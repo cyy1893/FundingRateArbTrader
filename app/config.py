@@ -1,0 +1,40 @@
+from __future__ import annotations
+
+from functools import lru_cache
+from typing import Literal, Optional
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """
+    Runtime configuration loaded from environment variables or a .env file.
+    """
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    drift_rpc_url: str = Field(..., description="Solana RPC endpoint reachable by driftpy")
+    drift_private_key: str = Field(..., description="Base58 encoded Solana private key for Drift")
+    drift_env: Literal["mainnet", "devnet"] = Field("mainnet", description="Target Drift cluster")
+    drift_sub_account_id: int = Field(0, description="Drift sub-account id to trade from")
+
+    lighter_base_url: str = Field("https://mainnet.zklighter.elliot.ai", description="Lighter REST/WebSocket endpoint")
+    lighter_private_key: str = Field(..., description="Hex encoded L1 private key for the Lighter API key")
+    lighter_account_index: int = Field(..., description="Primary Lighter account index")
+    lighter_api_key_index: int = Field(..., description="API key slot to use when signing orders")
+    lighter_max_api_key_index: Optional[int] = Field(
+        default=None, description="Optional inclusive max api key index for multi key rotations"
+    )
+    lighter_nonce_manager: Literal["optimistic", "api"] = Field(
+        "optimistic", description="Nonce manager to use when signing Lighter requests"
+    )
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """
+    Cached accessor so dependency injection reuses the same Settings instance.
+    """
+
+    return Settings()  # type: ignore[arg-type]
