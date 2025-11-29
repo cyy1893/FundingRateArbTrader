@@ -25,7 +25,9 @@ htmlcov/
 
 # Logs and local data
 *.log
-logs/
+logs/*
+!logs/
+!logs/.gitkeep
 
 # IDE/editor files
 .idea/

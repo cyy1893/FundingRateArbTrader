@@ -95,7 +95,42 @@ Connect to `/ws/events` to receive every order request/response pair as soon as 
 
 `GET /health` returns `{ "status": "ok", "drift_connected": true, "lighter_connected": true }` once both SDKs are initialized.
 
-### 6. Next Steps
+### 6. Docker Image
+
+Build the container locally (replace `YOUR_GH_USER` with your GitHub handle if you plan to publish to GHCR):
+
+```bash
+docker build -t ghcr.io/YOUR_GH_USER/funding-rate-arb-trader:latest .
+```
+
+Run it while mapping a `.env` file and a host log directory:
+
+```bash
+mkdir -p logs
+docker run --rm -it \
+  --name funding-rate-arb-trader \
+  -p 8080:8080 \
+  --env-file .env \
+  -v $(pwd)/logs:/var/log/funding-rate-arb-trader \
+  ghcr.io/YOUR_GH_USER/funding-rate-arb-trader:latest
+```
+
+The container looks for environment variables via `--env-file` and also reads `/app/.env` automatically, so you can also mount `-v $(pwd)/.env:/app/.env:ro` if you prefer file mapping. All API and access logs are streamed to stdout/stderr and persisted under `/var/log/funding-rate-arb-trader/server.log` (mapped above to `./logs`).
+
+Publish the image to GitHub Container Registry:
+
+```bash
+echo $GH_PAT | docker login ghcr.io -u YOUR_GH_USER --password-stdin
+docker push ghcr.io/YOUR_GH_USER/funding-rate-arb-trader:latest
+```
+
+Alternatively, use Docker Compose (logs directory is created automatically if missing):
+
+```bash
+docker compose up --build
+```
+
+### 7. Next Steps
 
 - Wrap additional Drift instructions (cancel, modify, funding info, etc.) as needed.
 - Extend the Lighter service with websockets from the SDK examples for richer account state updates.
