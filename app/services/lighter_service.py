@@ -40,12 +40,17 @@ class LighterService:
             if self._settings.lighter_nonce_manager.lower() == "api":
                 nonce_type = nonce_manager.NonceManagerType.API
 
+            api_private_keys = {
+                self._settings.lighter_api_key_index: self._settings.lighter_private_key,
+            }
+
             client = SignerClient(
                 url=self._settings.lighter_base_url,
                 private_key=self._settings.lighter_private_key,
                 api_key_index=self._settings.lighter_api_key_index,
                 account_index=self._settings.lighter_account_index,
                 max_api_key_index=self._settings.lighter_max_api_key_index or -1,
+                private_keys=api_private_keys,
                 nonce_management_type=nonce_type,
             )
 
