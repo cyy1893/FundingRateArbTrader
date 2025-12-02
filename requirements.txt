@@ -3,4 +3,4 @@ uvicorn[standard]>=0.30.0
 pydantic>=2.7
 pydantic-settings>=2.3
 driftpy>=0.8.82
-lighter-sdk @ git+https://github.com/elliottech/lighter-python.git@main
+lighter-sdk>=0.1.4
