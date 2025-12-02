@@ -83,3 +83,53 @@ class OrderEvent(BaseModel):
     venue: str
     payload: dict
     created_at: datetime
+
+
+class DriftSpotBalance(BaseModel):
+    market_index: int
+    market_name: str
+    balance_type: Literal["deposit", "borrow"]
+    amount: float
+    raw_amount: int
+    decimals: int
+
+
+class DriftPerpBalance(BaseModel):
+    market_index: int
+    market_name: str
+    base_asset_amount: float
+    raw_base_asset_amount: int
+    quote_break_even_amount: float
+    raw_quote_break_even_amount: int
+
+
+class DriftBalanceSnapshot(BaseModel):
+    sub_account_id: int
+    spot_positions: list[DriftSpotBalance]
+    perp_positions: list[DriftPerpBalance]
+
+
+class LighterPositionBalance(BaseModel):
+    market_id: int
+    symbol: str
+    sign: int
+    position: float
+    avg_entry_price: float
+    position_value: float
+    unrealized_pnl: float
+    realized_pnl: float
+    allocated_margin: float
+
+
+class LighterBalanceSnapshot(BaseModel):
+    account_index: int
+    available_balance: float
+    collateral: float
+    total_asset_value: float
+    cross_asset_value: float
+    positions: list[LighterPositionBalance]
+
+
+class BalancesResponse(BaseModel):
+    drift: DriftBalanceSnapshot
+    lighter: LighterBalanceSnapshot

@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+from decimal import Decimal
 from typing import Optional
 from lighter import nonce_manager
+from lighter.api.account_api import AccountApi
 from lighter.signer_client import SignerClient
 
 from app.config import Settings
-from app.models import LighterOrderRequest, LighterOrderResponse
+from app.models import (
+    LighterBalanceSnapshot,
+    LighterOrderRequest,
+    LighterOrderResponse,
+    LighterPositionBalance,
+)
 
 
 class LighterService:
@@ -108,6 +115,47 @@ class LighterService:
             payload=payload_dict,
         )
 
+    async def get_balances(self) -> LighterBalanceSnapshot:
+        client = await self._ensure_client()
+        account_api = AccountApi(client.api_client)
+        account_response = await account_api.account(
+            by="index", value=str(self._settings.lighter_account_index)
+        )
+
+        if not account_response.accounts:
+            raise RuntimeError("Lighter account response did not include any accounts")
+
+        account = account_response.accounts[0]
+        positions = [
+            LighterPositionBalance(
+                market_id=position.market_id,
+                symbol=position.symbol,
+                sign=position.sign,
+                position=self._to_float(position.position),
+                avg_entry_price=self._to_float(position.avg_entry_price),
+                position_value=self._to_float(position.position_value),
+                unrealized_pnl=self._to_float(position.unrealized_pnl),
+                realized_pnl=self._to_float(position.realized_pnl),
+                allocated_margin=self._to_float(position.allocated_margin),
+            )
+            for position in (account.positions or [])
+        ]
+
+        return LighterBalanceSnapshot(
+            account_index=account.account_index,
+            available_balance=self._to_float(account.available_balance),
+            collateral=self._to_float(account.collateral),
+            total_asset_value=self._to_float(account.total_asset_value),
+            cross_asset_value=self._to_float(account.cross_asset_value),
+            positions=positions,
+        )
+
     @property
     def is_ready(self) -> bool:
         return self._client is not None
+
+    @staticmethod
+    def _to_float(value: Optional[str]) -> float:
+        if value is None:
+            return 0.0
+        return float(Decimal(value))

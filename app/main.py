@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -9,9 +10,14 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 
 from app.config import get_settings
 from app.events import EventBroadcaster
-from app.models import DriftOrderRequest, LighterOrderRequest, OrderEvent
+from app.models import BalancesResponse, DriftOrderRequest, LighterOrderRequest, OrderEvent
 from app.services.drift_service import DriftService
 from app.services.lighter_service import LighterService
+
+
+logging.getLogger().setLevel(logging.INFO)
+logging.getLogger("websockets").setLevel(logging.WARNING)
+logging.getLogger("websockets.client").setLevel(logging.WARNING)
 
 
 settings = get_settings()
@@ -49,6 +55,24 @@ async def health() -> Dict[str, Any]:
         "drift_connected": drift_service.is_ready,
         "lighter_connected": lighter_service.is_ready,
     }
+
+
+@app.get("/balances", response_model=BalancesResponse)
+async def balances(
+    drift: DriftService = Depends(get_drift_service),
+    lighter: LighterService = Depends(get_lighter_service),
+) -> BalancesResponse:
+    try:
+        drift_balances = await drift.get_balances()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch Drift balances: {exc}") from exc
+
+    try:
+        lighter_balances = await lighter.get_balances()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch Lighter balances: {exc}") from exc
+
+    return BalancesResponse(drift=drift_balances, lighter=lighter_balances)
 
 
 @app.post("/orders/drift")

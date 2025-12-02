@@ -4,9 +4,12 @@ import asyncio
 from typing import Optional
 
 from anchorpy.provider import Wallet
-from driftpy.constants.numeric_constants import BASE_PRECISION, PRICE_PRECISION
+from driftpy.constants.numeric_constants import BASE_PRECISION, PRICE_PRECISION, QUOTE_PRECISION
 from driftpy.drift_client import DriftClient
+from driftpy.decode.utils import decode_name
 from driftpy.keypair import load_keypair
+from driftpy.math.perp_position import is_available as is_perp_position_available
+from driftpy.math.spot_position import is_spot_position_available
 from driftpy.types import (
     MarketType,
     OrderParams,
@@ -19,7 +22,13 @@ from driftpy.types import (
 from solana.rpc.async_api import AsyncClient
 
 from app.config import Settings
-from app.models import DriftOrderRequest, DriftOrderResponse
+from app.models import (
+    DriftBalanceSnapshot,
+    DriftOrderRequest,
+    DriftOrderResponse,
+    DriftPerpBalance,
+    DriftSpotBalance,
+)
 
 
 class DriftService:
@@ -86,6 +95,69 @@ class DriftService:
             market_type=request.market_type,
             direction=request.direction,
             order_type=request.order_type,
+        )
+
+    async def get_balances(self) -> DriftBalanceSnapshot:
+        client = await self._ensure_client()
+        user = client.get_user(self._settings.drift_sub_account_id)
+        user_account = user.get_user_account()
+
+        spot_positions: list[DriftSpotBalance] = []
+        for position in user_account.spot_positions:
+            if is_spot_position_available(position):
+                continue
+
+            spot_market = client.get_spot_market_account(position.market_index)
+            if spot_market is None:
+                continue
+
+            raw_amount = user.get_token_amount(position.market_index)
+            decimals = getattr(spot_market, "decimals", 0)
+            divisor = 10**decimals if decimals > 0 else 1
+            amount = raw_amount / divisor
+            balance_type_value = position.balance_type.__class__.__name__.lower()
+            balance_type = "deposit" if "deposit" in balance_type_value else "borrow"
+            market_name = decode_name(spot_market.name).strip("\x00")
+
+            spot_positions.append(
+                DriftSpotBalance(
+                    market_index=position.market_index,
+                    market_name=market_name,
+                    balance_type=balance_type,
+                    amount=amount,
+                    raw_amount=raw_amount,
+                    decimals=decimals,
+                )
+            )
+
+        perp_positions: list[DriftPerpBalance] = []
+        for position in user_account.perp_positions:
+            if is_perp_position_available(position):
+                continue
+
+            perp_market = client.get_perp_market_account(position.market_index)
+            if perp_market is None:
+                continue
+
+            market_name = decode_name(perp_market.name).strip("\x00")
+            base_raw = position.base_asset_amount
+            quote_raw = position.quote_break_even_amount
+
+            perp_positions.append(
+                DriftPerpBalance(
+                    market_index=position.market_index,
+                    market_name=market_name,
+                    base_asset_amount=base_raw / BASE_PRECISION,
+                    raw_base_asset_amount=base_raw,
+                    quote_break_even_amount=quote_raw / QUOTE_PRECISION,
+                    raw_quote_break_even_amount=quote_raw,
+                )
+            )
+
+        return DriftBalanceSnapshot(
+            sub_account_id=self._settings.drift_sub_account_id,
+            spot_positions=spot_positions,
+            perp_positions=perp_positions,
         )
 
     def _build_order_params(self, request: DriftOrderRequest) -> OrderParams:
