@@ -1,5 +1,6 @@
 services:
   trader:
+    platform: linux/amd64
     build:
       context: ./trader
       dockerfile: Dockerfile
