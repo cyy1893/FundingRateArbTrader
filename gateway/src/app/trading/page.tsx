@@ -117,7 +117,7 @@ export default async function TradingPage() {
 type UnifiedVenue = {
   id: "drift" | "lighter";
   name: string;
-  subtitle: string;
+  subtitle: string | null;
   totalUsd: number;
   balances: {
     title: string;
@@ -267,7 +267,7 @@ function WalletSummary({
 }) {
   const venueLinks: Record<UnifiedVenue["id"], string> = {
     drift: "https://app.drift.trade",
-    lighter: "https://lighter.xyz",
+    lighter: "https://app.lighter.xyz/trade/BTC?locale=zh",
   };
 
   return (
