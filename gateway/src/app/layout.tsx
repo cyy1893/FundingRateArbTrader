@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
+import { TopNav } from "@/components/top-nav";
+
 export const metadata: Metadata = {
   title: "Hyperliquid Perpetuals Dashboard",
   description:
@@ -14,7 +16,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="bg-muted/20 text-foreground">
+        <TopNav />
+        {children}
+      </body>
     </html>
   );
 }
