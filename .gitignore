@@ -38,6 +38,7 @@ logs/*
 
 # Environment configuration
 .env.*
+!trader/.env.example
 
 .idea/
 .vscode/

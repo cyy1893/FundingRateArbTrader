@@ -1,15 +1,27 @@
 services:
-  app:
-    platform: linux/amd64
+  trader:
     build:
-      context: .
+      context: ./trader
       dockerfile: Dockerfile
     image: funding-rate-arb-trader:latest
     container_name: funding-rate-arb-trader
     restart: unless-stopped
+    env_file:
+      - ./trader/.env
     ports:
       - "8080:8080"
-    env_file:
-      - .env
     volumes:
-      - ./logs:/var/log/funding-rate-arb-trader
+      - ./trader/logs:/var/log/funding-rate-arb-trader
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    image: funding-rate-arb-gateway:latest
+    container_name: funding-rate-arb-gateway
+    depends_on:
+      - trader
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
+    ports:
+      - "3000:3000"

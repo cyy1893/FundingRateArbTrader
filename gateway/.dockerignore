@@ -1,0 +1,12 @@
+node_modules
+.next
+npm-debug.log
+.git
+.gitignore
+.idea
+logs
+.npm-cache
+Dockerfile
+README.md
+pnpm-lock.yaml
+yarn.lock
