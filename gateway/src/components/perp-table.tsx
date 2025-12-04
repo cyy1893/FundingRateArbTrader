@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   WheelEvent,
   useCallback,
@@ -51,6 +50,7 @@ import {
 } from "@/components/ui/table";
 import { formatVolume } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { useArbitrageSidebar } from "@/components/arbitrage-sidebar";
 import type { MarketRow } from "@/types/market";
 import type { FundingHistoryPoint, LiveFundingResponse } from "@/types/funding";
 import type { SourceConfig } from "@/lib/external";
@@ -104,7 +104,6 @@ const DISPLAY_FUNDING_PERIOD_HOURS = 1;
 
 type SortColumn =
   | "markPrice"
-  | "maxLeverage"
   | "funding"
   | "rightFunding"
   | "arbitrage"
@@ -426,6 +425,7 @@ export function PerpTable({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const arbitrageSidebar = useArbitrageSidebar();
 
   const handleVolumeThresholdChange = useCallback(
     (value: string) => {
@@ -664,15 +664,6 @@ export function PerpTable({
       ? "不限"
       : `${formatVolume(volumeThreshold)}（每端）`;
   const externalFilterDescription = `显示资产：仅列出 ${leftSource.label} 与 ${rightSource.label} 均有的市场，且两端 24 小时成交量都 ${volumeThresholdLabel}`;
-  const arbitrageHref = useMemo(() => {
-    const params = new URLSearchParams({
-      sourceA: leftSource.id,
-      sourceB: rightSource.id,
-      volumeThreshold: String(volumeThreshold),
-    });
-    return `/arbitrage?${params.toString()}`;
-  }, [leftSource.id, rightSource.id, volumeThreshold]);
-
   const handlePageChange = (nextPage: number) => {
     if (nextPage >= 1 && nextPage <= pageCount) {
       setPage(nextPage);
@@ -902,8 +893,6 @@ export function PerpTable({
       switch (sortColumn) {
         case "markPrice":
           return row.markPrice;
-        case "maxLeverage":
-          return row.maxLeverage;
         case "funding":
         {
           const live = liveFunding.left[row.leftSymbol];
@@ -1250,13 +1239,17 @@ export function PerpTable({
             </div>
 
             <Button
-              asChild
               variant="outline"
               className="whitespace-nowrap"
+              onClick={() =>
+                arbitrageSidebar.open({
+                  sourceA: leftSource.id,
+                  sourceB: rightSource.id,
+                  volumeThreshold,
+                })
+              }
             >
-              <Link href={arbitrageHref} target="_blank" rel="noreferrer">
-                查看 24 小时套利年化
-              </Link>
+              查看 24 小时套利 APR
             </Button>
 
             <Button
@@ -1316,14 +1309,7 @@ export function PerpTable({
                   7 天
                 </TableHead>
                 <TableHead className="text-left font-semibold text-[11px] text-muted-foreground">
-                  <button
-                    type="button"
-                    onClick={() => cycleSort("maxLeverage")}
-                    className="inline-flex w-full items-center justify-between gap-1 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground transition hover:text-primary focus:outline-none"
-                  >
-                    <span>{leftSource.label} 最大杠杆</span>
-                    {renderSortIcon("maxLeverage")}
-                  </button>
+                  {leftSource.label} 最大杠杆
                 </TableHead>
                 <TableHead className="text-left font-semibold text-[11px] text-muted-foreground">
                   {rightSource.label} 最大杠杆

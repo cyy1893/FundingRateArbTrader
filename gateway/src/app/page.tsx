@@ -12,6 +12,10 @@ import { PerpTable } from "@/components/perp-table";
 import { SettlementCountdown } from "@/components/settlement-countdown";
 import { SourceControls } from "@/components/source-controls";
 import {
+  ArbitrageSidebar,
+  ArbitrageSidebarProvider,
+} from "@/components/arbitrage-sidebar";
+import {
   DEFAULT_LEFT_SOURCE,
   DEFAULT_RIGHT_SOURCE,
   normalizeSource,
@@ -70,7 +74,7 @@ export default async function Home({
 
   return (
     <div className="min-h-screen py-8">
-      <div className="container mx-auto max-w-[1400px] px-6">
+      <div className="mx-auto max-w-[1800px] px-8">
         <Suspense fallback={<DashboardSkeleton />}>
           <DashboardContent
             primarySource={primarySource}
@@ -143,8 +147,10 @@ async function DashboardContent({
     settlementPeriodHours,
   );
   return (
-    <>
-      <Card className="shadow-sm">
+    <ArbitrageSidebarProvider>
+      <div className="flex gap-6">
+        <div className="flex-1">
+          <Card className="shadow-sm">
         <CardHeader className="space-y-6 pb-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div className="space-y-1.5">
@@ -206,7 +212,10 @@ async function DashboardContent({
           />
         </CardContent>
       </Card>
-    </>
+        </div>
+        <ArbitrageSidebar />
+      </div>
+    </ArbitrageSidebarProvider>
   );
 }
 
