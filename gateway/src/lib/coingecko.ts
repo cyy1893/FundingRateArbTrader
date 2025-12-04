@@ -7,6 +7,7 @@ const COINGECKO_LIST_API =
 const COINGECKO_MARKETS_API =
   "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&sparkline=false&price_change_percentage=1h,24h,7d";
 
+const COINGECKO_API_KEY = "CG-Bk4Hk2fWnGqa372fums79HvT";
 const COINGECKO_MAPPING_TTL_MS = 10 * 60 * 1000;
 const MAX_RETRY_ATTEMPTS = 5;
 
@@ -82,8 +83,24 @@ function bucketCoinsByKey(
   return map;
 }
 
+function maybeAttachCoingeckoHeaders(url: string, init?: RequestInit): RequestInit | undefined {
+  if (!url.includes("api.coingecko.com")) {
+    return init;
+  }
+  const existingHeaders = init?.headers;
+  const headers =
+    existingHeaders instanceof Headers
+      ? new Headers(existingHeaders)
+      : new Headers(existingHeaders ?? {});
+  headers.set("x-cg-demo-api-key", COINGECKO_API_KEY);
+  return {
+    ...init,
+    headers,
+  };
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit, attempt = 0): Promise<T> {
-  const response = await fetch(url, init);
+  const response = await fetch(url, maybeAttachCoingeckoHeaders(url, init));
   if (response.status === 429 && attempt < MAX_RETRY_ATTEMPTS) {
     const retryAfterHeader = response.headers.get("retry-after");
     const retryAfterMs = Number.isFinite(Number(retryAfterHeader))

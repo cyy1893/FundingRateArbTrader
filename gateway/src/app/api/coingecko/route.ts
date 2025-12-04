@@ -22,6 +22,7 @@ type CoinGeckoCacheEntry = {
 const COINGECKO_CACHE_TTL_MS = 60 * 1000;
 const COINGECKO_MARKETS_URL =
   "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&sparkline=false&price_change_percentage=1h,24h,7d";
+const COINGECKO_API_KEY = "CG-Bk4Hk2fWnGqa372fums79HvT";
 const cachedByKey: Map<string, CoinGeckoCacheEntry> = new Map();
 
 async function describeResponseFailure(response: Response, label: string): Promise<string> {
@@ -68,7 +69,12 @@ async function fetchByIds(symbolsUpper: string[], idLookup: Map<string, string>)
   for (let i = 0; i < ids.length; i += chunkSize) {
     const chunk = ids.slice(i, i + chunkSize);
     const url = `${COINGECKO_MARKETS_URL}&ids=${chunk.join(",")}`;
-    const response = await fetch(url, { cache: "no-store" });
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        "x-cg-demo-api-key": COINGECKO_API_KEY,
+      },
+    });
     if (!response.ok) {
       errors.push({
         source: "CoinGecko API",
