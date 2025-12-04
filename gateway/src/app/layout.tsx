@@ -1,12 +1,19 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-import { TopNav } from "@/components/top-nav";
+import { SideNav } from "@/components/side-nav";
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
-  title: "Hyperliquid Perpetuals Dashboard",
+  title: "Funding Rate Arbitrage Dashboard",
   description:
-    "Minimalist monitoring panel for Hyperliquid perpetual markets built with Next.js.",
+    "Modern fintech platform for monitoring and executing funding rate arbitrage opportunities.",
 };
 
 export default function RootLayout({
@@ -15,10 +22,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className="bg-muted/20 text-foreground">
-        <TopNav />
-        {children}
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <body className="bg-background font-sans text-foreground antialiased">
+        {/* 2-Column Layout */}
+        <SideNav />
+        <main className="ml-64 min-h-screen">
+          {children}
+        </main>
       </body>
     </html>
   );

@@ -55,43 +55,34 @@ export function SourceControls({
   );
 
   return (
-    <div className="rounded-lg border border-border/80 bg-background/60 p-3">
-      <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row">
-        <label className="flex flex-1 flex-col gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide">
-            左侧交易所
-          </span>
-          <Select value={leftSourceId} onValueChange={handlePrimarySourceChange}>
-            <SelectTrigger className="focus-visible:outline-none focus-visible:ring-0">
-              <SelectValue placeholder="选择交易所" />
-            </SelectTrigger>
-            <SelectContent>
-              {SOURCE_OPTIONS.map((option) => (
-                <SelectItem key={option.id} value={option.id}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </label>
-        <label className="flex flex-1 flex-col gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide">
-            右侧交易所
-          </span>
-          <Select value={rightSourceId} onValueChange={handleSecondarySourceChange}>
-            <SelectTrigger className="focus-visible:outline-none focus-visible:ring-0">
-              <SelectValue placeholder="选择交易所" />
-            </SelectTrigger>
-            <SelectContent>
-              {SOURCE_OPTIONS.map((option) => (
-                <SelectItem key={option.id} value={option.id}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </label>
-      </div>
+    <div className="flex items-center gap-2">
+      <Select value={leftSourceId} onValueChange={handlePrimarySourceChange}>
+        <SelectTrigger className="h-9 w-[140px] text-xs focus-visible:outline-none focus-visible:ring-0">
+          <span className="mr-2 text-muted-foreground">左侧:</span>
+          <SelectValue placeholder="选择交易所" />
+        </SelectTrigger>
+        <SelectContent>
+          {SOURCE_OPTIONS.map((option) => (
+            <SelectItem key={option.id} value={option.id}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Select value={rightSourceId} onValueChange={handleSecondarySourceChange}>
+        <SelectTrigger className="h-9 w-[140px] text-xs focus-visible:outline-none focus-visible:ring-0">
+          <span className="mr-2 text-muted-foreground">右侧:</span>
+          <SelectValue placeholder="选择交易所" />
+        </SelectTrigger>
+        <SelectContent>
+          {SOURCE_OPTIONS.map((option) => (
+            <SelectItem key={option.id} value={option.id}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

@@ -6,6 +6,7 @@ type CoinGeckoSnapshot = {
   name: string;
   image: string | null;
   symbol: string;
+  currentPrice: number | null;
   volumeUsd: number | null;
   priceChange1h: number | null;
   priceChange24h: number | null;
@@ -80,6 +81,7 @@ async function fetchByIds(symbolsUpper: string[], idLookup: Map<string, string>)
       name?: string;
       image?: string | null;
       symbol?: string;
+      current_price?: number | null;
       total_volume?: number;
       price_change_percentage_1h_in_currency?: number | null;
       price_change_percentage_24h_in_currency?: number | null;
@@ -92,11 +94,16 @@ async function fetchByIds(symbolsUpper: string[], idLookup: Map<string, string>)
         return;
       }
       const volume = Number(item.total_volume);
+      const currentPrice =
+        typeof item.current_price === "number" && Number.isFinite(item.current_price)
+          ? item.current_price
+          : null;
       const snapshot: CoinGeckoSnapshot = {
         id: item.id ?? hyperSymbolUpper.toLowerCase(),
         name: item.name ?? hyperSymbolUpper,
         image: item.image ?? null,
         symbol: hyperSymbolUpper,
+        currentPrice,
         volumeUsd: Number.isFinite(volume) ? volume : null,
         priceChange1h:
           typeof item.price_change_percentage_1h_in_currency === "number" &&

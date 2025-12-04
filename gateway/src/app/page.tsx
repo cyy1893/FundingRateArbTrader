@@ -69,8 +69,8 @@ export default async function Home({
   );
 
   return (
-    <div className="min-h-screen bg-muted/20 py-10">
-      <div className="container mx-auto flex max-w-[1900px] flex-col gap-6 px-4">
+    <div className="min-h-screen py-8">
+      <div className="container mx-auto max-w-[1400px] px-6">
         <Suspense fallback={<DashboardSkeleton />}>
           <DashboardContent
             primarySource={primarySource}
@@ -144,96 +144,91 @@ async function DashboardContent({
   );
   return (
     <>
-      <Card className="border-border/60">
-        <CardHeader className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-2">
-            <CardTitle className="text-2xl font-semibold tracking-tight">
-              资金费率比较
-            </CardTitle>
-            <CardDescription className="max-w-2xl text-sm text-muted-foreground">
-              各交易所资金费率的差异。
-            </CardDescription>
-            <SourceControls
-              leftSourceId={primarySource.id}
-              rightSourceId={secondarySource.id}
-            />
-          </div>
-        <div className="rounded-lg border border-border/70 bg-muted/40 px-4 py-3 text-sm">
-          <div className="flex flex-col gap-3 text-muted-foreground">
-            <div className="flex items-center justify-between gap-8">
-              <div className="flex flex-col gap-1">
-                <span className="uppercase tracking-wide text-xs">
-                  资金结算（整点）
+      <Card className="shadow-sm">
+        <CardHeader className="space-y-6 pb-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-1.5">
+              <CardTitle className="text-2xl font-semibold tracking-tight">
+                资金费率比较
+              </CardTitle>
+              <CardDescription className="text-sm text-muted-foreground">
+                跨交易所资金费率实时监控与套利机会分析
+              </CardDescription>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              <div className="flex flex-col items-end gap-1">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  下次结算
                 </span>
                 <SettlementCountdown
                   targetIso={nextSettlementIso}
-                  className="text-lg"
+                  className="text-base font-semibold tabular-nums"
                 />
               </div>
             </div>
           </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {truncatedErrorMessage ? (
-          <Alert variant="destructive">
-            <AlertTitle>数据获取失败</AlertTitle>
-            <AlertDescription>{truncatedErrorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
-        {displayedApiErrors.length > 0 ? (
-          <Alert variant="default">
-            <AlertTitle>部分数据来源不可用</AlertTitle>
-            <AlertDescription>
-              <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
-                {displayedApiErrors.map((apiError) => (
-                  <li key={apiError.key}>
-                    <span className="font-semibold">{apiError.source}:</span>{" "}
-                    <span>{apiError.message}</span>
-                  </li>
-                ))}
-              </ul>
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        <PerpTable
-          rows={errorMessage ? [] : rows}
-          leftSource={primarySource}
-          rightSource={secondarySource}
-          volumeThreshold={volumeThreshold}
-        />
-      </CardContent>
-    </Card>
+        </CardHeader>
+        
+        <CardContent className="space-y-4">
+          {truncatedErrorMessage ? (
+            <Alert variant="destructive" className="border-destructive/50">
+              <AlertTitle className="font-semibold">数据获取失败</AlertTitle>
+              <AlertDescription>{truncatedErrorMessage}</AlertDescription>
+            </Alert>
+          ) : null}
+          {displayedApiErrors.length > 0 ? (
+            <Alert variant="default" className="border-border bg-muted/30">
+              <AlertTitle className="font-semibold">部分数据来源不可用</AlertTitle>
+              <AlertDescription>
+                <ul className="mt-2 list-disc space-y-1 pl-4 text-sm">
+                  {displayedApiErrors.map((apiError) => (
+                    <li key={apiError.key}>
+                      <span className="font-semibold">{apiError.source}:</span>{" "}
+                      <span>{apiError.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <PerpTable
+            rows={errorMessage ? [] : rows}
+            leftSource={primarySource}
+            rightSource={secondarySource}
+            volumeThreshold={volumeThreshold}
+            headerControls={
+              <SourceControls
+                leftSourceId={primarySource.id}
+                rightSourceId={secondarySource.id}
+              />
+            }
+          />
+        </CardContent>
+      </Card>
     </>
   );
 }
 
 function DashboardSkeleton() {
   return (
-    <Card className="border-border/60">
-      <CardHeader className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="w-full space-y-2 animate-pulse">
-          <div className="h-6 w-48 rounded bg-muted" />
-          <div className="h-4 w-64 rounded bg-muted/80" />
+    <Card className="shadow-sm">
+      <CardHeader className="space-y-6 pb-6">
+        <div className="w-full space-y-3 animate-pulse">
+          <div className="h-8 w-56 rounded-lg bg-muted" />
+          <div className="h-5 w-96 rounded-lg bg-muted/80" />
         </div>
-        <div className="rounded-lg border border-border/70 bg-muted/40 px-4 py-3 text-sm">
-          <div className="flex flex-col gap-3 text-muted-foreground">
-            <div className="flex items-center justify-between gap-8">
-              <div className="flex flex-col gap-2">
-                <span className="h-3 w-24 rounded bg-muted/80" />
-                <span className="h-6 w-32 rounded bg-muted" />
-              </div>
-            </div>
-          </div>
+        <div className="flex items-center justify-between">
+          <div className="h-10 w-64 rounded-lg bg-muted/70" />
+          <div className="h-20 w-48 rounded-xl bg-muted/60" />
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-3">
-          <div className="h-4 w-40 rounded bg-muted/70" />
-          <div className="h-11 rounded-lg bg-muted/60" />
-          <div className="h-8 rounded bg-muted/40" />
+          <div className="h-4 w-48 rounded bg-muted/70" />
+          <div className="h-12 rounded-lg bg-muted/60" />
         </div>
-        <div className="rounded-xl border border-dashed border-border/70">
+        <div className="rounded-xl border border-dashed border-border">
           <div className="h-[520px] w-full animate-pulse rounded-xl bg-muted/40" />
         </div>
       </CardContent>

@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Search, RefreshCw, ExternalLink } from "lucide-react";
 
 import { PerpTableRow } from "@/components/perp-table-row";
 import { FailureAlertsOverlay } from "@/components/failure-alerts";
@@ -77,6 +77,7 @@ type PerpTableProps = {
   leftSource: SourceConfig;
   rightSource: SourceConfig;
   volumeThreshold: number;
+  headerControls?: React.ReactNode;
 };
 
 type CoinGeckoSnapshot = {
@@ -84,6 +85,7 @@ type CoinGeckoSnapshot = {
   name: string;
   image: string | null;
   symbol: string;
+  currentPrice: number | null;
   volumeUsd: number | null;
   priceChange1h: number | null;
   priceChange24h: number | null;
@@ -379,6 +381,7 @@ export function PerpTable({
   leftSource,
   rightSource,
   volumeThreshold,
+  headerControls,
 }: PerpTableProps) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -543,11 +546,16 @@ export function PerpTable({
         Number.isFinite(snapshot.priceChange7d)
           ? snapshot.priceChange7d
           : row.priceChange7d;
+      const markPrice =
+        row.markPrice && Number.isFinite(row.markPrice) && row.markPrice > 0
+          ? row.markPrice
+          : snapshot.currentPrice ?? row.markPrice;
       return {
         ...row,
         displayName: snapshot.name ?? row.displayName,
         iconUrl: snapshot.image ?? row.iconUrl,
         coingeckoId: snapshot.id ?? row.coingeckoId,
+        markPrice,
         priceChange1h,
         priceChange24h,
         priceChange7d,
@@ -1207,51 +1215,29 @@ export function PerpTable({
       <FailureAlertsOverlay alerts={coinGeckoAlerts} />
       <TooltipProvider delayDuration={150}>
       <div className="space-y-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex w-full max-w-xs items-center gap-2">
+        <div className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-sm md:flex-row md:items-center">
+          <div className="relative w-full max-w-xs">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="搜索资产..."
               value={search}
               onChange={(event) => handleSearchChange(event.target.value)}
+              className="pl-9"
             />
-            {search ? (
-              <Button
-                variant="outline"
-                onClick={() => handleSearchChange("")}
-                className="whitespace-nowrap"
-              >
-                清除
-              </Button>
-            ) : null}
           </div>
+          {headerControls}
+
           <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              className="min-w-[110px]"
-              onClick={triggerBlockingRefresh}
-              disabled={isBlockingRefresh}
-            >
-              {isBlockingRefresh ? "刷新中…" : "刷新数据"}
-            </Button>
-            <Button
-              asChild
-              variant="outline"
-              className="whitespace-nowrap"
-            >
-              <Link href={arbitrageHref} target="_blank" rel="noreferrer">
-                查看 24 小时套利年化
-              </Link>
-            </Button>
-            <div className="flex flex-col rounded-lg border border-border/70 bg-background/60 px-3 py-2 text-xs">
-              <span className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
-                24 小时成交量过滤
+            <div className="flex items-center gap-2 rounded-lg border bg-background px-3 py-1.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                24H交易量 &ge;
               </span>
               <Select
                 value={String(volumeThreshold)}
                 onValueChange={handleVolumeThresholdChange}
               >
-              <SelectTrigger className="min-w-[156px] text-[13px] focus-visible:outline-none focus-visible:ring-0">
-                  <SelectValue placeholder="选择成交量下限" />
+                <SelectTrigger className="h-7 w-[90px] border-0 bg-transparent p-0 text-xs focus:ring-0">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {VOLUME_THRESHOLD_OPTIONS.map((option) => (
@@ -1263,57 +1249,32 @@ export function PerpTable({
               </Select>
             </div>
 
-            <span className="text-xs text-muted-foreground">
-              资金费率均按 1 小时计
-            </span>
+            <Button
+              asChild
+              variant="outline"
+              className="whitespace-nowrap"
+            >
+              <Link href={arbitrageHref} target="_blank" rel="noreferrer">
+                查看 24 小时套利年化
+              </Link>
+            </Button>
 
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="icon" className="h-9 w-9">
-                  <span className="sr-only">查看资金费率提示</span>
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-5 w-5"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 16v-4" />
-                    <path d="M12 8h.01" />
-                  </svg>
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-md bg-slate-950 text-slate-100 sm:rounded-3xl">
-                <DialogHeader>
-                  <DialogTitle className="text-base font-semibold text-slate-100">
-                    8 小时资金费率颜色提示
-                  </DialogTitle>
-                  <DialogDescription className="text-slate-400">
-                    根据默认 8 小时资金费率区间渲染颜色。
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="mt-4 space-y-3 text-sm">
-                  <div className="flex items-center justify-between gap-4">
-                    <span>-∞ &lt; 8 小时费率 &lt; 0%</span>
-                    <span className="h-4 w-4 rounded bg-[#f87171]" />
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span>0% ≤ 8 小时费率 ≤ 0.01%</span>
-                    <span className="h-4 w-4 rounded bg-[#94a3b8]" />
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span>0.01% &lt; 8 小时费率</span>
-                    <span className="h-4 w-4 rounded bg-[#34d399]" />
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={triggerBlockingRefresh}
+              disabled={isBlockingRefresh}
+              className="h-9"
+            >
+              <RefreshCw
+                className={cn(
+                  "mr-2 h-3.5 w-3.5",
+                  isBlockingRefresh && "animate-spin",
+                )}
+              />
+              {isBlockingRefresh ? "刷新中" : "刷新"}
+            </Button>
           </div>
-
         </div>
 
         <div className="text-xs text-muted-foreground">
