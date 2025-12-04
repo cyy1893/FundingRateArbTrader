@@ -286,12 +286,12 @@ function WalletSummary({
               href={venueLinks[venue.id]}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-lg border border-border/50 bg-background/60 px-4 py-3 text-sm transition-colors hover:text-primary hover:scale-105"
+              className="rounded-lg border border-border/50 bg-background/60 px-4 py-3 text-sm transition-colors hover:text-primary"
             >
               <p className="text-muted-foreground text-xs uppercase transition-colors hover:text-primary">
                 {venue.name}
               </p>
-              <p className="text-lg font-semibold transition-transform hover:scale-110">
+              <p className="text-lg font-semibold">
                 {formatUsd(venue.totalUsd)}
               </p>
             </a>

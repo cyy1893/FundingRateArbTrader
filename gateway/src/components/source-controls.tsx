@@ -58,7 +58,7 @@ export function SourceControls({
     <div className="flex items-center gap-2">
       <Select value={leftSourceId} onValueChange={handlePrimarySourceChange}>
         <SelectTrigger className="h-9 w-[140px] text-xs focus-visible:outline-none focus-visible:ring-0">
-          <span className="mr-2 text-muted-foreground">左侧:</span>
+          <span className="mr-2 text-muted-foreground">左侧交易所:</span>
           <SelectValue placeholder="选择交易所" />
         </SelectTrigger>
         <SelectContent>
@@ -72,7 +72,7 @@ export function SourceControls({
 
       <Select value={rightSourceId} onValueChange={handleSecondarySourceChange}>
         <SelectTrigger className="h-9 w-[140px] text-xs focus-visible:outline-none focus-visible:ring-0">
-          <span className="mr-2 text-muted-foreground">右侧:</span>
+          <span className="mr-2 text-muted-foreground">右侧交易所:</span>
           <SelectValue placeholder="选择交易所" />
         </SelectTrigger>
         <SelectContent>
