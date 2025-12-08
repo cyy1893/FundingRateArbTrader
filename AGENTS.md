@@ -10,6 +10,7 @@ pip install --upgrade pip && pip install -r requirements.txt   # install deps
 uvicorn app.main:app --reload --port 8080   # run the API with hot reload
 pytest                                      # execute fast unit/integration tests
 ```
+Always create and reuse the `.venv` at the repository root (next to `README.md`). Nested virtual environments (for example under `trader/`) break tooling paths and should be avoided. Use the virtual environment above (or an equivalent root-level venv path of your choosing) before installing dependencies so local execution mirrors the Docker image.
 Use a `.env` adjacent to `README.md` before booting the app; startup validates both Drift and Lighter keys and will exit early if configuration is incomplete.
 
 ## Coding Style & Naming Conventions

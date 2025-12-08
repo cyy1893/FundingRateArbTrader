@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+import logging
+from collections.abc import AsyncIterator
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 from anchorpy.provider import Wallet
 from driftpy.constants.numeric_constants import BASE_PRECISION, PRICE_PRECISION, QUOTE_PRECISION
@@ -18,8 +21,11 @@ from driftpy.types import (
     OrderType,
     PositionDirection,
     PostOnlyParams,
+    is_variant,
 )
 from solana.rpc.async_api import AsyncClient
+
+import httpx
 
 from app.config import Settings
 from app.models import (
@@ -28,6 +34,9 @@ from app.models import (
     DriftOrderResponse,
     DriftPerpBalance,
     DriftSpotBalance,
+    OrderBookLevel,
+    OrderBookSide,
+    VenueOrderBook,
 )
 
 
@@ -41,6 +50,8 @@ class DriftService:
         self._connection: Optional[AsyncClient] = None
         self._client: Optional[DriftClient] = None
         self._lock = asyncio.Lock()
+        self._http_client: Optional[httpx.AsyncClient] = None
+        self._dlob_url = settings.drift_dlob_url.rstrip("/")
 
     async def start(self) -> None:
         await self._ensure_client()
@@ -52,6 +63,9 @@ class DriftService:
         if self._connection is not None:
             await self._connection.close()
             self._connection = None
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
 
     async def _ensure_client(self) -> DriftClient:
         if self._client is not None:
@@ -159,6 +173,102 @@ class DriftService:
             spot_positions=spot_positions,
             perp_positions=perp_positions,
         )
+
+    async def stream_orderbook(
+        self,
+        symbol: str,
+        depth: int,
+        poll_interval: float = 1.0,
+    ) -> AsyncIterator[VenueOrderBook]:
+        """
+        Poll the Drift DLOB endpoint and yield normalized order book snapshots.
+        """
+
+        while True:
+            try:
+                snapshot = await self.get_orderbook_snapshot(symbol=symbol, depth=depth)
+                yield snapshot
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("Failed to refresh Drift order book: %s", exc)
+            await asyncio.sleep(max(poll_interval, 0.2))
+
+    async def get_orderbook_snapshot(self, symbol: str, depth: int) -> VenueOrderBook:
+        client = await self._ensure_client()
+        market_name = self._normalize_symbol(symbol)
+        market_info = client.get_market_index_and_type(market_name)
+        if market_info is None:
+            raise ValueError(f"Unknown Drift market: {market_name}")
+
+        market_index, market_type = market_info
+        if not is_variant(market_type, "Perp"):
+            raise ValueError("Only perp markets are supported for order book streaming")
+
+        http_client = await self._get_http_client()
+        response = await http_client.get(
+            f"{self._dlob_url}/l2",
+            params={"marketType": "perp", "marketIndex": market_index},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return self._build_drift_orderbook(payload, depth, symbol)
+
+    async def _get_http_client(self) -> httpx.AsyncClient:
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(timeout=5.0)
+        return self._http_client
+
+    @staticmethod
+    def _normalize_symbol(symbol: str) -> str:
+        normalized = symbol.strip().upper()
+        return normalized if normalized.endswith("-PERP") else f"{normalized}-PERP"
+
+    def _build_drift_orderbook(self, payload: dict[str, Any], depth: int, requested_symbol: str) -> VenueOrderBook:
+        bids = self._build_drift_side(payload.get("bids", []), depth)
+        asks = self._build_drift_side(payload.get("asks", []), depth)
+        ts_value = payload.get("ts") or payload.get("timestamp")
+        timestamp = self._to_timestamp(ts_value)
+
+        symbol = payload.get("marketName") or self._normalize_symbol(requested_symbol)
+        return VenueOrderBook(
+            venue="drift",
+            symbol=str(symbol),
+            bids=bids,
+            asks=asks,
+            timestamp=timestamp,
+        )
+
+    @staticmethod
+    def _build_drift_side(levels: list[dict[str, Any]], depth: int) -> OrderBookSide:
+        formatted_levels: list[OrderBookLevel] = []
+        cumulative = 0.0
+        for raw in levels[:depth]:
+            try:
+                price = float(int(str(raw.get("price", 0))) / PRICE_PRECISION)
+            except (TypeError, ValueError):
+                continue
+            try:
+                size = float(int(str(raw.get("size", 0))) / BASE_PRECISION)
+            except (TypeError, ValueError):
+                continue
+            if size <= 0:
+                continue
+            cumulative += size
+            formatted_levels.append(OrderBookLevel(price=price, size=size, total=cumulative))
+
+        return OrderBookSide(levels=formatted_levels)
+
+    @staticmethod
+    def _to_timestamp(value: Any) -> float:
+        if value is None:
+            return datetime.now(tz=timezone.utc).timestamp()
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return datetime.now(tz=timezone.utc).timestamp()
+        # DLOB timestamps are in ms
+        return numeric / 1000 if numeric > 1e11 else numeric
 
     def _build_order_params(self, request: DriftOrderRequest) -> OrderParams:
         order_type = {

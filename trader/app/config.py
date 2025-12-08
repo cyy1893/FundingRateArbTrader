@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     drift_private_key: str = Field(..., description="Base58 encoded Solana private key for Drift")
     drift_env: Literal["mainnet", "devnet"] = Field("mainnet", description="Target Drift cluster")
     drift_sub_account_id: int = Field(0, description="Drift sub-account id to trade from")
+    drift_dlob_url: str = Field(
+        "https://dlob.drift.trade", description="Public Drift DLOB endpoint used for order book snapshots"
+    )
 
     lighter_base_url: str = Field("https://mainnet.zklighter.elliot.ai", description="Lighter REST/WebSocket endpoint")
     lighter_private_key: str = Field(..., description="Hex encoded L1 private key for the Lighter API key")

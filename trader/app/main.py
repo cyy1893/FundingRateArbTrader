@@ -4,13 +4,22 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 from datetime import datetime, timezone
+from collections.abc import AsyncIterator
 from typing import Any, Dict
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 
 from app.config import get_settings
 from app.events import EventBroadcaster
-from app.models import BalancesResponse, DriftOrderRequest, LighterOrderRequest, OrderEvent
+from app.models import (
+    BalancesResponse,
+    DriftOrderRequest,
+    LighterOrderRequest,
+    OrderBookSnapshot,
+    OrderBookSubscription,
+    OrderEvent,
+    VenueOrderBook,
+)
 from app.services.drift_service import DriftService
 from app.services.lighter_service import LighterService
 
@@ -132,3 +141,78 @@ async def ws_events(
         pass
     finally:
         await broadcaster.unregister(queue)
+
+
+@app.websocket("/ws/orderbook")
+async def ws_orderbook(
+    websocket: WebSocket,
+    drift: DriftService = Depends(get_drift_service),
+    lighter: LighterService = Depends(get_lighter_service),
+):
+    await websocket.accept()
+    try:
+        payload = await websocket.receive_json()
+        subscription = OrderBookSubscription(**payload)
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:  # noqa: BLE001
+        await websocket.send_json({"error": f"Invalid subscription payload: {exc}"})
+        await websocket.close()
+        return
+
+    update_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+    async def forward_updates(
+        venue_name: str,
+        stream: AsyncIterator[VenueOrderBook],
+    ) -> None:
+        try:
+            async for snapshot in stream:
+                await update_queue.put({"type": "update", "venue": venue_name, "snapshot": snapshot})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logging.error("Order book stream failure for %s: %s", venue_name, exc)
+            await update_queue.put({"type": "error", "venue": venue_name, "message": str(exc)})
+
+    tasks: list[asyncio.Task] = []
+    try:
+        tasks.append(
+            asyncio.create_task(
+                forward_updates("drift", drift.stream_orderbook(subscription.symbol, subscription.depth))
+            )
+        )
+        tasks.append(
+            asyncio.create_task(
+                forward_updates("lighter", lighter.stream_orderbook(subscription.symbol, subscription.depth))
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        await websocket.send_json({"error": str(exc)})
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        return
+
+    latest_snapshots: dict[str, Any] = {}
+
+    try:
+        while True:
+            message = await update_queue.get()
+            if message.get("type") == "error":
+                await websocket.send_json({"error": message.get("message"), "venue": message.get("venue")})
+                continue
+
+            venue = message["venue"]
+            latest_snapshots[venue] = message["snapshot"]
+            snapshot = OrderBookSnapshot(
+                drift=latest_snapshots.get("drift"),
+                lighter=latest_snapshots.get("lighter"),
+            )
+            await websocket.send_json(snapshot.model_dump())
+    except WebSocketDisconnect:
+        pass
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

@@ -1,3 +1,7 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { TrendingUp } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Card,
@@ -19,14 +23,7 @@ import type {
   DriftBalanceSnapshot,
   LighterBalanceSnapshot,
 } from "@/types/trader";
-
-const API_BASE_URL =
-  process.env.API_BASE_URL ??
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  "http://localhost:8080";
-
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+import { OrderDepthSidebar } from "@/components/order-depth-sidebar";
 
 const numberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 4,
@@ -45,64 +42,107 @@ function formatUsd(value: number) {
   return usdFormatter.format(value);
 }
 
+type ErrorPayload = { detail?: string; error?: string };
+
 async function fetchBalances(): Promise<BalancesResponse> {
-  const response = await fetch(`${API_BASE_URL}/balances`, {
+  const response = await fetch("/api/balances", {
     cache: "no-store",
   });
 
   if (!response.ok) {
-    throw new Error(`获取余额失败（HTTP ${response.status}）`);
+    let payload: ErrorPayload | null = null;
+    if (response.headers.get("content-type")?.includes("application/json")) {
+      try {
+        payload = (await response.json()) as ErrorPayload;
+      } catch {
+        payload = null;
+      }
+    }
+    const detail =
+      typeof payload?.detail === "string"
+        ? payload.detail
+        : typeof payload?.error === "string"
+          ? payload.error
+          : `HTTP ${response.status}`;
+    throw new Error(`获取余额失败：${detail}`);
   }
 
   return response.json();
 }
 
-export default async function TradingPage() {
-  let balances: BalancesResponse | null = null;
-  let errorMessage: string | null = null;
-  let normalized: UnifiedWalletData | null = null;
+export default function TradingPage() {
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [normalized, setNormalized] = useState<UnifiedWalletData | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  try {
-    balances = await fetchBalances();
-    normalized = normalizeBalances(balances);
-  } catch (error) {
-    errorMessage =
-      error instanceof Error
-        ? error.message
-        : "无法获取账户余额，请确认后端服务是否正在运行。";
-  }
+  useEffect(() => {
+    async function loadBalances() {
+      try {
+        const data = await fetchBalances();
+        setNormalized(normalizeBalances(data));
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "无法获取账户余额，请确认后端服务是否正在运行。",
+        );
+      }
+    }
+
+    loadBalances();
+    const interval = setInterval(loadBalances, 10000); // Refresh every 10s
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="min-h-screen bg-muted/20 py-6">
-      <div className="container mx-auto flex max-w-[1900px] flex-col gap-4 px-4">
-        <Card className="border-border/60">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-xl font-semibold tracking-tight">
-              交易
-            </CardTitle>
-            <CardDescription className="text-xs">
-              查看 Drift / Lighter 账户的最新余额和持仓。
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {errorMessage ? (
-              <Alert variant="destructive">
-                <AlertTitle>无法加载余额</AlertTitle>
-                <AlertDescription>{errorMessage}</AlertDescription>
-              </Alert>
-            ) : normalized ? (
-              <>
-                <CompactWalletSummary totalUsd={normalized.totalUsd} venues={normalized.venues} />
-                <UnifiedPositionsTable venues={normalized.venues} />
-                <TransactionHistoryTable />
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                正在等待余额数据……
-              </p>
-            )}
-          </CardContent>
-        </Card>
+      <div className="container mx-auto flex max-w-[1900px] flex-col gap-6 px-4 xl:flex-row">
+        <div className="flex-1">
+          <Card className="border-border/60">
+            <CardHeader className="pb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-xl font-semibold tracking-tight">
+                    交易
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    查看 Drift / Lighter 账户的最新余额和持仓。
+                  </CardDescription>
+                </div>
+                <button
+                  onClick={() => setIsSidebarOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  <TrendingUp className="h-4 w-4" />
+                  监控订单深度
+                </button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {errorMessage ? (
+                <Alert variant="destructive">
+                  <AlertTitle>无法加载余额</AlertTitle>
+                  <AlertDescription>{errorMessage}</AlertDescription>
+                </Alert>
+              ) : normalized ? (
+                <>
+                  <CompactWalletSummary totalUsd={normalized.totalUsd} venues={normalized.venues} />
+                  <UnifiedPositionsTable venues={normalized.venues} />
+                  <TransactionHistoryTable />
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  正在等待余额数据……
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <OrderDepthSidebar
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
+        />
       </div>
     </div>
   );
@@ -135,7 +175,7 @@ type UnifiedWalletData = {
 function normalizeBalances(balances: BalancesResponse): UnifiedWalletData {
   const driftInfo = summarizeDrift(balances.drift);
   const lighterInfo = summarizeLighter(balances.lighter);
-  const venues = [driftInfo, lighterInfo];
+  const venues = [lighterInfo, driftInfo];
 
   const totalUsd = venues.reduce((sum, venue) => sum + venue.totalUsd, 0);
 
@@ -353,13 +393,12 @@ function UnifiedPositionsTable({ venues }: { venues: UnifiedVenue[] }) {
                     {formatUsd(pos.positionValue)}
                   </TableCell>
                   <TableCell
-                    className={`text-right ${
-                      pos.unrealizedPnl !== null
+                    className={`text-right ${pos.unrealizedPnl !== null
                         ? pos.unrealizedPnl >= 0
                           ? "text-green-600"
                           : "text-red-600"
                         : ""
-                    }`}
+                      }`}
                   >
                     {pos.unrealizedPnl !== null
                       ? formatUsd(pos.unrealizedPnl)

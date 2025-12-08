@@ -133,3 +133,41 @@ class LighterBalanceSnapshot(BaseModel):
 class BalancesResponse(BaseModel):
     drift: DriftBalanceSnapshot
     lighter: LighterBalanceSnapshot
+
+
+class OrderBookLevel(BaseModel):
+    """Single price level in the order book."""
+    price: float
+    size: float
+    total: float  # Cumulative size
+
+
+class OrderBookSide(BaseModel):
+    """One side (bids or asks) of the order book."""
+    levels: list[OrderBookLevel]
+
+
+class VenueOrderBook(BaseModel):
+    """Order book for a single venue."""
+    venue: Literal["drift", "lighter"]
+    symbol: str
+    bids: OrderBookSide
+    asks: OrderBookSide
+    timestamp: float
+
+
+class OrderBookSnapshot(BaseModel):
+    """Combined order book from both venues."""
+    drift: Optional[VenueOrderBook] = None
+    lighter: Optional[VenueOrderBook] = None
+
+
+class OrderBookSubscription(BaseModel):
+    """WebSocket subscription request for order book data."""
+    symbol: str = Field(..., description="Trading symbol (e.g., BTC, ETH, SOL)")
+    drift_leverage: float = Field(..., gt=0, description="Leverage for Drift")
+    lighter_leverage: float = Field(..., gt=0, description="Leverage for Lighter")
+    drift_direction: Literal["long", "short"] = Field(..., description="Position direction for Drift")
+    lighter_direction: Literal["long", "short"] = Field(..., description="Position direction for Lighter")
+    notional_value: float = Field(..., gt=0, description="Contract notional value in USD")
+    depth: int = Field(10, ge=1, le=50, description="Number of price levels to include")
