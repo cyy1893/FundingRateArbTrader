@@ -73,18 +73,18 @@ export default async function TradingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-muted/20 py-10">
-      <div className="container mx-auto flex max-w-[1900px] flex-col gap-6 px-4">
+    <div className="min-h-screen bg-muted/20 py-6">
+      <div className="container mx-auto flex max-w-[1900px] flex-col gap-4 px-4">
         <Card className="border-border/60">
-          <CardHeader>
-            <CardTitle className="text-2xl font-semibold tracking-tight">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-xl font-semibold tracking-tight">
               交易
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="text-xs">
               查看 Drift / Lighter 账户的最新余额和持仓。
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-4">
             {errorMessage ? (
               <Alert variant="destructive">
                 <AlertTitle>无法加载余额</AlertTitle>
@@ -92,15 +92,9 @@ export default async function TradingPage() {
               </Alert>
             ) : normalized ? (
               <>
-                <WalletSummary
-                  totalUsd={normalized.totalUsd}
-                  venues={normalized.venues}
-                />
-                <div className="grid gap-6 lg:grid-cols-2">
-                  {normalized.venues.map((venue) => (
-                    <VenueWalletCard key={venue.id} venue={venue} />
-                  ))}
-                </div>
+                <CompactWalletSummary totalUsd={normalized.totalUsd} venues={normalized.venues} />
+                <UnifiedPositionsTable venues={normalized.venues} />
+                <TransactionHistoryTable />
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
@@ -258,117 +252,163 @@ function summarizeLighter(lighter: LighterBalanceSnapshot): UnifiedVenue {
   };
 }
 
-function WalletSummary({
-  totalUsd,
-  venues,
-}: {
-  totalUsd: number;
-  venues: UnifiedVenue[];
-}) {
-  const venueLinks: Record<UnifiedVenue["id"], string> = {
-    drift: "https://app.drift.trade",
-    lighter: "https://app.lighter.xyz/trade/BTC?locale=zh",
-  };
-
+function CompactWalletSummary({ totalUsd, venues }: { totalUsd: number; venues: UnifiedVenue[] }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+      <div className="grid gap-4 md:grid-cols-3">
         <div>
           <p className="text-xs uppercase tracking-wide text-muted-foreground">
             总资产
           </p>
-          <p className="text-3xl font-semibold">{formatUsd(totalUsd)}</p>
+          <p className="text-2xl font-semibold">{formatUsd(totalUsd)}</p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {venues.map((venue) => (
-            <a
-              key={venue.id}
-              href={venueLinks[venue.id]}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-lg border border-border/50 bg-background/60 px-4 py-3 text-sm transition-colors hover:text-primary"
-            >
-              <p className="text-muted-foreground text-xs uppercase transition-colors hover:text-primary">
-                {venue.name}
-              </p>
-              <p className="text-lg font-semibold">
-                {formatUsd(venue.totalUsd)}
-              </p>
-            </a>
-          ))}
-        </div>
+        {venues.map((venue) => (
+          <div key={venue.id}>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+              {venue.name}
+            </p>
+            <p className="text-lg font-semibold">{formatUsd(venue.totalUsd)}</p>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function VenueWalletCard({ venue }: { venue: UnifiedVenue }) {
+type UnifiedPosition = {
+  venue: string;
+  market: string;
+  position: number;
+  positionValue: number;
+  unrealizedPnl: number | null;
+};
+
+function UnifiedPositionsTable({ venues }: { venues: UnifiedVenue[] }) {
+  const allPositions: UnifiedPosition[] = [];
+
+  venues.forEach((venue) => {
+    venue.positionGroups.forEach((group) => {
+      group.rows.forEach((row) => {
+        if (venue.id === "drift") {
+          // Drift 格式: [市场, 仓位, 盈亏（USD）]
+          allPositions.push({
+            venue: venue.name,
+            market: row.cells[0],
+            position: parseFloat(row.cells[1].replace(/,/g, "")),
+            positionValue: parseFloat(
+              row.cells[2].replace(/[$,]/g, ""),
+            ),
+            unrealizedPnl: parseFloat(
+              row.cells[2].replace(/[$,]/g, ""),
+            ),
+          });
+        } else if (venue.id === "lighter") {
+          // Lighter 格式: [市场, 仓位, 持仓价值, 未实现盈亏]
+          allPositions.push({
+            venue: venue.name,
+            market: row.cells[0],
+            position: parseFloat(row.cells[1].replace(/,/g, "")),
+            positionValue: parseFloat(
+              row.cells[2].replace(/[$,]/g, ""),
+            ),
+            unrealizedPnl: parseFloat(
+              row.cells[3].replace(/[$,]/g, ""),
+            ),
+          });
+        }
+      });
+    });
+  });
+
   return (
-    <Card className="border-border/60">
-      <CardHeader>
-        <CardTitle className="text-xl font-semibold">{venue.name}</CardTitle>
-        {venue.subtitle ? (
-          <CardDescription>{venue.subtitle}</CardDescription>
-        ) : null}
-        <div className="text-sm text-muted-foreground">
-          合计 {formatUsd(venue.totalUsd)}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <section className="space-y-2">
-          <SectionTitle>{venue.balances.title}</SectionTitle>
-          {venue.balances.rows.length === 0 ? (
-            <EmptyState message={venue.balances.emptyMessage} />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {venue.balances.headers.map((header) => (
-                    <TableHead key={header}>{header}</TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {venue.balances.rows.map((row) => (
-                  <TableRow key={row.key}>
-                    {row.cells.map((cell, index) => (
-                      <TableCell key={`${row.key}-${index}`}>{cell}</TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </section>
-        {venue.positionGroups.map((group) => (
-          <section key={group.title} className="space-y-2">
-            <SectionTitle>{group.title}</SectionTitle>
-            {group.rows.length === 0 ? (
-              <EmptyState message={group.emptyMessage} />
+    <section className="space-y-2">
+      <SectionTitle>当前持仓</SectionTitle>
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>交易所</TableHead>
+              <TableHead>市场</TableHead>
+              <TableHead className="text-right">仓位</TableHead>
+              <TableHead className="text-right">持仓价值</TableHead>
+              <TableHead className="text-right">未实现盈亏</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {allPositions.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="h-24 text-center text-sm text-muted-foreground">
+                  暂无持仓
+                </TableCell>
+              </TableRow>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {group.headers.map((header) => (
-                      <TableHead key={header}>{header}</TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {group.rows.map((row) => (
-                    <TableRow key={row.key}>
-                      {row.cells.map((cell, index) => (
-                        <TableCell key={`${row.key}-${index}`}>{cell}</TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              allPositions.map((pos, index) => (
+                <TableRow key={`${pos.venue}-${pos.market}-${index}`}>
+                  <TableCell className="font-medium">{pos.venue}</TableCell>
+                  <TableCell>{pos.market}</TableCell>
+                  <TableCell className="text-right">
+                    {formatNumber(pos.position)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {formatUsd(pos.positionValue)}
+                  </TableCell>
+                  <TableCell
+                    className={`text-right ${
+                      pos.unrealizedPnl !== null
+                        ? pos.unrealizedPnl >= 0
+                          ? "text-green-600"
+                          : "text-red-600"
+                        : ""
+                    }`}
+                  >
+                    {pos.unrealizedPnl !== null
+                      ? formatUsd(pos.unrealizedPnl)
+                      : "-"}
+                  </TableCell>
+                </TableRow>
+              ))
             )}
-          </section>
-        ))}
-      </CardContent>
-    </Card>
+          </TableBody>
+        </Table>
+      </div>
+    </section>
+  );
+}
+
+function TransactionHistoryTable() {
+  // 暂时为空，等待后端API
+  const transactions: never[] = [];
+
+  return (
+    <section className="space-y-2">
+      <SectionTitle>交易历史</SectionTitle>
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>时间</TableHead>
+              <TableHead>交易所</TableHead>
+              <TableHead>市场</TableHead>
+              <TableHead>类型</TableHead>
+              <TableHead className="text-right">数量</TableHead>
+              <TableHead className="text-right">价格</TableHead>
+              <TableHead className="text-right">手续费</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {transactions.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="h-24 text-center text-sm text-muted-foreground">
+                  暂无交易历史数据
+                </TableCell>
+              </TableRow>
+            ) : (
+              transactions.map(() => null)
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
   );
 }
 
