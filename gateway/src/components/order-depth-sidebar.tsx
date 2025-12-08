@@ -65,7 +65,7 @@ export function OrderDepthSidebar({ isOpen, onClose }: Props) {
         <aside
             className={cn(
                 "pointer-events-none flex w-full flex-shrink-0 transition-all duration-300 xl:h-full",
-                isOpen ? "opacity-100 xl:w-[480px]" : "w-0 opacity-0",
+                isOpen ? "opacity-100 xl:w-full" : "w-0 opacity-0",
             )}
         >
             <div

@@ -18,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import type {
   BalancesResponse,
   DriftBalanceSnapshot,
@@ -96,7 +97,12 @@ export default function TradingPage() {
 
   return (
     <div className="min-h-screen bg-muted/20 py-6">
-      <div className="container mx-auto flex max-w-[1900px] flex-col gap-6 px-4 xl:flex-row">
+      <div
+        className={cn(
+          "container mx-auto flex max-w-[1900px] flex-col gap-6 px-4",
+          isSidebarOpen ? "xl:grid xl:grid-cols-2 xl:items-start" : "xl:flex-row",
+        )}
+      >
         <div className="flex-1">
           <Card className="border-border/60">
             <CardHeader className="pb-4">
