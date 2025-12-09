@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,8 +36,9 @@ export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringC
     const [lighterDirection, setLighterDirection] = useState<"long" | "short">("long");
     const [notionalValue, setNotionalValue] = useState("");
 
-    const handleStart = () => {
-        if (!symbol || !notionalValue) return;
+    // Auto-start monitoring when configuration changes
+    useEffect(() => {
+        if (!symbol) return;
 
         const sub: OrderBookSubscription = {
             symbol,
@@ -50,7 +51,7 @@ export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringC
         };
 
         onStartMonitoring(sub);
-    };
+    }, [symbol, driftLeverage, lighterLeverage, driftDirection, lighterDirection, notionalValue, onStartMonitoring]);
 
     return (
         <Card className="border-border/60">
@@ -160,16 +161,9 @@ export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringC
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex gap-3 pt-2">
-                    <Button
-                        className="flex-1"
-                        onClick={handleStart}
-                        disabled={!symbol || !notionalValue}
-                    >
-                        开始监控
-                    </Button>
+                <div className="flex justify-end pt-2">
                     <Button variant="outline" onClick={onClose}>
-                        取消
+                        关闭
                     </Button>
                 </div>
             </CardContent>

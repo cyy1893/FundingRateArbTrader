@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { TrendingUp } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -97,9 +97,9 @@ export default function TradingPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleStartMonitoring = (sub: OrderBookSubscription) => {
+  const handleStartMonitoring = useCallback((sub: OrderBookSubscription) => {
     setSubscription(sub);
-  };
+  }, []);
 
   const handleReset = () => {
     setSubscription(null);
