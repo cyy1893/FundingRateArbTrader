@@ -24,7 +24,8 @@ import type {
   DriftBalanceSnapshot,
   LighterBalanceSnapshot,
 } from "@/types/trader";
-import { OrderDepthSidebar } from "@/components/order-depth-sidebar";
+import { MonitoringConfigCard, OrderBookCard } from "@/components/order-depth-cards";
+import type { OrderBookSubscription } from "@/hooks/use-order-book-websocket";
 
 const numberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 4,
@@ -74,7 +75,8 @@ async function fetchBalances(): Promise<BalancesResponse> {
 export default function TradingPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [normalized, setNormalized] = useState<UnifiedWalletData | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [subscription, setSubscription] = useState<OrderBookSubscription | null>(null);
 
   useEffect(() => {
     async function loadBalances() {
@@ -95,15 +97,28 @@ export default function TradingPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const handleStartMonitoring = (sub: OrderBookSubscription) => {
+    setSubscription(sub);
+  };
+
+  const handleReset = () => {
+    setSubscription(null);
+    setShowConfig(true);
+  };
+
+  const handleCloseConfig = () => {
+    setShowConfig(false);
+    setSubscription(null);
+  };
+
   return (
     <div className="min-h-screen bg-muted/20 py-6">
-      <div
-        className={cn(
-          "container mx-auto flex max-w-[1900px] flex-col gap-6 px-4",
-          isSidebarOpen ? "xl:grid xl:grid-cols-2 xl:items-start" : "xl:flex-row",
-        )}
-      >
-        <div className="flex-1">
+      <div className="container mx-auto max-w-[1900px] px-4">
+        <div className={cn(
+          "grid gap-6",
+          subscription ? "lg:grid-cols-3" : showConfig ? "lg:grid-cols-2" : "lg:grid-cols-1"
+        )}>
+          {/* Balance Card */}
           <Card className="border-border/60">
             <CardHeader className="pb-4">
               <div className="flex items-center justify-between">
@@ -115,13 +130,15 @@ export default function TradingPage() {
                     查看 Drift / Lighter 账户的最新余额和持仓。
                   </CardDescription>
                 </div>
-                <button
-                  onClick={() => setIsSidebarOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                >
-                  <TrendingUp className="h-4 w-4" />
-                  监控订单深度
-                </button>
+                {!showConfig && (
+                  <button
+                    onClick={() => setShowConfig(true)}
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                  >
+                    <TrendingUp className="h-4 w-4" />
+                    监控订单深度
+                  </button>
+                )}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -143,12 +160,23 @@ export default function TradingPage() {
               )}
             </CardContent>
           </Card>
-        </div>
 
-        <OrderDepthSidebar
-          isOpen={isSidebarOpen}
-          onClose={() => setIsSidebarOpen(false)}
-        />
+          {/* Monitoring Config Card */}
+          {showConfig && (
+            <MonitoringConfigCard
+              onClose={handleCloseConfig}
+              onStartMonitoring={handleStartMonitoring}
+            />
+          )}
+
+          {/* Order Book Card */}
+          {subscription && (
+            <OrderBookCard
+              subscription={subscription}
+              onReset={handleReset}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

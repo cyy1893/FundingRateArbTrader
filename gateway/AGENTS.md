@@ -12,6 +12,24 @@ Next.js 16 App Router routes live in `src/app`, with server components by defaul
 ## Coding Style & Naming Conventions
 Stick to TypeScript, two-space indentation, and the existing no-semicolon style. React components, hooks, and context providers use PascalCase filenames; utilities in `src/lib` export camelCase functions grouped by exchange or concern. Fetching should happen in server components or dedicated API routes, with `{ cache: "no-store" }` for market-sensitive endpoints. Tailwind utilities are ordered from layout to typography, and class merging goes through `tailwind-merge`.
 
+## UI/UX Patterns & Animation Guidelines
+
+### Sidebar Animation Consistency
+All sidebars across the application must follow a consistent slide-in animation pattern from the right side:
+
+- **Fixed Width**: Sidebars should use a fixed width (e.g., `w-[460px]`, `w-[520px]`) instead of responsive full-width (`w-full`), ensuring a consistent slide-in animation effect.
+- **Animation Classes**: Use `transition-all duration-300` with conditional width classes:
+  ```tsx
+  className={cn(
+    "pointer-events-none flex h-full flex-shrink-0 transition-all duration-300",
+    isOpen ? "w-[520px] opacity-100" : "w-0 opacity-0"
+  )}
+  ```
+- **Layout Structure**: Parent containers should use `flex` layout with `gap-6` between main content and sidebar, avoiding conditional grid layouts that cause inconsistent rendering patterns.
+- **Examples**: See `arbitrage-sidebar.tsx` for reference implementation.
+
+This pattern ensures that all monitoring cards, detail panels, and auxiliary information slides in uniformly from the right, creating a cohesive visual experience throughout the app.
+
 ## Testing Guidelines
 There is no formal test runner yet, so every PR needs manual QA notes (e.g., “Run `npm run dev`, toggle each exchange, confirm settlement timer matches Drift interval”). When adding deterministic helpers, colocate `*.spec.ts` files next to the source and exercise them via `node --test` or a lightweight Vitest harness; aim for ~80% coverage in `src/lib` modules that handle math or symbol mapping.
 
