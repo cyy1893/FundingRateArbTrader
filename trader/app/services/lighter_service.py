@@ -252,7 +252,7 @@ class LighterService:
                         "bids": list(order_book.get("bids", [])),
                     }
                 else:
-                    self._apply_lighter_updates(order_book_state, order_book)
+                    self._apply_lighter_updates(order_book_state, order_book, depth)
 
                 timestamp = self._parse_timestamp(data.get("timestamp"))
                 yield self._build_lighter_orderbook(
@@ -266,6 +266,7 @@ class LighterService:
         self,
         order_book_state: dict[str, list[dict[str, str]]],
         updates: dict[str, Any],
+        depth_limit: int,
     ) -> None:
         for side in ("asks", "bids"):
             if side not in updates:
@@ -288,6 +289,8 @@ class LighterService:
                 entry for entry in existing if self._parse_decimal(entry.get("size")) > 0
             ]
             existing.sort(key=lambda item: self._parse_decimal(item.get("price")), reverse=reverse)
+            if len(existing) > depth_limit * 3:
+                del existing[depth_limit * 3 :]
 
     def _build_lighter_orderbook(
         self,

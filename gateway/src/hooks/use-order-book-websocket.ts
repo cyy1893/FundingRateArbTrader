@@ -31,6 +31,8 @@ export type OrderBookSubscription = {
   lighter_direction: 'long' | 'short';
   notional_value: number;
   depth: number;
+  throttle_ms?: number;
+  drift_poll_ms?: number;
 };
 
 type WebSocketStatus = 'disconnected' | 'connecting' | 'connected' | 'error';

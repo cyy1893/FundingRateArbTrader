@@ -161,6 +161,9 @@ async def ws_orderbook(
         return
 
     update_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    latest_snapshots: dict[str, Any] = {}
+    throttle = max(0.05, min((subscription.throttle_ms or 500) / 1000, 5.0))
+    stop_event = asyncio.Event()
 
     async def forward_updates(
         venue_name: str,
@@ -168,6 +171,8 @@ async def ws_orderbook(
     ) -> None:
         try:
             async for snapshot in stream:
+                if stop_event.is_set():
+                    break
                 await update_queue.put({"type": "update", "venue": venue_name, "snapshot": snapshot})
         except asyncio.CancelledError:
             raise
@@ -179,8 +184,15 @@ async def ws_orderbook(
     try:
         tasks.append(
             asyncio.create_task(
-                forward_updates("drift", drift.stream_orderbook(subscription.symbol, subscription.depth))
-            )
+                forward_updates(
+                    "drift",
+                    drift.stream_orderbook(
+                        subscription.symbol,
+                        subscription.depth,
+                        poll_interval=max(0.2, (subscription.drift_poll_ms or 1000) / 1000),
+                    ),
+                )
+        )
         )
         tasks.append(
             asyncio.create_task(
@@ -194,10 +206,23 @@ async def ws_orderbook(
         await asyncio.gather(*tasks, return_exceptions=True)
         return
 
-    latest_snapshots: dict[str, Any] = {}
-
-    try:
+    async def send_loop() -> None:
         while True:
+            await asyncio.sleep(throttle)
+            if latest_snapshots:
+                snapshot = OrderBookSnapshot(
+                    drift=latest_snapshots.get("drift"),
+                    lighter=latest_snapshots.get("lighter"),
+                )
+                try:
+                    await websocket.send_json(snapshot.model_dump())
+                except Exception:
+                    stop_event.set()
+                    break
+
+    sender_task = asyncio.create_task(send_loop())
+    try:
+        while not stop_event.is_set():
             message = await update_queue.get()
             if message.get("type") == "error":
                 await websocket.send_json({"error": message.get("message"), "venue": message.get("venue")})
@@ -205,14 +230,10 @@ async def ws_orderbook(
 
             venue = message["venue"]
             latest_snapshots[venue] = message["snapshot"]
-            snapshot = OrderBookSnapshot(
-                drift=latest_snapshots.get("drift"),
-                lighter=latest_snapshots.get("lighter"),
-            )
-            await websocket.send_json(snapshot.model_dump())
     except WebSocketDisconnect:
-        pass
+        stop_event.set()
     finally:
+        sender_task.cancel()
         for task in tasks:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(sender_task, *tasks, return_exceptions=True)

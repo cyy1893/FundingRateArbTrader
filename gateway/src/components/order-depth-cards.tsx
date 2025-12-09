@@ -27,6 +27,9 @@ type OrderBookCardProps = {
 };
 
 const SYMBOLS = ["BTC", "ETH", "SOL", "HYPE", "XRP", "FARTCOIN", "SUI", "WIF", "APT", "PUMP"];
+const DEFAULT_DEPTH = 10;
+const DEFAULT_THROTTLE_MS = 500;
+const DEFAULT_DRIFT_POLL_MS = 1000;
 
 export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringConfigCardProps) {
     const [symbol, setSymbol] = useState("");
@@ -47,7 +50,9 @@ export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringC
             drift_direction: driftDirection,
             lighter_direction: lighterDirection,
             notional_value: parseFloat(notionalValue) || 1000,
-            depth: 10,
+            depth: DEFAULT_DEPTH,
+            throttle_ms: DEFAULT_THROTTLE_MS,
+            drift_poll_ms: DEFAULT_DRIFT_POLL_MS,
         };
 
         onStartMonitoring(sub);

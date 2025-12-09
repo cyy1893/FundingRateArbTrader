@@ -171,3 +171,5 @@ class OrderBookSubscription(BaseModel):
     lighter_direction: Literal["long", "short"] = Field(..., description="Position direction for Lighter")
     notional_value: float = Field(..., gt=0, description="Contract notional value in USD")
     depth: int = Field(10, ge=1, le=50, description="Number of price levels to include")
+    throttle_ms: int = Field(500, ge=50, le=5000, description="Throttle interval in milliseconds for order book updates")
+    drift_poll_ms: int = Field(1000, ge=200, le=5000, description="Poll interval for Drift order book HTTP snapshot")
