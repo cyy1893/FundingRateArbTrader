@@ -54,23 +54,19 @@ export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringC
     }, [symbol, driftLeverage, lighterLeverage, driftDirection, lighterDirection, notionalValue, onStartMonitoring]);
 
     return (
-        <Card className="border-border/60">
-            <CardHeader className="pb-4">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <CardTitle className="text-xl font-semibold tracking-tight">
-                            订单深度监控
-                        </CardTitle>
-                        <CardDescription className="text-xs">
-                            配置 Drift 和 Lighter 的订单簿监控参数
-                        </CardDescription>
-                    </div>
-                    <Button variant="ghost" size="icon" onClick={onClose}>
-                        <X className="h-5 w-5" />
-                    </Button>
+        <div className="rounded-xl border border-dashed bg-background/60 p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-4 pb-3">
+                <div>
+                    <p className="text-sm font-semibold">订单深度监控</p>
+                    <p className="text-xs text-muted-foreground">
+                        配置 Drift 和 Lighter 的订单簿监控参数
+                    </p>
                 </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+                <Button variant="ghost" size="icon" onClick={onClose}>
+                    <X className="h-5 w-5" />
+                </Button>
+            </div>
+            <div className="space-y-4">
                 {/* Step 1: Symbol Selection */}
                 <div className="space-y-2">
                     <h3 className="text-sm font-semibold">步骤 1: 选择币种</h3>
@@ -166,8 +162,8 @@ export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringC
                         关闭
                     </Button>
                 </div>
-            </CardContent>
-        </Card>
+            </div>
+        </div>
     );
 }
 

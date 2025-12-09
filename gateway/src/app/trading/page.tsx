@@ -77,6 +77,7 @@ export default function TradingPage() {
   const [normalized, setNormalized] = useState<UnifiedWalletData | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [subscription, setSubscription] = useState<OrderBookSubscription | null>(null);
+  const showMonitoringArea = showConfig || subscription !== null;
 
   useEffect(() => {
     async function loadBalances() {
@@ -114,11 +115,8 @@ export default function TradingPage() {
   return (
     <div className="min-h-screen bg-muted/20 py-6">
       <div className="container mx-auto max-w-[1900px] px-4">
-        <div className={cn(
-          "grid gap-6",
-          subscription ? "lg:grid-cols-3" : showConfig ? "lg:grid-cols-2" : "lg:grid-cols-1"
-        )}>
-          {/* Balance Card */}
+        <div className={cn("grid gap-6", subscription ? "lg:grid-cols-2" : "lg:grid-cols-1")}>
+          {/* Main Trading Column */}
           <Card className="border-border/60">
             <CardHeader className="pb-4">
               <div className="flex items-center justify-between">
@@ -130,15 +128,13 @@ export default function TradingPage() {
                     查看 Drift / Lighter 账户的最新余额和持仓。
                   </CardDescription>
                 </div>
-                {!showConfig && (
-                  <button
-                    onClick={() => setShowConfig(true)}
-                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                  >
-                    <TrendingUp className="h-4 w-4" />
-                    监控订单深度
-                  </button>
-                )}
+                <button
+                  onClick={() => setShowConfig((v) => !v)}
+                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  <TrendingUp className="h-4 w-4" />
+                  {showConfig ? "隐藏深度监控" : "监控订单深度"}
+                </button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -150,6 +146,44 @@ export default function TradingPage() {
               ) : normalized ? (
                 <>
                   <CompactWalletSummary totalUsd={normalized.totalUsd} venues={normalized.venues} />
+
+                  {/* Monitoring area sits between summary and positions */}
+                  {showMonitoringArea && (
+                    <div className="rounded-xl border bg-card/40 p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-semibold">订单深度监控</h3>
+                          <p className="text-xs text-muted-foreground">
+                            选择币种并实时查看 Drift / Lighter 订单簿。
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setShowConfig((v) => !v)}
+                            className="rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted"
+                          >
+                            {showConfig ? "收起配置" : "展开配置"}
+                          </button>
+                          {subscription && (
+                            <button
+                              onClick={handleReset}
+                              className="rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted"
+                            >
+                              停止监控
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {showConfig && (
+                        <MonitoringConfigCard
+                          onClose={() => setShowConfig(false)}
+                          onStartMonitoring={handleStartMonitoring}
+                        />
+                      )}
+                    </div>
+                  )}
+
                   <UnifiedPositionsTable venues={normalized.venues} />
                   <TransactionHistoryTable />
                 </>
@@ -161,15 +195,7 @@ export default function TradingPage() {
             </CardContent>
           </Card>
 
-          {/* Monitoring Config Card */}
-          {showConfig && (
-            <MonitoringConfigCard
-              onClose={handleCloseConfig}
-              onStartMonitoring={handleStartMonitoring}
-            />
-          )}
-
-          {/* Order Book Card */}
+          {/* Order Book Column */}
           {subscription && (
             <OrderBookCard
               subscription={subscription}

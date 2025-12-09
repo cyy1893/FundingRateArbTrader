@@ -41,12 +41,23 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const subscriptionRef = useRef<OrderBookSubscription | null>(null);
+  const latestSnapshotRef = useRef<OrderBookSnapshot | null>(null);
+  const throttleIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const connect = useCallback(() => {
-    if (!subscription) return;
+  const normalizeSymbol = useCallback((sym: string | undefined | null) => {
+    if (!sym) return "";
+    return sym.replace(/-PERP$/i, "").trim().toUpperCase();
+  }, []);
+
+  const connect = useCallback((sub?: OrderBookSubscription | null) => {
+    const activeSub = sub ?? subscriptionRef.current;
+    if (!activeSub) return;
 
     setStatus('connecting');
     setError(null);
+    setOrderBook(null);
+    latestSnapshotRef.current = null;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.hostname}:8080/ws/orderbook`;
@@ -58,7 +69,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
       ws.onopen = () => {
         setStatus('connected');
         // Send subscription parameters
-        ws.send(JSON.stringify(subscription));
+        ws.send(JSON.stringify(activeSub));
       };
 
       ws.onmessage = (event) => {
@@ -72,8 +83,18 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
             return;
           }
 
-          // Update order book data
-          setOrderBook(data);
+          const currentSymbol = subscriptionRef.current?.symbol;
+          if (currentSymbol) {
+            const target = normalizeSymbol(currentSymbol);
+            const symbols = [data.drift?.symbol, data.lighter?.symbol]
+              .map((sym) => normalizeSymbol(sym))
+              .filter(Boolean);
+            if (symbols.length > 0 && symbols.some((sym) => sym !== target)) {
+              return;
+            }
+          }
+
+          latestSnapshotRef.current = data;
         } catch (err) {
           console.error('Failed to parse WebSocket message:', err);
         }
@@ -91,21 +112,24 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
 
         // Auto-reconnect after 3 seconds
         reconnectTimeoutRef.current = setTimeout(() => {
-          if (subscription) {
-            connect();
-          }
+          const latestSub = subscriptionRef.current;
+          if (latestSub) connect(latestSub);
         }, 3000);
       };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect');
       setStatus('error');
     }
-  }, [subscription]);
+  }, []);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+    if (throttleIntervalRef.current) {
+      clearInterval(throttleIntervalRef.current);
+      throttleIntervalRef.current = null;
     }
 
     if (wsRef.current) {
@@ -116,11 +140,13 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     setStatus('disconnected');
     setOrderBook(null);
     setError(null);
+    latestSnapshotRef.current = null;
   }, []);
 
   useEffect(() => {
+    subscriptionRef.current = subscription;
     if (subscription) {
-      connect();
+      connect(subscription);
     } else {
       disconnect();
     }
@@ -128,7 +154,22 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     return () => {
       disconnect();
     };
-  }, [subscription, connect, disconnect]);
+  }, [subscription, connect, disconnect, normalizeSymbol]);
+
+  useEffect(() => {
+    throttleIntervalRef.current = setInterval(() => {
+      if (latestSnapshotRef.current) {
+        setOrderBook(latestSnapshotRef.current);
+      }
+    }, 500);
+
+    return () => {
+      if (throttleIntervalRef.current) {
+        clearInterval(throttleIntervalRef.current);
+        throttleIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   return {
     orderBook,
