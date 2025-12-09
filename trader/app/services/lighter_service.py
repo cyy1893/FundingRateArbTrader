@@ -220,11 +220,25 @@ class LighterService:
             ping_interval=20,
             ping_timeout=20,
         ) as ws:
-            await ws.send(json.dumps({"type": "subscribe", "channel": f"order_book/{market_id}"}))
+            # Wait for server handshake before subscribing (mirrors lighter-python client)
+            try:
+                first_msg = await ws.recv()
+                data = json.loads(first_msg)
+                if data.get("type") == "connected":
+                    await ws.send(json.dumps({"type": "subscribe", "channel": f"order_book/{market_id}"}))
+                else:
+                    # Fallback: still attempt subscription if handshake is unexpected
+                    await ws.send(json.dumps({"type": "subscribe", "channel": f"order_book/{market_id}"}))
+            except Exception:
+                await ws.send(json.dumps({"type": "subscribe", "channel": f"order_book/{market_id}"}))
 
             async for raw_message in ws:
                 data = json.loads(raw_message)
                 message_type = data.get("type")
+                if message_type == "ping":
+                    await ws.send(json.dumps({"type": "pong"}))
+                    continue
+
                 if message_type not in {"subscribed/order_book", "update/order_book"}:
                     continue
 
@@ -312,8 +326,8 @@ class LighterService:
             size = self._parse_decimal(entry.get("size"))
             if price <= 0 or size <= 0:
                 continue
-            cumulative += size
-            levels.append(OrderBookLevel(price=float(price), size=float(size), total=float(cumulative)))
+            cumulative += float(size)  # Convert Decimal to float before adding
+            levels.append(OrderBookLevel(price=float(price), size=float(size), total=cumulative))
 
         return OrderBookSide(levels=levels)
 
