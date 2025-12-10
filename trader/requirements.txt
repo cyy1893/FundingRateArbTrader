@@ -4,3 +4,4 @@ pydantic>=2.7
 pydantic-settings>=2.3
 driftpy>=0.8.82
 lighter-sdk==0.1.4
+PyJWT>=2.8.0

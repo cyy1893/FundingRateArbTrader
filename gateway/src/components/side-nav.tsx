@@ -1,20 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { BarChart3, TrendingUp, Settings, Activity } from "lucide-react";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { BarChart3, TrendingUp, Settings, Activity, Lock, User, LogOut } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { clearClientAuthToken, extractUsernameFromToken, getClientAuthToken } from "@/lib/auth";
 
 const NAV_ITEMS = [
   { href: "/", label: "费率比较", icon: BarChart3 },
   { href: "/trading", label: "交易", icon: TrendingUp },
   { href: "/activity", label: "活动", icon: Activity },
   { href: "/settings", label: "设置", icon: Settings },
+  { href: "/login", label: "登录", icon: Lock },
 ];
 
 export function SideNav() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [username, setUsername] = useState<string | null>(null);
+
+  useEffect(() => {
+    const syncUser = () => {
+      const token = getClientAuthToken();
+      setUsername(extractUsernameFromToken(token));
+    };
+    syncUser();
+    const interval = setInterval(syncUser, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleLogout = async () => {
+    clearClientAuthToken();
+    try {
+      await fetch("/api/login", { method: "DELETE" });
+    } catch {
+      // ignore
+    }
+    setUsername(null);
+    router.push("/login");
+  };
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-card">
@@ -58,13 +84,31 @@ export function SideNav() {
 
         {/* Footer */}
         <div className="mt-auto border-t border-border pt-4">
-          <div className="rounded-lg bg-muted/50 px-3 py-2.5">
-            <p className="text-xs font-medium text-foreground">系统状态</p>
-            <div className="mt-1 flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full bg-green-500" />
-              <p className="text-xs text-muted-foreground">运行正常</p>
+          {username ? (
+            <div className="rounded-lg bg-muted/60 px-3 py-3 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <User className="h-4 w-4" />
+                <span>{username}</span>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                退出登录
+              </button>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-lg bg-muted/50 px-3 py-2.5">
+              <p className="text-xs font-medium text-foreground">未登录</p>
+              <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <Lock className="h-3.5 w-3.5" />
+                <Link className="underline hover:text-foreground" href="/login">
+                  前往登录
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </aside>

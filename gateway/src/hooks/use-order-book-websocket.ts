@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
+import { getClientAuthToken } from '@/lib/auth';
+
 export type OrderBookLevel = {
   price: number;
   size: number;
@@ -55,7 +57,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     return sym.replace(/-PERP$/i, "").trim().toUpperCase();
   }, []);
 
-  const connect = useCallback((sub?: OrderBookSubscription | null) => {
+  const connect = useCallback(function doConnect(sub?: OrderBookSubscription | null) {
     const activeSub = sub ?? subscriptionRef.current;
     if (!activeSub) return;
 
@@ -68,7 +70,13 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     latestSnapshotRef.current = null;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.hostname}:8080/ws/orderbook`;
+    const base =
+      process.env.NEXT_PUBLIC_TRADER_WS_URL ??
+      `${protocol}//${window.location.hostname}:8080`;
+    const token = getClientAuthToken();
+    const wsUrl = `${base.replace(/^http/, 'ws').replace(/\/$/, '')}/ws/orderbook${
+      token ? `?token=${encodeURIComponent(token)}` : ''
+    }`;
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -131,14 +139,14 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
         // Auto-reconnect after 3 seconds
         reconnectTimeoutRef.current = setTimeout(() => {
           const latestSub = subscriptionRef.current;
-          if (latestSub) connect(latestSub);
+          if (latestSub) doConnect(latestSub);
         }, 3000);
       };
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect');
       setStatus('error');
     }
-  }, []);
+  }, [normalizeSymbol]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {

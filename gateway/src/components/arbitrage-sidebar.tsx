@@ -101,7 +101,7 @@ export function ArbitrageSidebarProvider({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [data, lastRequest]);
 
   const close = useCallback(() => {
     setIsOpen(false);

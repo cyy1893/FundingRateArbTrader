@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { TrendingUp } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -26,6 +27,7 @@ import type {
 } from "@/types/trader";
 import { MonitoringConfigCard, OrderBookCard } from "@/components/order-depth-cards";
 import type { OrderBookSubscription } from "@/hooks/use-order-book-websocket";
+import { getClientAuthToken } from "@/lib/auth";
 
 const numberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 4,
@@ -77,13 +79,31 @@ export default function TradingPage() {
   const [normalized, setNormalized] = useState<UnifiedWalletData | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [subscription, setSubscription] = useState<OrderBookSubscription | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const showMonitoringArea = showConfig || subscription !== null;
+
+  useEffect(() => {
+    const syncAuth = () => {
+      setIsAuthenticated(Boolean(getClientAuthToken()));
+    };
+
+    syncAuth();
+    const handleStorage = () => syncAuth();
+    window.addEventListener("storage", handleStorage);
+    const interval = setInterval(syncAuth, 5000);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     async function loadBalances() {
       try {
         const data = await fetchBalances();
         setNormalized(normalizeBalances(data));
+        setErrorMessage(null);
       } catch (error) {
         setErrorMessage(
           error instanceof Error
@@ -93,10 +113,26 @@ export default function TradingPage() {
       }
     }
 
-    loadBalances();
-    const interval = setInterval(loadBalances, 10000); // Refresh every 10s
-    return () => clearInterval(interval);
-  }, []);
+    if (!isAuthenticated) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadAndTrack = async () => {
+      await loadBalances();
+      if (cancelled) {
+        return;
+      }
+    };
+
+    loadAndTrack();
+    const interval = setInterval(loadAndTrack, 10000); // Refresh every 10s
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isAuthenticated]);
 
   const handleStartMonitoring = useCallback((sub: OrderBookSubscription) => {
     setSubscription(sub);
@@ -107,15 +143,13 @@ export default function TradingPage() {
     setShowConfig(true);
   };
 
-  const handleCloseConfig = () => {
-    setShowConfig(false);
-    setSubscription(null);
-  };
-
   return (
     <div className="min-h-screen bg-muted/20 py-6">
       <div className="container mx-auto max-w-[1900px] px-4">
-        <div className={cn("grid gap-6", subscription ? "lg:grid-cols-2" : "lg:grid-cols-1")}>
+        {!isAuthenticated ? (
+          <AuthRequiredCard />
+        ) : (
+          <div className={cn("grid gap-6", subscription ? "lg:grid-cols-2" : "lg:grid-cols-1")}>
           {/* Main Trading Column */}
           <Card className="border-border/60">
             <CardHeader className="pb-4">
@@ -202,7 +236,8 @@ export default function TradingPage() {
               onReset={handleReset}
             />
           )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -511,14 +546,36 @@ function TransactionHistoryTable() {
   );
 }
 
-function EmptyState({ message }: { message: string }) {
-  return <p className="text-sm text-muted-foreground">{message}</p>;
-}
-
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <h3 className="text-sm font-semibold tracking-tight text-foreground">
       {children}
     </h3>
+  );
+}
+
+function AuthRequiredCard() {
+  return (
+    <div className="mx-auto max-w-3xl">
+      <Card className="border-dashed border-primary/30 bg-card/70 shadow-md">
+        <CardHeader className="space-y-2">
+          <CardTitle className="text-2xl font-semibold">需要登录</CardTitle>
+          <CardDescription className="text-sm text-muted-foreground">
+            请先登录以查看 Drift / Lighter 账户余额并开启订单簿监控。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/login"
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
+          >
+            前往登录
+          </Link>
+          <p className="text-xs text-muted-foreground">
+            登录后将自动刷新本页面。
+          </p>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

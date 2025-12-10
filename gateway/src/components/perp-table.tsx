@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronUp, Loader2, Search, RefreshCw, ExternalLink } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Search, RefreshCw } from "lucide-react";
 
 import { PerpTableRow } from "@/components/perp-table-row";
 import { FailureAlertsOverlay } from "@/components/failure-alerts";
@@ -28,7 +28,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {

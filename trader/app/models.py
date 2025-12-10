@@ -135,6 +135,17 @@ class BalancesResponse(BaseModel):
     lighter: LighterBalanceSnapshot
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+
+
 class OrderBookLevel(BaseModel):
     """Single price level in the order book."""
     price: float

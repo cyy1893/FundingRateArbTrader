@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from collections.abc import AsyncIterator
 from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, HTTPException, Security, WebSocket, WebSocketDisconnect, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import get_settings
 from app.events import EventBroadcaster
@@ -15,6 +16,8 @@ from app.models import (
     BalancesResponse,
     DriftOrderRequest,
     LighterOrderRequest,
+    LoginRequest,
+    LoginResponse,
     OrderBookSnapshot,
     OrderBookSubscription,
     OrderEvent,
@@ -22,6 +25,7 @@ from app.models import (
 )
 from app.services.drift_service import DriftService
 from app.services.lighter_service import LighterService
+from app.utils.auth import AuthError, AuthManager, LockoutError, parse_users
 
 
 logging.getLogger().setLevel(logging.INFO)
@@ -33,6 +37,15 @@ settings = get_settings()
 event_broadcaster = EventBroadcaster()
 drift_service = DriftService(settings)
 lighter_service = LighterService(settings)
+auth_manager = AuthManager(
+    users=parse_users([entry.strip() for entry in settings.auth_users.split(",") if entry.strip()]),
+    secret=settings.auth_jwt_secret,
+    algorithm=settings.auth_jwt_algorithm,
+    token_ttl_minutes=settings.auth_token_ttl_minutes,
+    lockout_threshold=settings.auth_lockout_threshold,
+    lockout_minutes=settings.auth_lockout_minutes,
+)
+auth_scheme = HTTPBearer()
 
 
 @asynccontextmanager
@@ -57,6 +70,38 @@ def get_broadcaster() -> EventBroadcaster:
     return event_broadcaster
 
 
+def get_auth_manager() -> AuthManager:
+    return auth_manager
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Security(auth_scheme),
+    manager: AuthManager = Depends(get_auth_manager),
+) -> str:
+    try:
+        return manager.validate_token(credentials.credentials)
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=exc.message) from exc
+
+
+async def authenticate_websocket(websocket: WebSocket, manager: AuthManager) -> str:
+    token = websocket.query_params.get("token")
+    if not token:
+        auth_header = websocket.headers.get("authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1]
+
+    if not token:
+        await websocket.close(code=1008, reason="Missing token")
+        raise WebSocketDisconnect
+
+    try:
+        return manager.validate_token(token)
+    except AuthError as exc:
+        await websocket.close(code=1008, reason=exc.message)
+        raise WebSocketDisconnect
+
+
 @app.get("/health")
 async def health() -> Dict[str, Any]:
     return {
@@ -70,6 +115,7 @@ async def health() -> Dict[str, Any]:
 async def balances(
     drift: DriftService = Depends(get_drift_service),
     lighter: LighterService = Depends(get_lighter_service),
+    _: str = Depends(get_current_user),
 ) -> BalancesResponse:
     try:
         drift_balances = await drift.get_balances()
@@ -89,6 +135,7 @@ async def create_drift_order(
     order: DriftOrderRequest,
     service: DriftService = Depends(get_drift_service),
     broadcaster: EventBroadcaster = Depends(get_broadcaster),
+    _: str = Depends(get_current_user),
 ):
     try:
         response = await service.place_order(order)
@@ -110,6 +157,7 @@ async def create_lighter_order(
     order: LighterOrderRequest,
     service: LighterService = Depends(get_lighter_service),
     broadcaster: EventBroadcaster = Depends(get_broadcaster),
+    _: str = Depends(get_current_user),
 ):
     try:
         response = await service.place_order(order)
@@ -126,11 +174,33 @@ async def create_lighter_order(
     return response
 
 
+@app.post("/login", response_model=LoginResponse)
+async def login(
+    payload: LoginRequest,
+    manager: AuthManager = Depends(get_auth_manager),
+) -> LoginResponse:
+    try:
+        token, expires_in = manager.authenticate(payload.username, payload.password)
+    except LockoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=f"Too many failed attempts. Try again after {exc.until.isoformat()}",
+        ) from exc
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=exc.message) from exc
+
+    return LoginResponse(access_token=token, expires_in=expires_in)
+
+
 @app.websocket("/ws/events")
 async def ws_events(
     websocket: WebSocket,
     broadcaster: EventBroadcaster = Depends(get_broadcaster),
 ):
+    try:
+        await authenticate_websocket(websocket, auth_manager)
+    except WebSocketDisconnect:
+        return
     await websocket.accept()
     queue = await broadcaster.register()
     try:
@@ -149,6 +219,10 @@ async def ws_orderbook(
     drift: DriftService = Depends(get_drift_service),
     lighter: LighterService = Depends(get_lighter_service),
 ):
+    try:
+        await authenticate_websocket(websocket, auth_manager)
+    except WebSocketDisconnect:
+        return
     await websocket.accept()
     try:
         payload = await websocket.receive_json()
