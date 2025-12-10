@@ -189,7 +189,6 @@ async def ws_orderbook(
                     drift.stream_orderbook(
                         subscription.symbol,
                         subscription.depth,
-                        poll_interval=max(0.2, (subscription.drift_poll_ms or 1000) / 1000),
                     ),
                 )
         )

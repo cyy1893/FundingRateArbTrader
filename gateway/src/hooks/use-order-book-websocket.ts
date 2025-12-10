@@ -35,10 +35,13 @@ export type OrderBookSubscription = {
   drift_poll_ms?: number;
 };
 
-type WebSocketStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type WebSocketStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export function useOrderBookWebSocket(subscription: OrderBookSubscription | null) {
   const [orderBook, setOrderBook] = useState<OrderBookSnapshot | null>(null);
+  const [hasSnapshot, setHasSnapshot] = useState(false);
+  const [hasDrift, setHasDrift] = useState(false);
+  const [hasLighter, setHasLighter] = useState(false);
   const [status, setStatus] = useState<WebSocketStatus>('disconnected');
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -59,6 +62,9 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     setStatus('connecting');
     setError(null);
     setOrderBook(null);
+    setHasSnapshot(false);
+    setHasDrift(false);
+    setHasLighter(false);
     latestSnapshotRef.current = null;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -77,11 +83,12 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          
+
           // Handle error messages from server
           if (data.error) {
             setError(data.error);
             setStatus('error');
+            setHasSnapshot(false);
             return;
           }
 
@@ -96,6 +103,9 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
             }
           }
 
+          setHasSnapshot(true);
+          setHasDrift(Boolean(data.drift));
+          setHasLighter(Boolean(data.lighter));
           latestSnapshotRef.current = data;
         } catch (err) {
           console.error('Failed to parse WebSocket message:', err);
@@ -106,11 +116,17 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
         console.error('WebSocket error:', event);
         setError('WebSocket connection error');
         setStatus('error');
+        setHasSnapshot(false);
+        setHasDrift(false);
+        setHasLighter(false);
       };
 
       ws.onclose = () => {
         setStatus('disconnected');
         wsRef.current = null;
+        setHasSnapshot(false);
+        setHasDrift(false);
+        setHasLighter(false);
 
         // Auto-reconnect after 3 seconds
         reconnectTimeoutRef.current = setTimeout(() => {
@@ -129,10 +145,6 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
-    if (throttleIntervalRef.current) {
-      clearInterval(throttleIntervalRef.current);
-      throttleIntervalRef.current = null;
-    }
 
     if (wsRef.current) {
       wsRef.current.close();
@@ -142,6 +154,9 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     setStatus('disconnected');
     setOrderBook(null);
     setError(null);
+    setHasSnapshot(false);
+    setHasDrift(false);
+    setHasLighter(false);
     latestSnapshotRef.current = null;
   }, []);
 
@@ -177,6 +192,9 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     orderBook,
     status,
     error,
+    hasSnapshot,
+    hasDrift,
+    hasLighter,
     reconnect: connect,
   };
 }

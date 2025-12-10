@@ -1,10 +1,14 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { OrderBookSnapshot, VenueOrderBook, OrderBookLevel } from "@/hooks/use-order-book-websocket";
+import type { OrderBookSnapshot, VenueOrderBook, OrderBookLevel, WebSocketStatus } from "@/hooks/use-order-book-websocket";
 
 type Props = {
   orderBook: OrderBookSnapshot | null;
+  status: WebSocketStatus;
+  hasSnapshot: boolean;
+  hasDrift: boolean;
+  hasLighter: boolean;
 };
 
 const formatPrice = (price: number) => price.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
@@ -25,6 +29,15 @@ const bidColors = {
   pill: "bg-[#d7f4dc]",
   text: "text-[#159947]",
 };
+
+function LoadingState({ message }: { message: string }) {
+  return (
+    <div className="h-96 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+      <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+      <p className="text-sm text-foreground/80">{message}</p>
+    </div>
+  );
+}
 
 function DepthRow({
   level,
@@ -63,13 +76,25 @@ function DepthRow({
   );
 }
 
-function VenueOrderBookTable({ venue }: { venue: VenueOrderBook | undefined }) {
+function VenueOrderBookTable({
+  venue,
+  status,
+  hasSnapshot,
+  venueReady,
+}: {
+  venue: VenueOrderBook | undefined;
+  status: WebSocketStatus;
+  hasSnapshot: boolean;
+  venueReady: boolean;
+}) {
+  const showLoading = (!hasSnapshot || !venueReady) && status !== "error";
+  if (showLoading) {
+    const message = status === "connected" ? "等待订单簿数据..." : "建立连接中...";
+    return <LoadingState message={message} />;
+  }
+
   if (!venue) {
-    return (
-      <div className="h-96 flex items-center justify-center text-muted-foreground">
-        <p>暂无数据</p>
-      </div>
-    );
+    return <div className="h-96" />;
   }
 
   const asks = [...venue.asks.levels].reverse().slice(0, 14);
@@ -153,7 +178,7 @@ function VenueOrderBookTable({ venue }: { venue: VenueOrderBook | undefined }) {
   );
 }
 
-export function OrderBookDisplay({ orderBook }: Props) {
+export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasDrift, hasLighter }: Props) {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <Card className="border-none shadow-none bg-transparent">
@@ -161,7 +186,12 @@ export function OrderBookDisplay({ orderBook }: Props) {
           <CardTitle className="text-lg text-[#2f2a5a]">Drift 订单簿</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <VenueOrderBookTable venue={orderBook?.drift} />
+          <VenueOrderBookTable
+            venue={orderBook?.drift}
+            status={status}
+            hasSnapshot={hasSnapshot}
+            venueReady={hasDrift}
+          />
         </CardContent>
       </Card>
 
@@ -170,7 +200,12 @@ export function OrderBookDisplay({ orderBook }: Props) {
           <CardTitle className="text-lg text-[#2f2a5a]">Lighter 订单簿</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <VenueOrderBookTable venue={orderBook?.lighter} />
+          <VenueOrderBookTable
+            venue={orderBook?.lighter}
+            status={status}
+            hasSnapshot={hasSnapshot}
+            venueReady={hasLighter}
+          />
         </CardContent>
       </Card>
     </div>

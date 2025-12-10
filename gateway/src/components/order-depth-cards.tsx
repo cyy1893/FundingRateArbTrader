@@ -173,7 +173,7 @@ export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringC
 }
 
 export function OrderBookCard({ subscription, onReset }: OrderBookCardProps) {
-    const { orderBook, status, error } = useOrderBookWebSocket(subscription);
+    const { orderBook, status, error, hasSnapshot, hasDrift, hasLighter } = useOrderBookWebSocket(subscription);
 
     return (
         <Card className="border-border/60">
@@ -220,7 +220,13 @@ export function OrderBookCard({ subscription, onReset }: OrderBookCardProps) {
                 )}
 
                 {/* Order Book Display */}
-                <OrderBookDisplay orderBook={orderBook} />
+                <OrderBookDisplay
+                    orderBook={orderBook}
+                    status={status}
+                    hasSnapshot={hasSnapshot}
+                    hasDrift={hasDrift}
+                    hasLighter={hasLighter}
+                />
             </CardContent>
         </Card>
     );

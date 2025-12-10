@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from anchorpy.provider import Wallet
 from driftpy.constants.numeric_constants import BASE_PRECISION, PRICE_PRECISION, QUOTE_PRECISION
@@ -39,6 +41,8 @@ from app.models import (
     VenueOrderBook,
 )
 
+import websockets
+
 
 class DriftService:
     """
@@ -52,6 +56,7 @@ class DriftService:
         self._lock = asyncio.Lock()
         self._http_client: Optional[httpx.AsyncClient] = None
         self._dlob_url = settings.drift_dlob_url.rstrip("/")
+        self._dlob_ws_url = self._build_dlob_ws_url(settings)
 
     async def start(self) -> None:
         await self._ensure_client()
@@ -178,21 +183,91 @@ class DriftService:
         self,
         symbol: str,
         depth: int,
-        poll_interval: float = 1.0,
     ) -> AsyncIterator[VenueOrderBook]:
         """
-        Poll the Drift DLOB endpoint and yield normalized order book snapshots.
+        Stream normalized order book snapshots from the Drift DLOB websocket.
         """
 
+        backoff = 1.0
         while True:
             try:
-                snapshot = await self.get_orderbook_snapshot(symbol=symbol, depth=depth)
-                yield snapshot
+                async for snapshot in self._stream_orderbook_ws(symbol, depth):
+                    backoff = 1.0
+                    yield snapshot
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                logging.warning("Failed to refresh Drift order book: %s", exc)
-            await asyncio.sleep(max(poll_interval, 0.2))
+                logging.warning("Failed to refresh Drift order book via websocket: %s", exc)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30.0)
+
+    async def _stream_orderbook_ws(self, symbol: str, depth: int) -> AsyncIterator[VenueOrderBook]:
+        market_name = self._normalize_symbol(symbol)
+        ws_url = self._dlob_ws_url
+        subscribe_payload = {
+            "type": "subscribe",
+            "marketType": "perp",
+            "channel": "orderbook",
+            "market": market_name,
+        }
+
+        async with websockets.connect(ws_url, ping_interval=20, ping_timeout=20) as ws:
+            await ws.send(json.dumps(subscribe_payload))
+            async for raw_message in ws:
+                message = json.loads(raw_message)
+
+                # DLOB server may send pings or unrelated messages
+                msg_type = message.get("type")
+                if msg_type == "ping":
+                    await ws.send(json.dumps({"type": "pong"}))
+                    continue
+
+                payload = self._extract_orderbook_payload(message, market_name)
+                if payload is None:
+                    continue
+
+                snapshot = self._build_drift_orderbook(payload, depth, symbol)
+                yield snapshot
+
+    def _extract_orderbook_payload(self, message: dict[str, Any], market_name: str) -> Optional[dict[str, Any]]:
+        """
+        Normalize DLOB websocket responses across legacy and current formats.
+
+        Legacy shape:
+        {"channel": "orderbook", "market": "SOL-PERP", "bids": [...], "asks": [...]}
+
+        Current shape:
+        {"channel": "orderbook_perp_0_grouped_1", "data": "{\"bids\": [...], \"asks\": [...], \"marketName\": \"SOL-PERP\"}"}
+        """
+        # Legacy envelope
+        if message.get("channel") == "orderbook":
+            if message.get("market") == market_name:
+                return message
+            return None
+
+        channel = message.get("channel")
+        if not channel or "orderbook" not in str(channel):
+            return None
+
+        data = message.get("data")
+        if data is None:
+            return None
+
+        if isinstance(data, str):
+            try:
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                return None
+        elif isinstance(data, dict):
+            payload = data
+        else:
+            return None
+
+        payload_market = payload.get("marketName") or payload.get("market")
+        if payload_market and payload_market != market_name:
+            return None
+
+        return payload
 
     async def get_orderbook_snapshot(self, symbol: str, depth: int) -> VenueOrderBook:
         client = await self._ensure_client()
@@ -218,6 +293,19 @@ class DriftService:
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(timeout=5.0)
         return self._http_client
+
+    @staticmethod
+    def _build_dlob_ws_url(settings: Settings) -> str:
+        if settings.drift_env == "devnet":
+            return "wss://master.dlob.drift.trade/ws"
+        if settings.drift_env == "mainnet":
+            return "wss://dlob.drift.trade/ws"
+
+        parsed = urlparse(settings.drift_dlob_url)
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        path = parsed.path if parsed.path.endswith("/ws") else f"{parsed.path.rstrip('/')}/ws"
+        netloc = parsed.netloc or parsed.path
+        return f"{scheme}://{netloc}{path}"
 
     @staticmethod
     def _normalize_symbol(symbol: str) -> str:
