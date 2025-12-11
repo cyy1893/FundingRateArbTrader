@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, TrendingUp, Settings, Activity, Lock, User, LogOut } from "lucide-react";
+import { BarChart3, TrendingUp, Lock, User, LogOut } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { clearClientAuthToken, extractUsernameFromToken, getClientAuthToken } from "@/lib/auth";
@@ -11,8 +11,6 @@ import { clearClientAuthToken, extractUsernameFromToken, getClientAuthToken } fr
 const NAV_ITEMS = [
   { href: "/", label: "费率比较", icon: BarChart3 },
   { href: "/trading", label: "交易", icon: TrendingUp },
-  { href: "/activity", label: "活动", icon: Activity },
-  { href: "/settings", label: "设置", icon: Settings },
   { href: "/login", label: "登录", icon: Lock },
 ];
 

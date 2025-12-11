@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { LogIn, ShieldCheck, Timer } from "lucide-react";
+import { LogIn, ShieldCheck } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AUTH_COOKIE_NAME, persistClientAuthToken, clearClientAuthToken } from "@/lib/auth";
+import { persistClientAuthToken } from "@/lib/auth";
 import type { LoginError, LoginResponse } from "@/types/auth";
 import { extractUsernameFromToken } from "@/lib/auth";
 
@@ -70,13 +70,6 @@ export default function LoginPage() {
     }
   };
 
-  const handleLogout = async () => {
-    clearClientAuthToken();
-    await fetch("/api/login", { method: "DELETE" });
-    setSuccess(null);
-    setError("已退出登录，如需访问请重新登录。");
-  };
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 px-4">
       <div className="w-full max-w-3xl">
@@ -86,9 +79,6 @@ export default function LoginPage() {
             受保护的交易控制台
           </div>
           <h1 className="mt-4 text-3xl font-semibold tracking-tight">登录 Funding Rate Trader</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            输入预设的用户名和密码以获取访问令牌（JWT）。失败三次将锁定 1 小时。
-          </p>
         </div>
 
         <Card className="shadow-lg">
@@ -140,35 +130,14 @@ export default function LoginPage() {
                 </Alert>
               ) : null}
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-start">
                 <Button type="submit" disabled={loading} className="gap-2">
                   <LogIn className="h-4 w-4" />
                   {loading ? "登录中..." : "登录"}
                 </Button>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="text-xs font-medium text-muted-foreground hover:text-foreground"
-                >
-                  清除令牌
-                </button>
               </div>
             </form>
 
-            <div className="mt-6 grid gap-3 rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">
-              <div className="flex items-center gap-2 font-medium text-foreground">
-                <Timer className="h-4 w-4" />
-                登录说明
-              </div>
-              <ul className="list-disc space-y-1 pl-5">
-                <li>凭证存储在 Cookie 和本地存储中，浏览器会自动携带访问后端。</li>
-                <li>忘记密码请更新后端 `.env` 中的 `AUTH_USERS` 配置。</li>
-                <li>连续 3 次失败将锁定 1 小时，请确认输入无误。</li>
-              </ul>
-              <p className="text-xs">
-                Cookie 名称：<code className="rounded bg-muted px-1">{AUTH_COOKIE_NAME}</code>
-              </p>
-            </div>
           </CardContent>
         </Card>
       </div>

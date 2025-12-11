@@ -570,6 +570,8 @@ export function PerpTable({
       })),
     [coinGeckoErrors],
   );
+  const isPriceDataLoading =
+    coinGeckoSymbols.length > 0 && coinGeckoSnapshots.size === 0;
   const [historyViewport, setHistoryViewport] = useState<[number, number] | null>(
     null,
   );
@@ -1388,6 +1390,7 @@ export function PerpTable({
                     leftSourceLabel={leftSource.label}
                     rightSourceLabel={rightSource.label}
                     onHistoryClick={handleHistoryClick}
+                    loadingPrices={isPriceDataLoading}
                   />
                 ))
               )}

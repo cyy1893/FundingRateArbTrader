@@ -46,6 +46,7 @@ type PerpTableRowProps = {
   onHistoryClick: (row: MarketRow) => void;
   leftSourceLabel: string;
   rightSourceLabel: string;
+  loadingPrices?: boolean;
 };
 
 const ARBITRAGE_COLOR_WINDOW_HOURS = 8;
@@ -67,7 +68,23 @@ function getFundingBadgeClass(rate: number): string {
   return "border-[#6ee7b7] bg-[#6ee7b71a] text-[#047857]";
 }
 
-function renderPriceChange(value: number | null) {
+function PriceSkeleton({ width = "w-16" }: { width?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-block h-4 animate-pulse rounded bg-muted",
+        width,
+      )}
+      aria-hidden="true"
+    />
+  );
+}
+
+function renderPriceChange(value: number | null, isLoading?: boolean) {
+  if (isLoading || value === null || typeof value === "undefined") {
+    return <PriceSkeleton width="w-14" />;
+  }
+
   if (typeof value === "number" && Number.isFinite(value)) {
     if (value > 0) {
       return (
@@ -119,6 +136,7 @@ function PerpTableRowComponent({
   onHistoryClick,
   leftSourceLabel,
   rightSourceLabel,
+  loadingPrices = false,
 }: PerpTableRowProps) {
   const leftHourly =
     liveFunding.left[row.leftSymbol] ?? row.fundingRate;
@@ -195,8 +213,12 @@ function PerpTableRowComponent({
   return (
     <TableRow key={row.symbol} className="hover:bg-muted/40">
       <TableCell className="py-3 text-sm font-semibold text-foreground min-w-[190px]">
-        {coingeckoUrl ? (
-          <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5">
+          {loadingPrices ? (
+            <div className="flex h-7 w-7 items-center justify-center rounded-full border border-border/30 bg-muted/60">
+              <span className="sr-only">加载中</span>
+            </div>
+          ) : coingeckoUrl ? (
             <a
               href={coingeckoUrl}
               target="_blank"
@@ -216,56 +238,44 @@ function PerpTableRowComponent({
                 </span>
               )}
             </a>
-            <div className="flex flex-col overflow-hidden">
-              <a
-                href={coingeckoUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="truncate text-sm font-semibold text-foreground transition hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                {row.displayName}
-              </a>
-              <span className="truncate text-[11px] uppercase text-muted-foreground">
-                {row.symbol}
-              </span>
+          ) : row.iconUrl ? (
+            <img
+              src={row.iconUrl}
+              alt={`${row.displayName} 图标`}
+              className="h-7 w-7 flex-shrink-0 rounded-full border border-border/30 bg-background object-contain"
+              loading="lazy"
+            />
+          ) : (
+            <div className="flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-muted text-[10px] font-medium uppercase text-muted-foreground">
+              {row.symbol.slice(0, 3)}
             </div>
+          )}
+          <div className="flex flex-col overflow-hidden">
+            <a
+              href={coingeckoUrl ?? undefined}
+              target={coingeckoUrl ? "_blank" : undefined}
+              rel={coingeckoUrl ? "noreferrer" : undefined}
+              className="truncate text-sm font-semibold text-foreground transition hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
+              {row.displayName}
+            </a>
+            <span className="truncate text-[11px] uppercase text-muted-foreground">
+              {row.symbol}
+            </span>
           </div>
-        ) : (
-          <div className="flex items-center gap-2.5">
-            {row.iconUrl ? (
-              <img
-                src={row.iconUrl}
-                alt={`${row.displayName} 图标`}
-                className="h-7 w-7 flex-shrink-0 rounded-full border border-border/30 bg-background object-contain"
-                loading="lazy"
-              />
-            ) : (
-              <div className="flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-muted text-[10px] font-medium uppercase text-muted-foreground">
-                {row.symbol.slice(0, 3)}
-              </div>
-            )}
-            <div className="flex flex-col overflow-hidden">
-              <span className="truncate text-sm font-semibold text-foreground">
-                {row.displayName}
-              </span>
-              <span className="truncate text-[11px] uppercase text-muted-foreground">
-                {row.symbol}
-              </span>
-            </div>
-          </div>
-        )}
+        </div>
       </TableCell>
       <TableCell className="font-medium tabular-nums text-sm">
-        {formatPrice(row.markPrice)}
+        {loadingPrices ? <PriceSkeleton width="w-20" /> : formatPrice(row.markPrice)}
       </TableCell>
       <TableCell className="text-xs font-medium">
-        {renderPriceChange(row.priceChange1h)}
+        {renderPriceChange(row.priceChange1h, loadingPrices)}
       </TableCell>
       <TableCell className="text-xs font-medium">
-        {renderPriceChange(row.priceChange24h)}
+        {renderPriceChange(row.priceChange24h, loadingPrices)}
       </TableCell>
       <TableCell className="text-xs font-medium">
-        {renderPriceChange(row.priceChange7d)}
+        {renderPriceChange(row.priceChange7d, loadingPrices)}
       </TableCell>
       <TableCell className="font-medium tabular-nums text-sm">
         {row.maxLeverage ?? "—"}
