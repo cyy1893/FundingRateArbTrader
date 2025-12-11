@@ -50,6 +50,7 @@ import {
 import { formatVolume } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { useArbitrageSidebar } from "@/components/arbitrage-sidebar";
+import { persistComparisonSelection } from "@/lib/comparison-selection";
 import type { MarketRow } from "@/types/market";
 import type { FundingHistoryPoint, LiveFundingResponse } from "@/types/funding";
 import type { SourceConfig } from "@/lib/external";
@@ -675,6 +676,18 @@ export function PerpTable({
     setSearch(value);
     setPage(1);
   };
+
+  useEffect(() => {
+    persistComparisonSelection({
+      primarySourceId: leftSource.id,
+      secondarySourceId: rightSource.id,
+      volumeThreshold,
+      symbols: filteredRows.map((row) => ({
+        symbol: row.symbol,
+        displayName: row.displayName ?? row.symbol,
+      })),
+    });
+  }, [filteredRows, leftSource.id, rightSource.id, volumeThreshold]);
 
   const handleHistoryClick = useCallback(
     (row: MarketRow) => {

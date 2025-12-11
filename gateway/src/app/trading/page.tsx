@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { TrendingUp } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -28,6 +29,9 @@ import type {
 import { MonitoringConfigCard, OrderBookCard } from "@/components/order-depth-cards";
 import type { OrderBookSubscription } from "@/hooks/use-order-book-websocket";
 import { getClientAuthToken } from "@/lib/auth";
+import { readComparisonSelection, type ResolvedComparisonSelection } from "@/lib/comparison-selection";
+import { DEFAULT_LEFT_SOURCE, DEFAULT_RIGHT_SOURCE, normalizeSource } from "@/lib/external";
+import { DEFAULT_VOLUME_THRESHOLD } from "@/lib/volume-filter";
 
 const numberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 4,
@@ -74,12 +78,20 @@ async function fetchBalances(): Promise<BalancesResponse> {
   return response.json();
 }
 
-export default function TradingPage() {
+function TradingPageContent() {
+  const searchParams = useSearchParams();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [normalized, setNormalized] = useState<UnifiedWalletData | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [subscription, setSubscription] = useState<OrderBookSubscription | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [comparisonSelection, setComparisonSelection] = useState<ResolvedComparisonSelection>({
+    primarySource: DEFAULT_LEFT_SOURCE,
+    secondarySource: DEFAULT_RIGHT_SOURCE,
+    volumeThreshold: DEFAULT_VOLUME_THRESHOLD,
+    symbols: [],
+    updatedAt: null,
+  });
   const showMonitoringArea = showConfig || subscription !== null;
 
   useEffect(() => {
@@ -134,6 +146,31 @@ export default function TradingPage() {
     };
   }, [isAuthenticated]);
 
+  useEffect(() => {
+    const stored = readComparisonSelection();
+    const primarySource = normalizeSource(
+      searchParams?.get("sourceA"),
+      stored?.primarySource ?? DEFAULT_LEFT_SOURCE,
+    );
+    const secondarySource = normalizeSource(
+      searchParams?.get("sourceB"),
+      stored?.secondarySource ?? DEFAULT_RIGHT_SOURCE,
+    );
+    const symbols =
+      stored &&
+      stored.primarySource.id === primarySource.id &&
+      stored.secondarySource.id === secondarySource.id
+        ? stored.symbols
+        : [];
+    setComparisonSelection({
+      primarySource,
+      secondarySource,
+      volumeThreshold: stored?.volumeThreshold ?? DEFAULT_VOLUME_THRESHOLD,
+      symbols,
+      updatedAt: symbols.length > 0 ? stored?.updatedAt ?? null : null,
+    });
+  }, [searchParams]);
+
   const handleStartMonitoring = useCallback((sub: OrderBookSubscription) => {
     setSubscription(sub);
   }, []);
@@ -142,6 +179,10 @@ export default function TradingPage() {
     setSubscription(null);
     setShowConfig(true);
   };
+
+  const availableSymbols = comparisonSelection.symbols;
+  const selectedExchangesLabel = `${comparisonSelection.primarySource.label} / ${comparisonSelection.secondarySource.label}`;
+  const hasComparisonSymbols = availableSymbols.length > 0;
 
   return (
     <div className="min-h-screen bg-muted/20 py-6">
@@ -159,7 +200,7 @@ export default function TradingPage() {
                     交易
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    查看 Drift / Lighter 账户的最新余额和持仓。
+                    查看账户资产，并基于 {selectedExchangesLabel} 的费率比较准备套利。
                   </CardDescription>
                 </div>
                 <button
@@ -188,7 +229,12 @@ export default function TradingPage() {
                         <div>
                           <h3 className="text-sm font-semibold">套利交易设置</h3>
                           <p className="text-xs text-muted-foreground">
-                            配置套利参数并实时查看 Drift / Lighter 订单簿。
+                            配置套利参数并实时查看 {selectedExchangesLabel} 订单簿。
+                          </p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            币种来源：{hasComparisonSymbols
+                              ? `费率比较筛选的 ${availableSymbols.length} 个币种`
+                              : "请先在费率比较页筛选可用币种"}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -213,6 +259,9 @@ export default function TradingPage() {
                         <MonitoringConfigCard
                           onClose={() => setShowConfig(false)}
                           onStartMonitoring={handleStartMonitoring}
+                          availableSymbols={availableSymbols}
+                          primaryLabel={comparisonSelection.primarySource.label}
+                          secondaryLabel={comparisonSelection.secondarySource.label}
                         />
                       )}
                     </div>
@@ -240,6 +289,26 @@ export default function TradingPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function TradingPageFallback() {
+  return (
+    <div className="min-h-screen bg-muted/20 py-6">
+      <div className="container mx-auto max-w-[1900px] px-4">
+        <div className="rounded-lg border bg-card/60 p-6 text-sm text-muted-foreground">
+          正在加载交易页面…
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function TradingPage() {
+  return (
+    <Suspense fallback={<TradingPageFallback />}>
+      <TradingPageContent />
+    </Suspense>
   );
 }
 

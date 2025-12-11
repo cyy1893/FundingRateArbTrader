@@ -16,9 +16,14 @@ import {
 import { OrderBookSubscription, useOrderBookWebSocket } from "@/hooks/use-order-book-websocket";
 import { OrderBookDisplay } from "@/components/order-book-display";
 
+type SymbolOption = { symbol: string; displayName: string };
+
 type MonitoringConfigCardProps = {
     onClose: () => void;
     onStartMonitoring: (subscription: OrderBookSubscription) => void;
+    availableSymbols: SymbolOption[];
+    primaryLabel: string;
+    secondaryLabel: string;
 };
 
 type OrderBookCardProps = {
@@ -26,18 +31,35 @@ type OrderBookCardProps = {
     onReset: () => void;
 };
 
-const SYMBOLS = ["BTC", "ETH", "SOL", "HYPE", "XRP", "FARTCOIN", "SUI", "WIF", "APT", "PUMP"];
 const DEFAULT_DEPTH = 10;
 const DEFAULT_THROTTLE_MS = 500;
 const DEFAULT_DRIFT_POLL_MS = 1000;
 
-export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringConfigCardProps) {
+export function MonitoringConfigCard({
+    onClose,
+    onStartMonitoring,
+    availableSymbols,
+    primaryLabel,
+    secondaryLabel,
+}: MonitoringConfigCardProps) {
     const [symbol, setSymbol] = useState("");
     const [driftLeverage, setDriftLeverage] = useState("1");
     const [lighterLeverage, setLighterLeverage] = useState("1");
     const [driftDirection, setDriftDirection] = useState<"long" | "short">("long");
     const [lighterDirection, setLighterDirection] = useState<"long" | "short">("long");
     const [notionalValue, setNotionalValue] = useState("");
+    const hasSymbols = availableSymbols.length > 0;
+
+    useEffect(() => {
+        if (!hasSymbols) {
+            setSymbol("");
+            return;
+        }
+        const exists = availableSymbols.some((option) => option.symbol === symbol);
+        if (!exists) {
+            setSymbol(availableSymbols[0].symbol);
+        }
+    }, [availableSymbols, hasSymbols, symbol]);
 
     // Auto-start monitoring when configuration changes
     useEffect(() => {
@@ -64,7 +86,7 @@ export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringC
                 <div>
                     <p className="text-sm font-semibold">套利交易设置</p>
                     <p className="text-xs text-muted-foreground">
-                        配置 Drift 和 Lighter 的套利参数
+                        配置 {primaryLabel} 和 {secondaryLabel} 的套利参数
                     </p>
                 </div>
                 <Button variant="ghost" size="icon" onClick={onClose}>
@@ -76,18 +98,23 @@ export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringC
                 <div className="space-y-2">
                     <h3 className="text-sm font-semibold">步骤 1: 选择币种</h3>
                     <Label htmlFor="symbol">币种</Label>
-                    <Select value={symbol} onValueChange={setSymbol}>
+                    <Select value={symbol} onValueChange={setSymbol} disabled={!hasSymbols}>
                         <SelectTrigger id="symbol">
                             <SelectValue placeholder="选择币种" />
                         </SelectTrigger>
                         <SelectContent>
-                            {SYMBOLS.map((sym) => (
-                                <SelectItem key={sym} value={sym}>
-                                    {sym}
+                            {availableSymbols.map((option) => (
+                                <SelectItem key={option.symbol} value={option.symbol}>
+                                    {option.displayName} ({option.symbol})
                                 </SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
+                    {!hasSymbols ? (
+                        <p className="text-xs text-muted-foreground">
+                            请先在费率比较页选择交易所并筛选币种后再开始套利。
+                        </p>
+                    ) : null}
                 </div>
 
                 {/* Step 2: Leverage and Direction */}
