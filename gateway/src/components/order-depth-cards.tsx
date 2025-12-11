@@ -62,9 +62,9 @@ export function MonitoringConfigCard({ onClose, onStartMonitoring }: MonitoringC
         <div className="rounded-xl border border-dashed bg-background/60 p-4 shadow-sm">
             <div className="flex items-start justify-between gap-4 pb-3">
                 <div>
-                    <p className="text-sm font-semibold">订单深度监控</p>
+                    <p className="text-sm font-semibold">套利交易设置</p>
                     <p className="text-xs text-muted-foreground">
-                        配置 Drift 和 Lighter 的订单簿监控参数
+                        配置 Drift 和 Lighter 的套利参数
                     </p>
                 </div>
                 <Button variant="ghost" size="icon" onClick={onClose}>

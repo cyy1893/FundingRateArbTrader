@@ -167,7 +167,7 @@ export default function TradingPage() {
                   className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
                 >
                   <TrendingUp className="h-4 w-4" />
-                  {showConfig ? "隐藏深度监控" : "监控订单深度"}
+                  {showConfig ? "隐藏套利设置" : "开始套利交易"}
                 </button>
               </div>
             </CardHeader>
@@ -186,9 +186,9 @@ export default function TradingPage() {
                     <div className="rounded-xl border bg-card/40 p-4 space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
-                          <h3 className="text-sm font-semibold">订单深度监控</h3>
+                          <h3 className="text-sm font-semibold">套利交易设置</h3>
                           <p className="text-xs text-muted-foreground">
-                            选择币种并实时查看 Drift / Lighter 订单簿。
+                            配置套利参数并实时查看 Drift / Lighter 订单簿。
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -203,7 +203,7 @@ export default function TradingPage() {
                               onClick={handleReset}
                               className="rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted"
                             >
-                              停止监控
+                              停止套利
                             </button>
                           )}
                         </div>

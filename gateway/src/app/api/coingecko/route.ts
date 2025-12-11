@@ -19,7 +19,7 @@ type CoinGeckoCacheEntry = {
   errors: Array<{ source: string; message: string }>;
 };
 
-const COINGECKO_CACHE_TTL_MS = 60 * 1000;
+const COINGECKO_CACHE_TTL_MS = 5 * 60 * 1000;
 const COINGECKO_MARKETS_URL =
   "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&sparkline=false&price_change_percentage=1h,24h,7d";
 const COINGECKO_API_KEY = "CG-Bk4Hk2fWnGqa372fums79HvT";
