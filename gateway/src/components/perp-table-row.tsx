@@ -123,6 +123,9 @@ function buildMarketUrl(provider: SourceProvider, symbol: string | null | undefi
   if (provider === "lighter") {
     return `https://app.lighter.xyz/trade/${encodeURIComponent(symbol)}`;
   }
+  if (provider === "grvt") {
+    return `https://app.grvt.io/trade/${encodeURIComponent(symbol)}`;
+  }
   if (provider === "hyperliquid") {
     return `https://app.hyperliquid.xyz/trade/${encodeURIComponent(symbol)}`;
   }

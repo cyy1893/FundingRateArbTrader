@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     lighter_nonce_manager: Literal["optimistic", "api"] = Field(
         "optimistic", description="Nonce manager to use when signing Lighter requests"
     )
+    grvt_env: Literal["prod", "testnet", "staging", "dev"] = Field(
+        "prod", description="Target GRVT environment for public market data"
+    )
     auth_users: str = Field(
         ...,
         description="Comma-separated username:password pairs for local auth (e.g. alice:pass,bob:pass)",

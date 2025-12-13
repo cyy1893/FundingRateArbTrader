@@ -26,6 +26,7 @@ class MarketDataService:
         self._client = httpx.AsyncClient(timeout=10.0)
         self._drift_leverage_map: dict[str, float] | None = None
         self._lighter_leverage_map: dict[str, float] | None = None
+        self._grvt_market_data_base, _ = self._build_grvt_endpoints(settings.grvt_env)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -227,6 +228,85 @@ class MarketDataService:
 
         return ExchangeSnapshot(markets=list(symbol_to_market.values()), errors=errors)
 
+    async def _fetch_grvt_markets(self) -> ExchangeSnapshot:
+        errors: list[ApiError] = []
+        instruments: list[dict[str, Any]] = []
+        try:
+            resp = await self._client.post(
+                f"{self._grvt_market_data_base}/full/v1/all_instruments",
+                json={"is_active": True},
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            instruments = payload.get("result", []) or []
+        except Exception as exc:  # noqa: BLE001
+            errors.append(ApiError(source="GRVT API", message=str(exc)))
+            return ExchangeSnapshot(markets=[], errors=errors)
+
+        # Filter perpetual instruments
+        perp_instruments = [inst for inst in instruments if isinstance(inst, dict) and inst.get("kind") == "PERPETUAL"]
+        tickers: dict[str, dict[str, Any]] = {}
+
+        async def fetch_ticker(instrument: str) -> None:
+            try:
+                resp = await self._client.post(
+                    f"{self._grvt_market_data_base}/full/v1/ticker",
+                    json={"instrument": instrument},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                result = data.get("result") if isinstance(data, dict) else None
+                if isinstance(result, dict):
+                    tickers[instrument] = result
+            except Exception:
+                # ignore individual failures; we will still return partial data
+                return
+
+        # Limit concurrency to avoid hammering the API
+        semaphore = asyncio.Semaphore(10)
+
+        async def bounded_fetch(instr: str) -> None:
+            async with semaphore:
+                await fetch_ticker(instr)
+
+        await asyncio.gather(*(bounded_fetch(inst["instrument"]) for inst in perp_instruments if "instrument" in inst))
+
+        markets: list[ExchangeMarketMetrics] = []
+        for inst in perp_instruments:
+            symbol = str(inst.get("instrument", "")).replace("_Perp", "").replace("_PERP", "")
+            base_symbol = str(inst.get("base", "")).upper()
+            ticker = tickers.get(inst.get("instrument", ""))
+            mark_price = _parse_float(ticker.get("mark_price")) if ticker else None
+            funding_rate_pct = _parse_float(ticker.get("funding_rate_8h_curr") or ticker.get("funding_rate"))
+            interval_hours = _parse_float(inst.get("funding_interval_hours")) or 8.0
+            funding_rate_hourly = (
+                (funding_rate_pct / 100.0) / max(interval_hours, 1.0) if funding_rate_pct is not None else None
+            )
+            buy_q = _parse_float(ticker.get("buy_volume_24h_q")) if ticker else None
+            sell_q = _parse_float(ticker.get("sell_volume_24h_q")) if ticker else None
+            volume_q = (buy_q or 0) + (sell_q or 0)
+            open_interest = _parse_float(ticker.get("open_interest")) if ticker else None
+
+            markets.append(
+                ExchangeMarketMetrics(
+                    base_symbol=base_symbol or symbol,
+                    symbol=f"{base_symbol}-PERP" if base_symbol else symbol,
+                    display_name=base_symbol or symbol,
+                    mark_price=mark_price,
+                    price_change_1h=None,
+                    price_change_24h=None,
+                    price_change_7d=None,
+                    max_leverage=None,
+                    funding_rate_hourly=funding_rate_hourly,
+                    funding_period_hours=interval_hours,
+                    day_notional_volume=volume_q if volume_q > 0 else None,
+                    open_interest=open_interest,
+                    volume_usd=volume_q if volume_q > 0 else None,
+                )
+            )
+
+        return ExchangeSnapshot(markets=markets, errors=errors)
+
     async def fetch_exchange_snapshot(self, source: str) -> ExchangeSnapshot:
         provider = source.lower()
         if provider == "hyperliquid":
@@ -235,6 +315,8 @@ class MarketDataService:
             return await self._fetch_drift_markets()
         if provider == "lighter":
             return await self._fetch_lighter_markets()
+        if provider == "grvt":
+            return await self._fetch_grvt_markets()
         return ExchangeSnapshot(markets=[], errors=[ApiError(source=source, message="Unsupported provider")])
 
     async def get_perp_snapshot(self, primary: str, secondary: str) -> PerpSnapshot:
@@ -355,6 +437,25 @@ class MarketDataService:
             return leverage_map
         except Exception:  # noqa: BLE001
             return overrides
+
+    def _build_grvt_endpoints(self, env: str) -> tuple[str, str]:
+        env_lower = env.lower()
+        if env_lower == "prod":
+            base = "https://market-data.grvt.io"
+            trade_base = "https://trades.grvt.io"
+        elif env_lower == "testnet":
+            base = "https://market-data.testnet.grvt.io"
+            trade_base = "https://trades.testnet.grvt.io"
+        elif env_lower == "staging":
+            base = "https://market-data.staging.gravitymarkets.io"
+            trade_base = "https://trades.staging.gravitymarkets.io"
+        elif env_lower == "dev":
+            base = "https://market-data.dev.gravitymarkets.io"
+            trade_base = "https://trades.dev.gravitymarkets.io"
+        else:
+            base = "https://market-data.grvt.io"
+            trade_base = "https://trades.grvt.io"
+        return base, trade_base
 
 
 def _parse_drift_initial_leverage(initial: str) -> float | None:

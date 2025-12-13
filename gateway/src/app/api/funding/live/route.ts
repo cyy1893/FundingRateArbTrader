@@ -13,6 +13,7 @@ import {
   normalizeSource,
   type SourceConfig,
 } from "@/lib/external";
+import { fetchGrvtFundingRates } from "@/lib/grvt";
 
 type HyperliquidFundingResponse = [
   {
@@ -210,6 +211,9 @@ async function fetchFundingRatesForSource(
   }
   if (source.provider === "lighter") {
     return fetchLighterFundingRates(symbols);
+  }
+  if (source.provider === "grvt") {
+    return fetchGrvtFundingRates(symbols);
   }
   return {};
 }

@@ -1,6 +1,6 @@
-export type SourceId = "hyperliquid" | "drift" | "lighter";
+export type SourceId = "hyperliquid" | "drift" | "lighter" | "grvt";
 
-export type SourceProvider = "hyperliquid" | "drift" | "lighter";
+export type SourceProvider = "hyperliquid" | "drift" | "lighter" | "grvt";
 
 export type SourceConfig = {
   id: SourceId;
@@ -23,6 +23,11 @@ export const SOURCE_OPTIONS: SourceConfig[] = [
     id: "lighter",
     label: "Lighter",
     provider: "lighter",
+  },
+  {
+    id: "grvt",
+    label: "GRVT",
+    provider: "grvt",
   },
 ];
 
