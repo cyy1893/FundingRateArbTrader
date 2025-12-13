@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { OrderBookSnapshot, VenueOrderBook, OrderBookLevel, WebSocketStatus } from "@/hooks/use-order-book-websocket";
 
@@ -11,28 +12,34 @@ type Props = {
   hasLighter: boolean;
 };
 
-const formatPrice = (price: number) => price.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+const formatPrice = (price: number) => price.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const formatShort = (val: number) => {
   if (Math.abs(val) >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M`;
   if (Math.abs(val) >= 1_000) return `${(val / 1_000).toFixed(1)}K`;
   return val.toFixed(2);
 };
+type DisplayMode = "base" | "usd";
+const formatValue = (val: number, mode: DisplayMode) => {
+  const formatted = formatShort(val);
+  return mode === "usd" ? `$${formatted}` : formatted;
+};
 
 const askColors = {
-  bar: "bg-[#f9caca]",
-  pill: "bg-[#f9dede]",
-  text: "text-[#e55353]",
+  // Total is lighter, size is stronger
+  totalBg: "rgba(209, 58, 58, 0.12)",
+  sizeBg: "rgba(209, 58, 58, 0.35)",
+  text: "text-[#d13a3a]",
 };
 
 const bidColors = {
-  bar: "bg-[#bfe8c7]",
-  pill: "bg-[#d7f4dc]",
-  text: "text-[#159947]",
+  totalBg: "rgba(15, 140, 68, 0.12)",
+  sizeBg: "rgba(15, 140, 68, 0.35)",
+  text: "text-[#0f8c44]",
 };
 
 function LoadingState({ message }: { message: string }) {
   return (
-    <div className="h-96 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+    <div className="h-72 flex flex-col items-center justify-center gap-3 text-muted-foreground">
       <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
       <p className="text-sm text-foreground/80">{message}</p>
     </div>
@@ -42,34 +49,52 @@ function LoadingState({ message }: { message: string }) {
 function DepthRow({
   level,
   maxTotal,
+  maxSize,
   tone,
-  align,
+  displayMode,
 }: {
   level: OrderBookLevel;
   maxTotal: number;
+  maxSize: number;
   tone: "ask" | "bid";
-  align: "left" | "right";
+  displayMode: DisplayMode;
 }) {
-  const widthPct = maxTotal > 0 ? Math.min(100, (level.total / maxTotal) * 100) : 0;
+  const safeVal = (val: unknown) => {
+    const num = Number(val);
+    return Number.isFinite(num) && num > 0 ? num : 0;
+  };
+
+  const totalVal = safeVal(level.total);
+  const sizeVal = safeVal(level.size);
+
+  const totalWidthPct = Math.min(100, (totalVal / maxTotal) * 100);
+  // Size bar scales both within the row (size vs total) and against the global max size, and never exceeds the total bar.
+  const sizeWidthPct = Math.min(
+    totalWidthPct,
+    (sizeVal / maxSize) * 100,
+    totalVal > 0 ? totalWidthPct * Math.min(1, sizeVal / totalVal) : 0,
+  );
   const palette = tone === "ask" ? askColors : bidColors;
-  const justify = align === "right" ? "justify-end" : "justify-start";
-  const barPos = align === "right" ? "right-0" : "left-0";
 
   return (
-    <div className="relative overflow-hidden rounded-sm">
+    <div className="relative overflow-hidden bg-white">
       <div
-        className={`${palette.bar} absolute inset-y-1 ${barPos} rounded ${tone === "ask" ? "rounded-l" : "rounded-r"}`}
-        style={{ width: `${widthPct}%` }}
+        className="absolute inset-y-0 left-0"
+        style={{ width: `${totalWidthPct}%`, backgroundColor: palette.totalBg }}
       />
-      <div className={`relative z-10 flex ${justify} items-center gap-4 px-2 py-1.5 text-sm font-semibold`}>
+      <div
+        className="absolute inset-y-0 left-0"
+        style={{ width: `${sizeWidthPct}%`, backgroundColor: palette.sizeBg }}
+      />
+      <div className="relative z-10 flex items-center gap-3 px-2 py-2 text-sm font-semibold">
         <span className={`${palette.text} min-w-[80px] text-right font-semibold`}>
           {formatPrice(level.price)}
         </span>
-        <span className={`${palette.pill} text-foreground/90 min-w-[70px] rounded px-2 py-1 text-center font-semibold`}>
-          {formatShort(level.size)}
+        <span className="text-foreground/80 min-w-[70px] text-right font-semibold">
+          {formatValue(level.size, displayMode)}
         </span>
         <span className="text-foreground/80 min-w-[70px] text-right font-semibold">
-          {formatShort(level.total)}
+          {formatValue(level.total, displayMode)}
         </span>
       </div>
     </div>
@@ -81,11 +106,13 @@ function VenueOrderBookTable({
   status,
   hasSnapshot,
   venueReady,
+  displayMode,
 }: {
   venue: VenueOrderBook | undefined;
   status: WebSocketStatus;
   hasSnapshot: boolean;
   venueReady: boolean;
+  displayMode: DisplayMode;
 }) {
   const showLoading = (!hasSnapshot || !venueReady) && status !== "error";
   if (showLoading) {
@@ -94,83 +121,114 @@ function VenueOrderBookTable({
   }
 
   if (!venue) {
-    return <div className="h-96" />;
+    return <div className="h-72" />;
   }
 
-  const asks = [...venue.asks.levels].reverse().slice(0, 14);
-  const bids = venue.bids.levels.slice(0, 14);
-  const maxAskTotal = asks.reduce((m, l) => Math.max(m, l.total), 0);
-  const maxBidTotal = bids.reduce((m, l) => Math.max(m, l.total), 0);
+  const asks = [...venue.asks.levels].reverse().slice(0, 10);
+  const bids = venue.bids.levels.slice(0, 10);
+
+  const toUsdLevels = (levels: OrderBookLevel[]): OrderBookLevel[] => {
+    let cumulativeUsd = 0;
+    return levels.map((lvl) => {
+      const price = Number(lvl.price);
+      const baseSize = Number(lvl.size);
+      const sizeUsd = price * baseSize;
+      cumulativeUsd += sizeUsd;
+      return {
+        price,
+        size: sizeUsd,
+        total: cumulativeUsd,
+      };
+    });
+  };
+
+  const askUsdLevels = toUsdLevels(asks);
+  const bidUsdLevels = toUsdLevels(bids);
+  const askLevels = displayMode === "usd" ? askUsdLevels : asks;
+  const bidLevels = displayMode === "usd" ? bidUsdLevels : bids;
+
+  const safeMax = (levels: OrderBookLevel[], key: "total" | "size") => {
+    const maxVal = levels.reduce((m, l) => {
+      const val = Number(l[key]);
+      return Number.isFinite(val) ? Math.max(m, val) : m;
+    }, 0);
+    return maxVal > 0 ? maxVal : 1;
+  };
+
+  const maxAskTotal = safeMax(askLevels, "total");
+  const maxBidTotal = safeMax(bidLevels, "total");
+  const maxAskSize = safeMax(askLevels, "size");
+  const maxBidSize = safeMax(bidLevels, "size");
+
+  const crossMaxTotal = Math.max(maxAskTotal, maxBidTotal, 1);
+  const crossMaxSize = Math.max(maxAskSize, maxBidSize, 1);
 
   const bestBid = bids[0]?.price;
-  const bestAsk = asks[asks.length - 1]?.price ?? asks[0]?.price;
+  const bestAsk = askLevels[askLevels.length - 1]?.price ?? asks[0]?.price;
   const spread = bestAsk && bestBid ? bestAsk - bestBid : null;
   const mid = bestAsk && bestBid ? (bestAsk + bestBid) / 2 : null;
   const spreadPct = spread && mid ? (spread / mid) * 100 : null;
+  const sizeHeader = displayMode === "usd" ? "数量 (USD)" : "数量";
+  const totalHeader = displayMode === "usd" ? "总计 (USD)" : "总计";
 
   return (
-    <div className="rounded-xl border border-[#e5dcff] bg-[#f8f5ff] shadow-sm">
-      <div className="border-b border-[#e5dcff] px-3 py-3">
-        <div className="flex items-center justify-between text-sm font-semibold text-[#2f2a5a]">
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 px-3 py-3">
+        <div className="flex items-center justify-between text-sm font-semibold text-slate-800">
           <span>Orderbook</span>
-          <span className="text-xs text-[#8c82c1]">USD</span>
+          <span className="text-xs text-slate-500">{displayMode === "usd" ? "USD" : "Base"}</span>
         </div>
       </div>
 
-      <div className="px-3 pb-3">
-        <div className="grid grid-cols-3 gap-4 py-2 text-xs font-semibold text-[#8c82c1] uppercase tracking-wide">
-          <span className="text-left">Price</span>
-          <span className="text-center">Size (USD)</span>
-          <span className="text-right">Total (USD)</span>
+      <div className="px-3 pb-3 pt-2">
+        <div className="grid grid-cols-3 gap-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+          <span className="text-left">价格</span>
+          <span className="text-center">{sizeHeader}</span>
+          <span className="text-right">{totalHeader}</span>
         </div>
 
-        <div className="space-y-1">
+        <div className="overflow-hidden border border-slate-200">
           {asks.length === 0 ? (
-            <div className="h-24 flex items-center justify-center text-muted-foreground text-sm border rounded-md bg-white/70">
+            <div className="h-24 flex items-center justify-center text-muted-foreground text-sm bg-slate-50">
               暂无卖单
             </div>
           ) : (
-            asks.map((level, idx) => (
+            <div className="divide-y divide-slate-100">
+              {askLevels.map((level, idx) => (
               <DepthRow
                 key={`ask-${idx}`}
                 level={level}
-                maxTotal={maxAskTotal}
+                maxTotal={crossMaxTotal}
+                maxSize={crossMaxSize}
                 tone="ask"
-                align="right"
+                displayMode={displayMode}
               />
-            ))
+            ))}
+          </div>
           )}
-        </div>
 
-        <div className="my-3 border-t border-[#e5dcff] pt-3 pb-2 text-center text-2xl font-bold text-[#159947]">
-          {bestBid ? formatPrice(bestBid) : "--"}
-        </div>
+          <div className="flex items-center justify-between bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+            <span>{spread ? `点差 ${spread.toFixed(1)}` : "点差 --"}</span>
+            <span>{spreadPct ? `${spreadPct.toFixed(3)}%` : "--"}</span>
+          </div>
 
-        <div className="space-y-1">
           {bids.length === 0 ? (
-            <div className="h-24 flex items-center justify-center text-muted-foreground text-sm border rounded-md bg-white/70">
+            <div className="h-24 flex items-center justify-center text-muted-foreground text-sm bg-slate-50">
               暂无买单
             </div>
           ) : (
-            bids.map((level, idx) => (
+            <div className="divide-y divide-slate-100">
+              {bidLevels.map((level, idx) => (
               <DepthRow
                 key={`bid-${idx}`}
                 level={level}
-                maxTotal={maxBidTotal}
+                maxTotal={crossMaxTotal}
+                maxSize={crossMaxSize}
                 tone="bid"
-                align="left"
+                displayMode={displayMode}
               />
-            ))
-          )}
-        </div>
-
-        <div className="mt-3 rounded-md border border-[#e5dcff] bg-white/80 px-3 py-2 text-xs font-semibold text-[#6f669f]">
-          {spread ? (
-            <span>
-              Spread: ${spread.toFixed(0)} ({spreadPct ? spreadPct.toFixed(3) : "0.000"}%)
-            </span>
-          ) : (
-            <span>Spread: --</span>
+            ))}
+          </div>
           )}
         </div>
       </div>
@@ -179,8 +237,20 @@ function VenueOrderBookTable({
 }
 
 export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasDrift, hasLighter }: Props) {
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("usd");
+  const toggleMode = () => setDisplayMode((m) => (m === "usd" ? "base" : "usd"));
+
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <>
+      <div className="flex items-center justify-end mb-2">
+        <button
+          onClick={toggleMode}
+          className="rounded-md border px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+        >
+          显示：{displayMode === "usd" ? "USD" : "原始数量"}
+        </button>
+      </div>
+      <div className="grid gap-6 lg:grid-cols-2">
       <Card className="border-none shadow-none bg-transparent">
         <CardHeader className="pb-2">
           <CardTitle className="text-lg text-[#2f2a5a]">Drift 订单簿</CardTitle>
@@ -191,6 +261,7 @@ export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasDrift, has
             status={status}
             hasSnapshot={hasSnapshot}
             venueReady={hasDrift}
+            displayMode={displayMode}
           />
         </CardContent>
       </Card>
@@ -205,9 +276,11 @@ export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasDrift, has
             status={status}
             hasSnapshot={hasSnapshot}
             venueReady={hasLighter}
+            displayMode={displayMode}
           />
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </>
   );
 }
