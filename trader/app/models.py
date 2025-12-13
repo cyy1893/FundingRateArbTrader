@@ -184,3 +184,61 @@ class OrderBookSubscription(BaseModel):
     depth: int = Field(10, ge=1, le=50, description="Number of price levels to include")
     throttle_ms: int = Field(500, ge=50, le=5000, description="Throttle interval in milliseconds for order book updates")
     drift_poll_ms: int = Field(1000, ge=200, le=5000, description="Poll interval for Drift order book HTTP snapshot")
+
+
+class ApiError(BaseModel):
+    source: str
+    message: str
+
+
+class ExchangeMarketMetrics(BaseModel):
+    base_symbol: str | None = None
+    symbol: str
+    display_name: str
+    mark_price: float | None = None
+    price_change_1h: float | None = None
+    price_change_24h: float | None = None
+    price_change_7d: float | None = None
+    max_leverage: float | None = None
+    funding_rate_hourly: float | None = None
+    funding_period_hours: float | None = None
+    day_notional_volume: float | None = None
+    open_interest: float | None = None
+    volume_usd: float | None = None
+
+
+class ExchangeSnapshot(BaseModel):
+    markets: list[ExchangeMarketMetrics]
+    errors: list[ApiError] = Field(default_factory=list)
+
+
+class MarketRow(BaseModel):
+    left_provider: str
+    right_provider: str
+    left_symbol: str
+    left_funding_period_hours: float | None = None
+    symbol: str | None = None
+    display_name: str | None = None
+    icon_url: str | None = None
+    coingecko_id: str | None = None
+    mark_price: float | None = None
+    price_change_1h: float | None = None
+    price_change_24h: float | None = None
+    price_change_7d: float | None = None
+    max_leverage: float | None = None
+    funding_rate: float | None = None
+    day_notional_volume: float | None = None
+    open_interest: float | None = None
+    volume_usd: float | None = None
+    right: dict | None = None
+
+
+class PerpSnapshot(BaseModel):
+    rows: list[MarketRow]
+    fetched_at: datetime
+    errors: list[ApiError] = Field(default_factory=list)
+
+
+class PerpSnapshotRequest(BaseModel):
+    primary_source: str
+    secondary_source: str

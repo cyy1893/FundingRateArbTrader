@@ -22,9 +22,12 @@ from app.models import (
     OrderBookSubscription,
     OrderEvent,
     VenueOrderBook,
+    PerpSnapshot,
+    PerpSnapshotRequest,
 )
 from app.services.drift_service import DriftService
 from app.services.lighter_service import LighterService
+from app.services.market_data_service import MarketDataService
 from app.utils.auth import AuthError, AuthManager, LockoutError, parse_users
 
 
@@ -37,6 +40,7 @@ settings = get_settings()
 event_broadcaster = EventBroadcaster()
 drift_service = DriftService(settings)
 lighter_service = LighterService(settings)
+market_data_service = MarketDataService(settings)
 auth_manager = AuthManager(
     users=parse_users([entry.strip() for entry in settings.auth_users.split(",") if entry.strip()]),
     secret=settings.auth_jwt_secret,
@@ -52,7 +56,7 @@ auth_scheme = HTTPBearer()
 async def lifespan(app: FastAPI):
     await asyncio.gather(drift_service.start(), lighter_service.start())
     yield
-    await asyncio.gather(drift_service.stop(), lighter_service.stop())
+    await asyncio.gather(drift_service.stop(), lighter_service.stop(), market_data_service.close())
 
 
 app = FastAPI(title="Funding Rate Arbitrage Trader", version="0.1.0", lifespan=lifespan)
@@ -68,6 +72,10 @@ def get_lighter_service() -> LighterService:
 
 def get_broadcaster() -> EventBroadcaster:
     return event_broadcaster
+
+
+def get_market_data_service() -> MarketDataService:
+    return market_data_service
 
 
 def get_auth_manager() -> AuthManager:
@@ -172,6 +180,17 @@ async def create_lighter_order(
         ).model_dump()
     )
     return response
+
+
+@app.post("/perp-snapshot", response_model=PerpSnapshot)
+async def perp_snapshot(
+    payload: PerpSnapshotRequest,
+    service: MarketDataService = Depends(get_market_data_service),
+) -> PerpSnapshot:
+    try:
+        return await service.get_perp_snapshot(payload.primary_source, payload.secondary_source)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 @app.post("/login", response_model=LoginResponse)

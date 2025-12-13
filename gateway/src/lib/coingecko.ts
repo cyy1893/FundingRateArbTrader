@@ -1,6 +1,3 @@
-import { SOURCE_OPTIONS } from "@/lib/external";
-import { fetchExchangeSnapshot } from "@/lib/markets";
-
 const HYPER_API = "https://api.hyperliquid.xyz/info";
 const COINGECKO_LIST_API =
   "https://api.coingecko.com/api/v3/coins/list?include_platform=false";
@@ -34,13 +31,13 @@ type CoinGeckoMarketMeta = Map<
   }
 >;
 
-let cachedMapping:
-  | {
-      map: Map<string, string>;
-      expiresAt: number;
-    }
-  | null = null;
-let inflightMapping: Promise<Map<string, string>> | null = null;
+type MappingCache = {
+  map: Map<string, string>;
+  expiresAt: number;
+};
+
+const cachedMappingByKey: Map<string, MappingCache> = new Map();
+const inflightMappingByKey: Map<string, Promise<Map<string, string>>> = new Map();
 
 function normalizeAlphaNumeric(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -137,42 +134,6 @@ async function fetchHyperSymbols(): Promise<string[]> {
     .map((asset) => asset.name);
 }
 
-async function fetchAllSourceSymbols(): Promise<string[]> {
-  const symbolSets = await Promise.all(
-    SOURCE_OPTIONS.map((source) =>
-      fetchExchangeSnapshot(source)
-        .then((snapshot) =>
-          snapshot.markets
-            .map((market) => market.baseSymbol ?? market.symbol ?? "")
-            .filter(Boolean),
-        )
-        .catch(() => []),
-    ),
-  );
-
-  const allSymbols = new Set<string>();
-  symbolSets.flat().forEach((symbol) => {
-    const normalized = symbol.trim();
-    if (normalized) {
-      allSymbols.add(normalized.toUpperCase());
-    }
-  });
-
-  // Include Hyperliquid-specific universe (covers delisting edge cases)
-  try {
-    const hyperSymbols = await fetchHyperSymbols();
-    hyperSymbols.forEach((symbol) => {
-      if (symbol) {
-        allSymbols.add(symbol.toUpperCase());
-      }
-    });
-  } catch {
-    // ignore; other sources still populate
-  }
-
-  return Array.from(allSymbols);
-}
-
 async function fetchCoinGeckoCoins(): Promise<CoinGeckoListItem[]> {
   const response = await fetchJson<unknown>(COINGECKO_LIST_API);
   if (!Array.isArray(response)) {
@@ -249,11 +210,22 @@ async function fetchCoinGeckoMarketMeta(ids: string[]): Promise<CoinGeckoMarketM
   return meta;
 }
 
-async function buildCoinGeckoMapping(): Promise<Map<string, string>> {
-  const [universeSymbols, coinGeckoCoins] = await Promise.all([
-    fetchAllSourceSymbols(),
-    fetchCoinGeckoCoins(),
-  ]);
+async function buildCoinGeckoMapping(
+  symbolsUpper: string[],
+): Promise<Map<string, string>> {
+  const coinGeckoCoins = await fetchCoinGeckoCoins();
+  const universeSymbols =
+    symbolsUpper.length > 0
+      ? symbolsUpper.map((s) => s.toUpperCase())
+      : [];
+  if (universeSymbols.length === 0) {
+    try {
+      const hyperSymbols = await fetchHyperSymbols();
+      hyperSymbols.forEach((sym) => universeSymbols.push(sym.toUpperCase()));
+    } catch {
+      // ignore; mapping will be empty if nothing is provided
+    }
+  }
 
   const coinsBySymbol = bucketCoinsByKey(coinGeckoCoins, (coin) =>
     coin?.symbol ? [normalizeAlphaNumeric(coin.symbol)] : [],
@@ -308,26 +280,40 @@ async function buildCoinGeckoMapping(): Promise<Map<string, string>> {
   return mapping;
 }
 
-export async function getCoinGeckoMapping(): Promise<Map<string, string>> {
+export async function getCoinGeckoMapping(
+  symbols?: string[],
+): Promise<Map<string, string>> {
+  const normalizedSymbols = Array.isArray(symbols)
+    ? Array.from(new Set(symbols.map((s) => s.toUpperCase()))).sort()
+    : [];
+  const cacheKey =
+    normalizedSymbols.length > 0 ? normalizedSymbols.join(",") : "__all__";
+
   const now = Date.now();
-  if (cachedMapping && cachedMapping.expiresAt > now) {
-    return cachedMapping.map;
+  const cached = cachedMappingByKey.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.map;
   }
-  if (inflightMapping) {
-    return inflightMapping;
+
+  const inflight = inflightMappingByKey.get(cacheKey);
+  if (inflight) {
+    return inflight;
   }
-  inflightMapping = buildCoinGeckoMapping()
+
+  const promise = buildCoinGeckoMapping(normalizedSymbols)
     .then((map) => {
-      cachedMapping = {
+      cachedMappingByKey.set(cacheKey, {
         map,
         expiresAt: Date.now() + COINGECKO_MAPPING_TTL_MS,
-      };
-      inflightMapping = null;
+      });
+      inflightMappingByKey.delete(cacheKey);
       return map;
     })
     .catch((error) => {
-      inflightMapping = null;
+      inflightMappingByKey.delete(cacheKey);
       throw error;
     });
-  return inflightMapping;
+
+  inflightMappingByKey.set(cacheKey, promise);
+  return promise;
 }

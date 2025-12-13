@@ -169,7 +169,7 @@ export async function POST(request: Request) {
     );
   }
   try {
-    const mapping = await getCoinGeckoMapping();
+    const mapping = await getCoinGeckoMapping(symbolsUpper);
     const result = await fetchByIds(symbolsUpper, mapping);
     cachedByKey.set(cacheKey, result);
     return NextResponse.json(
