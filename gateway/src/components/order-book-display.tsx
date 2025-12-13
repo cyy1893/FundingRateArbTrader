@@ -124,8 +124,10 @@ function VenueOrderBookTable({
     return <div className="h-72" />;
   }
 
-  const asks = [...venue.asks.levels].reverse().slice(0, 10);
-  const bids = venue.bids.levels.slice(0, 10);
+  // Backend sends asks sorted best->worst (lowest price first). Keep that order for math/cumulative,
+  // but reverse for display so higher prices sit at the top of the asks column.
+  const asksBase = venue.asks.levels.slice(0, 10);
+  const bidsBase = venue.bids.levels.slice(0, 10);
 
   const toUsdLevels = (levels: OrderBookLevel[]): OrderBookLevel[] => {
     let cumulativeUsd = 0;
@@ -142,10 +144,14 @@ function VenueOrderBookTable({
     });
   };
 
-  const askUsdLevels = toUsdLevels(asks);
-  const bidUsdLevels = toUsdLevels(bids);
-  const askLevels = displayMode === "usd" ? askUsdLevels : asks;
-  const bidLevels = displayMode === "usd" ? bidUsdLevels : bids;
+  const askUsdLevels = toUsdLevels(asksBase);
+  const bidUsdLevels = toUsdLevels(bidsBase);
+
+  const askLevels = displayMode === "usd" ? askUsdLevels : asksBase;
+  const bidLevels = displayMode === "usd" ? bidUsdLevels : bidsBase;
+
+  // Render asks from high -> low while keeping cumulative math from best ask upward.
+  const askLevelsForDisplay = [...askLevels].reverse();
 
   const safeMax = (levels: OrderBookLevel[], key: "total" | "size") => {
     const maxVal = levels.reduce((m, l) => {
@@ -155,16 +161,16 @@ function VenueOrderBookTable({
     return maxVal > 0 ? maxVal : 1;
   };
 
-  const maxAskTotal = safeMax(askLevels, "total");
+  const maxAskTotal = safeMax(askLevelsForDisplay, "total");
   const maxBidTotal = safeMax(bidLevels, "total");
-  const maxAskSize = safeMax(askLevels, "size");
+  const maxAskSize = safeMax(askLevelsForDisplay, "size");
   const maxBidSize = safeMax(bidLevels, "size");
 
   const crossMaxTotal = Math.max(maxAskTotal, maxBidTotal, 1);
   const crossMaxSize = Math.max(maxAskSize, maxBidSize, 1);
 
-  const bestBid = bids[0]?.price;
-  const bestAsk = askLevels[askLevels.length - 1]?.price ?? asks[0]?.price;
+  const bestBid = bidLevels[0]?.price;
+  const bestAsk = asksBase[0]?.price;
   const spread = bestAsk && bestBid ? bestAsk - bestBid : null;
   const mid = bestAsk && bestBid ? (bestAsk + bestBid) / 2 : null;
   const spreadPct = spread && mid ? (spread / mid) * 100 : null;
@@ -188,23 +194,23 @@ function VenueOrderBookTable({
         </div>
 
         <div className="overflow-hidden border border-slate-200">
-          {asks.length === 0 ? (
+          {asksBase.length === 0 ? (
             <div className="h-24 flex items-center justify-center text-muted-foreground text-sm bg-slate-50">
               暂无卖单
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {askLevels.map((level, idx) => (
-              <DepthRow
-                key={`ask-${idx}`}
-                level={level}
-                maxTotal={crossMaxTotal}
-                maxSize={crossMaxSize}
-                tone="ask"
-                displayMode={displayMode}
-              />
-            ))}
-          </div>
+              {askLevelsForDisplay.map((level, idx) => (
+                <DepthRow
+                  key={`ask-${idx}`}
+                  level={level}
+                  maxTotal={crossMaxTotal}
+                  maxSize={crossMaxSize}
+                  tone="ask"
+                  displayMode={displayMode}
+                />
+              ))}
+            </div>
           )}
 
           <div className="flex items-center justify-between bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
@@ -212,23 +218,23 @@ function VenueOrderBookTable({
             <span>{spreadPct ? `${spreadPct.toFixed(3)}%` : "--"}</span>
           </div>
 
-          {bids.length === 0 ? (
+          {bidsBase.length === 0 ? (
             <div className="h-24 flex items-center justify-center text-muted-foreground text-sm bg-slate-50">
               暂无买单
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
               {bidLevels.map((level, idx) => (
-              <DepthRow
-                key={`bid-${idx}`}
-                level={level}
-                maxTotal={crossMaxTotal}
-                maxSize={crossMaxSize}
-                tone="bid"
-                displayMode={displayMode}
-              />
-            ))}
-          </div>
+                <DepthRow
+                  key={`bid-${idx}`}
+                  level={level}
+                  maxTotal={crossMaxTotal}
+                  maxSize={crossMaxSize}
+                  tone="bid"
+                  displayMode={displayMode}
+                />
+              ))}
+            </div>
           )}
         </div>
       </div>
