@@ -14,7 +14,6 @@ from app.config import get_settings
 from app.events import EventBroadcaster
 from app.models import (
     BalancesResponse,
-    DriftOrderRequest,
     LighterOrderRequest,
     LoginRequest,
     LoginResponse,
@@ -25,7 +24,6 @@ from app.models import (
     PerpSnapshot,
     PerpSnapshotRequest,
 )
-from app.services.drift_service import DriftService
 from app.services.lighter_service import LighterService
 from app.services.market_data_service import MarketDataService
 from app.utils.auth import AuthError, AuthManager, LockoutError, parse_users
@@ -38,7 +36,6 @@ logging.getLogger("websockets.client").setLevel(logging.WARNING)
 
 settings = get_settings()
 event_broadcaster = EventBroadcaster()
-drift_service = DriftService(settings)
 lighter_service = LighterService(settings)
 market_data_service = MarketDataService(settings)
 auth_manager = AuthManager(
@@ -54,16 +51,12 @@ auth_scheme = HTTPBearer()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await asyncio.gather(drift_service.start(), lighter_service.start())
+    await lighter_service.start()
     yield
-    await asyncio.gather(drift_service.stop(), lighter_service.stop(), market_data_service.close())
+    await asyncio.gather(lighter_service.stop(), market_data_service.close())
 
 
 app = FastAPI(title="Funding Rate Arbitrage Trader", version="0.1.0", lifespan=lifespan)
-
-
-def get_drift_service() -> DriftService:
-    return drift_service
 
 
 def get_lighter_service() -> LighterService:
@@ -114,50 +107,21 @@ async def authenticate_websocket(websocket: WebSocket, manager: AuthManager) -> 
 async def health() -> Dict[str, Any]:
     return {
         "status": "ok",
-        "drift_connected": drift_service.is_ready,
         "lighter_connected": lighter_service.is_ready,
     }
 
 
 @app.get("/balances", response_model=BalancesResponse)
 async def balances(
-    drift: DriftService = Depends(get_drift_service),
     lighter: LighterService = Depends(get_lighter_service),
     _: str = Depends(get_current_user),
 ) -> BalancesResponse:
-    try:
-        drift_balances = await drift.get_balances()
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch Drift balances: {exc}") from exc
-
     try:
         lighter_balances = await lighter.get_balances()
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch Lighter balances: {exc}") from exc
 
-    return BalancesResponse(drift=drift_balances, lighter=lighter_balances)
-
-
-@app.post("/orders/drift")
-async def create_drift_order(
-    order: DriftOrderRequest,
-    service: DriftService = Depends(get_drift_service),
-    broadcaster: EventBroadcaster = Depends(get_broadcaster),
-    _: str = Depends(get_current_user),
-):
-    try:
-        response = await service.place_order(order)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-
-    await broadcaster.publish(
-        OrderEvent(
-            venue="drift",
-            payload={"request": order.model_dump(), "response": response.model_dump()},
-            created_at=datetime.now(tz=timezone.utc),
-        ).model_dump()
-    )
-    return response
+    return BalancesResponse(lighter=lighter_balances)
 
 
 @app.post("/orders/lighter")
@@ -235,7 +199,6 @@ async def ws_events(
 @app.websocket("/ws/orderbook")
 async def ws_orderbook(
     websocket: WebSocket,
-    drift: DriftService = Depends(get_drift_service),
     lighter: LighterService = Depends(get_lighter_service),
 ):
     try:
@@ -277,17 +240,6 @@ async def ws_orderbook(
     try:
         tasks.append(
             asyncio.create_task(
-                forward_updates(
-                    "drift",
-                    drift.stream_orderbook(
-                        subscription.symbol,
-                        subscription.depth,
-                    ),
-                )
-        )
-        )
-        tasks.append(
-            asyncio.create_task(
                 forward_updates("lighter", lighter.stream_orderbook(subscription.symbol, subscription.depth))
             )
         )
@@ -303,7 +255,6 @@ async def ws_orderbook(
             await asyncio.sleep(throttle)
             if latest_snapshots:
                 snapshot = OrderBookSnapshot(
-                    drift=latest_snapshots.get("drift"),
                     lighter=latest_snapshots.get("lighter"),
                 )
                 try:

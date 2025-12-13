@@ -39,14 +39,7 @@ Follow the conventional style found in history (`feat(coingecko): …`, `chore: 
 ## External Exchange Data Sources
 Hyperliquid remains the canonical venue, but the UI also pulls a single “external” data source as a comparison baseline. The selected source is encoded in the `externalSource` search param, normalized via `src/lib/external.ts`, and passed all the way through the market snapshot builder. Binance connectivity was removed, so the current options are:
 
-- `drift`: use `https://data.api.drift.trade/contracts` for market metadata and `https://data.api.drift.trade/fundingRates` for the historical overlay. These APIs mirror the figures exposed in the Drift UI at `https://app.drift.trade`.
 - `lighter`: pull funding, leverage, and volume snapshots from `https://explorer.elliot.ai/api/markets` (see https://docs.lighter.xyz/perpetual-futures/api and https://apidocs.lighter.xyz/docs). Funding data is exposed alongside market stats so the UI can treat Lighter as a straight peer to Hyperliquid and the other baselines.
+- `grvt`: use the market-data endpoints in `src/lib/grvt.ts` to read instrument lists, funding rates, and 24h stats from GRVT’s public APIs. Keep requests bounded and prefer the `/full/v1` endpoints already wired in the codebase.
 
-When wiring Drift into new surfaces, lean on the official docs at [https://drift-labs.github.io/v2-teacher/#program-addresses](https://drift-labs.github.io/v2-teacher/#program-addresses) for canonical identifiers. The currently relevant program IDs are:
-
-| Environment   | Program ID                                         | UI                          |
-| ------------- | -------------------------------------------------- | --------------------------- |
-| mainnet-beta  | `dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH`      | https://app.drift.trade     |
-| devnet        | `dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH`      | https://beta.drift.trade    |
-
-Respect the [Terms of Use](https://docs.drift.trade/legal-and-regulations/terms-of-use) before hitting their interfaces from restricted territories.
+Respect exchange terms of use before hitting public endpoints from restricted territories.

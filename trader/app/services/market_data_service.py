@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import asyncio
 import re
-import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -24,7 +23,6 @@ class MarketDataService:
     def __init__(self, settings: Settings) -> None:
         self._lighter_base_url = settings.lighter_base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=10.0)
-        self._drift_leverage_map: dict[str, float] | None = None
         self._lighter_leverage_map: dict[str, float] | None = None
         self._grvt_market_data_base, _ = self._build_grvt_endpoints(settings.grvt_env)
 
@@ -83,59 +81,6 @@ class MarketDataService:
                     day_notional_volume=day_ntl_vlm,
                     open_interest=open_interest,
                     volume_usd=day_ntl_vlm,
-                )
-            )
-
-        return ExchangeSnapshot(markets=markets, errors=errors)
-
-    async def _fetch_drift_markets(self) -> ExchangeSnapshot:
-        errors: list[ApiError] = []
-        leverage_map = await self._get_drift_leverage_map()
-        try:
-            response = await self._client.get("https://data.api.drift.trade/contracts")
-            response.raise_for_status()
-            payload = response.json()
-        except Exception as exc:  # noqa: BLE001
-            errors.append(ApiError(source="Drift Data API", message=str(exc)))
-            return ExchangeSnapshot(markets=[], errors=errors)
-
-        contracts = payload.get("contracts") if isinstance(payload, dict) else None
-        if not isinstance(contracts, list):
-            errors.append(ApiError(source="Drift Data API", message="Unexpected contracts payload"))
-            return ExchangeSnapshot(markets=[], errors=errors)
-
-        markets: list[ExchangeMarketMetrics] = []
-        for contract in contracts:
-            if (
-                not isinstance(contract, dict)
-                or contract.get("product_type") != "PERP"
-                or not contract.get("ticker_id")
-            ):
-                continue
-
-            symbol = str(contract["ticker_id"])
-            base_symbol = _normalize_derivatives_base(symbol)
-            funding_source = _parse_float(contract.get("next_funding_rate"))
-            if funding_source is None:
-                funding_source = _parse_float(contract.get("funding_rate"))
-            volume_raw = _parse_float(contract.get("quote_volume"))
-            max_leverage = leverage_map.get(symbol) or leverage_map.get(base_symbol)
-
-            markets.append(
-                ExchangeMarketMetrics(
-                    base_symbol=base_symbol,
-                    symbol=symbol,
-                    display_name=base_symbol or symbol,
-                    mark_price=None,
-                    price_change_1h=None,
-                    price_change_24h=None,
-                    price_change_7d=None,
-                    max_leverage=max_leverage,
-                    funding_rate_hourly=(funding_source / 100) if funding_source is not None else None,
-                    funding_period_hours=DEFAULT_FUNDING_PERIOD_HOURS,
-                    day_notional_volume=volume_raw,
-                    open_interest=None,
-                    volume_usd=volume_raw,
                 )
             )
 
@@ -311,8 +256,6 @@ class MarketDataService:
         provider = source.lower()
         if provider == "hyperliquid":
             return await self._fetch_hyperliquid_markets()
-        if provider == "drift":
-            return await self._fetch_drift_markets()
         if provider == "lighter":
             return await self._fetch_lighter_markets()
         if provider == "grvt":
@@ -386,34 +329,6 @@ class MarketDataService:
 
         return PerpSnapshot(rows=rows, fetched_at=datetime.now(tz=timezone.utc), errors=api_errors)
 
-    async def _get_drift_leverage_map(self) -> dict[str, float]:
-        if self._drift_leverage_map is not None:
-            return self._drift_leverage_map
-
-        url = "https://docs.drift.trade/trading/margin"
-        try:
-            response = await self._client.get(url)
-            response.raise_for_status()
-            html = response.text
-            match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.S)
-            if not match:
-                raise ValueError("Missing __NEXT_DATA__ in Drift margin page")
-            payload = json.loads(match.group(1))
-            data = payload.get("props", {}).get("pageProps", {}).get("ssg", {}).get("perpMarginData", [])  # type: ignore[arg-type]
-            leverage_map: dict[str, float] = {}
-            for row in data:
-                if not isinstance(row, dict):
-                    continue
-                name = str(row.get("name", "")).strip().upper()
-                initial = str(row.get("initial", "")).strip()
-                max_leverage = _parse_drift_initial_leverage(initial)
-                if name and max_leverage is not None:
-                    leverage_map[name] = max_leverage
-            self._drift_leverage_map = leverage_map
-            return leverage_map
-        except Exception:  # noqa: BLE001
-            return {}
-
     async def _get_lighter_leverage_map(self) -> dict[str, float]:
         if self._lighter_leverage_map is not None:
             return self._lighter_leverage_map
@@ -456,20 +371,6 @@ class MarketDataService:
             base = "https://market-data.grvt.io"
             trade_base = "https://trades.grvt.io"
         return base, trade_base
-
-
-def _parse_drift_initial_leverage(initial: str) -> float | None:
-    if not initial:
-        return None
-    match = re.search(r"/\s*([\d.]+)x", initial, re.I)
-    if match:
-        value = float(match.group(1))
-        return value if math.isfinite(value) and value > 0 else None
-    pct_match = re.search(r"([\\d.]+)%", initial)
-    if pct_match:
-        value = float(pct_match.group(1))
-        return (100 / value) if math.isfinite(value) and value > 0 else None
-    return None
 
 
 def _parse_lighter_leverage_markdown(markdown: str, overrides: dict[str, float]) -> dict[str, float]:

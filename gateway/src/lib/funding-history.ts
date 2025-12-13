@@ -51,59 +51,6 @@ async function fetchHyperliquidFundingHistorySeries(
     .filter((point): point is { time: number; rate: number } => point !== null);
 }
 
-async function fetchDriftFundingHistorySeries(
-  symbol: string,
-  startTime: number,
-): Promise<Array<{ time: number; rate: number }>> {
-  const params = new URLSearchParams({ marketName: symbol });
-
-  const response = await fetch(
-    `https://data.api.drift.trade/fundingRates?${params.toString()}`,
-    {
-      cache: "no-store",
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error("Drift funding history request failed.");
-  }
-
-  const data = (await response.json()) as {
-    fundingRates?: Array<{
-      ts?: string | number;
-      fundingRate?: string | number;
-      oraclePriceTwap?: string | number;
-    }>;
-  };
-
-  return (data.fundingRates ?? [])
-    .map((entry) => {
-      const timestampSeconds = Number(entry.ts);
-      const timestampMs = Number.isFinite(timestampSeconds)
-        ? timestampSeconds * 1000
-        : Number.NaN;
-      const time = Number.isFinite(timestampMs)
-        ? normalizeTimestampToHour(timestampMs)
-        : Number.NaN;
-      const fundingRateRaw = Number(entry.fundingRate);
-      const oracle = Number(entry.oraclePriceTwap);
-      if (
-        !Number.isFinite(time) ||
-        !Number.isFinite(fundingRateRaw) ||
-        !Number.isFinite(oracle) ||
-        oracle === 0
-      ) {
-        return null;
-      }
-      const ratePercent = ((fundingRateRaw / 1e9) / (oracle / 1e6)) * 100;
-      return { time, rate: ratePercent };
-    })
-    .filter(
-      (point): point is { time: number; rate: number } =>
-        point !== null && point.time >= startTime,
-    );
-}
-
 async function fetchLighterFundingHistorySeries(
   symbol: string,
   startTime: number,
@@ -198,11 +145,11 @@ async function fetchHistorySeriesForSource(
     const series = await fetchHyperliquidFundingHistorySeries(symbol, startTime);
     return series.map(({ time, rate }) => ({ time, rate: rate * 100 }));
   }
-  if (source.provider === "drift") {
-    return fetchDriftFundingHistorySeries(symbol, startTime);
-  }
   if (source.provider === "lighter") {
     return fetchLighterFundingHistorySeries(symbol, startTime);
+  }
+  if (source.provider === "grvt") {
+    return [];
   }
   return [];
 }

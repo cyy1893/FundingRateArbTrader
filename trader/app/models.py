@@ -6,37 +6,6 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
-class DriftOrderRequest(BaseModel):
-    venue: Literal["drift"] = "drift"
-    market_type: Literal["perp", "spot"] = Field(..., description="Drift market type to trade on")
-    market_index: int = Field(..., ge=0)
-    direction: Literal["long", "short"] = Field(..., description="Long = buy/base increase, Short = sell")
-    order_type: Literal["market", "limit", "trigger_market", "trigger_limit", "oracle"] = Field("limit")
-    base_amount: float = Field(..., gt=0, description="Base asset amount in natural units (e.g. SOL)")
-    price: Optional[float] = Field(None, gt=0, description="Limit price in USD, ignored for market orders")
-    user_order_id: int = Field(0, ge=0, description="Optional Drift client order ID")
-    reduce_only: bool = False
-    post_only: Literal["none", "must", "try", "slide"] = "none"
-    immediate_or_cancel: bool = False
-    trigger_price: Optional[float] = Field(None, gt=0)
-    trigger_condition: Literal["above", "below", "triggered_above", "triggered_below"] = "above"
-    oracle_price_offset: Optional[float] = Field(
-        None, description="Optional offset (in USD) for oracle triggered orders"
-    )
-    max_ts: Optional[int] = Field(None, description="Optional unix timestamp after which the order expires")
-    auction_duration: Optional[int] = None
-    auction_start_price: Optional[float] = None
-    auction_end_price: Optional[float] = None
-
-
-class DriftOrderResponse(BaseModel):
-    tx_signature: str
-    market_index: int
-    market_type: str
-    direction: str
-    order_type: str
-
-
 class LighterOrderRequest(BaseModel):
     venue: Literal["lighter"] = "lighter"
     market_index: int = Field(..., ge=0)
@@ -85,30 +54,6 @@ class OrderEvent(BaseModel):
     created_at: datetime
 
 
-class DriftSpotBalance(BaseModel):
-    market_index: int
-    market_name: str
-    balance_type: Literal["deposit", "borrow"]
-    amount: float
-    raw_amount: int
-    decimals: int
-
-
-class DriftPerpBalance(BaseModel):
-    market_index: int
-    market_name: str
-    base_asset_amount: float
-    raw_base_asset_amount: int
-    quote_break_even_amount: float
-    raw_quote_break_even_amount: int
-
-
-class DriftBalanceSnapshot(BaseModel):
-    sub_account_id: int
-    spot_positions: list[DriftSpotBalance]
-    perp_positions: list[DriftPerpBalance]
-
-
 class LighterPositionBalance(BaseModel):
     market_id: int
     symbol: str
@@ -131,7 +76,6 @@ class LighterBalanceSnapshot(BaseModel):
 
 
 class BalancesResponse(BaseModel):
-    drift: DriftBalanceSnapshot
     lighter: LighterBalanceSnapshot
 
 
@@ -160,7 +104,7 @@ class OrderBookSide(BaseModel):
 
 class VenueOrderBook(BaseModel):
     """Order book for a single venue."""
-    venue: Literal["drift", "lighter"]
+    venue: Literal["lighter"]
     symbol: str
     bids: OrderBookSide
     asks: OrderBookSide
@@ -168,22 +112,18 @@ class VenueOrderBook(BaseModel):
 
 
 class OrderBookSnapshot(BaseModel):
-    """Combined order book from both venues."""
-    drift: Optional[VenueOrderBook] = None
+    """Order book snapshot for available venues."""
     lighter: Optional[VenueOrderBook] = None
 
 
 class OrderBookSubscription(BaseModel):
     """WebSocket subscription request for order book data."""
     symbol: str = Field(..., description="Trading symbol (e.g., BTC, ETH, SOL)")
-    drift_leverage: float = Field(..., gt=0, description="Leverage for Drift")
     lighter_leverage: float = Field(..., gt=0, description="Leverage for Lighter")
-    drift_direction: Literal["long", "short"] = Field(..., description="Position direction for Drift")
     lighter_direction: Literal["long", "short"] = Field(..., description="Position direction for Lighter")
     notional_value: float = Field(..., gt=0, description="Contract notional value in USD")
     depth: int = Field(10, ge=1, le=50, description="Number of price levels to include")
     throttle_ms: int = Field(500, ge=50, le=5000, description="Throttle interval in milliseconds for order book updates")
-    drift_poll_ms: int = Field(1000, ge=200, le=5000, description="Poll interval for Drift order book HTTP snapshot")
 
 
 class ApiError(BaseModel):

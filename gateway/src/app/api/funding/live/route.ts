@@ -77,62 +77,6 @@ async function fetchHyperliquidFundingRates(
   return funding;
 }
 
-async function fetchDriftFundingRates(
-  symbols: string[],
-): Promise<Record<string, number>> {
-  if (symbols.length === 0) {
-    return {};
-  }
-
-  try {
-    const response = await fetch("https://data.api.drift.trade/contracts", {
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      return {};
-    }
-
-    const payload = (await response.json()) as {
-      contracts?: Array<{
-        ticker_id?: string;
-        funding_rate?: string | number;
-        next_funding_rate?: string | number;
-        product_type?: string;
-      }>;
-    };
-
-    const requested = new Set(symbols);
-    const funding: Record<string, number> = {};
-
-    payload.contracts
-      ?.filter(
-        (contract) =>
-          contract.product_type === "PERP" &&
-          contract.ticker_id &&
-          requested.has(contract.ticker_id),
-      )
-      .forEach((contract) => {
-        const nextFundingRaw = Number.parseFloat(
-          String(contract.next_funding_rate ?? ""),
-        );
-        const fallbackFundingRaw = Number.parseFloat(
-          String(contract.funding_rate ?? ""),
-        );
-        const fundingSource = Number.isFinite(nextFundingRaw)
-          ? nextFundingRaw
-          : fallbackFundingRaw;
-        if (Number.isFinite(fundingSource) && contract.ticker_id) {
-          funding[contract.ticker_id] = fundingSource / 100;
-        }
-      });
-
-    return funding;
-  } catch {
-    return {};
-  }
-}
-
 async function fetchLighterFundingRates(
   symbols: string[],
 ): Promise<Record<string, number>> {
@@ -205,9 +149,6 @@ async function fetchFundingRatesForSource(
   }
   if (source.provider === "hyperliquid") {
     return fetchHyperliquidFundingRates(symbols);
-  }
-  if (source.provider === "drift") {
-    return fetchDriftFundingRates(symbols);
   }
   if (source.provider === "lighter") {
     return fetchLighterFundingRates(symbols);

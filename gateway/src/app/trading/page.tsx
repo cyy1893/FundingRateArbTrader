@@ -23,7 +23,6 @@ import {
 import { cn } from "@/lib/utils";
 import type {
   BalancesResponse,
-  DriftBalanceSnapshot,
   LighterBalanceSnapshot,
 } from "@/types/trader";
 import { MonitoringConfigCard, OrderBookCard } from "@/components/order-depth-cards";
@@ -313,7 +312,7 @@ export default function TradingPage() {
 }
 
 type UnifiedVenue = {
-  id: "drift" | "lighter";
+  id: "lighter";
   name: string;
   subtitle: string | null;
   totalUsd: number;
@@ -337,74 +336,12 @@ type UnifiedWalletData = {
 };
 
 function normalizeBalances(balances: BalancesResponse): UnifiedWalletData {
-  const driftInfo = summarizeDrift(balances.drift);
   const lighterInfo = summarizeLighter(balances.lighter);
-  const venues = [lighterInfo, driftInfo];
+  const venues = [lighterInfo];
 
   const totalUsd = venues.reduce((sum, venue) => sum + venue.totalUsd, 0);
 
   return { totalUsd, venues };
-}
-
-function summarizeDrift(drift: DriftBalanceSnapshot): UnifiedVenue {
-  const spotUsd = drift.spot_positions.reduce((sum, spot) => {
-    const direction = spot.balance_type === "deposit" ? 1 : -1;
-    if (spot.market_name.toLowerCase().includes("usdc")) {
-      return sum + direction * spot.amount;
-    }
-    return sum;
-  }, 0);
-
-  const filteredPerps = drift.perp_positions.filter(
-    (perp) => Math.abs(perp.quote_break_even_amount) >= 1,
-  );
-  const perpUsd = filteredPerps.reduce(
-    (sum, perp) => sum + perp.quote_break_even_amount,
-    0,
-  );
-
-  const totalUsd = spotUsd + perpUsd;
-
-  const spotRows = drift.spot_positions.map((spot) => {
-    const directionMultiplier = spot.balance_type === "deposit" ? 1 : -1;
-    return {
-      key: `spot-${spot.market_index}`,
-      cells: [
-        spot.market_name,
-        formatNumber(directionMultiplier * spot.amount),
-      ],
-    };
-  });
-
-  const perpRows = filteredPerps.map((perp) => ({
-    key: `perp-${perp.market_index}`,
-    cells: [
-      perp.market_name,
-      formatNumber(perp.base_asset_amount),
-      formatUsd(perp.quote_break_even_amount),
-    ],
-  }));
-
-  return {
-    id: "drift",
-    name: "Drift 账户",
-    subtitle: null,
-    totalUsd,
-    balances: {
-      title: "余额",
-      headers: ["货币", "数额"],
-      rows: spotRows,
-      emptyMessage: "暂无现货仓位",
-    },
-    positionGroups: [
-      {
-        title: "持仓",
-        headers: ["市场", "仓位", "盈亏（USD）"],
-        rows: perpRows,
-        emptyMessage: "暂无持仓",
-      },
-    ],
-  };
 }
 
 function summarizeLighter(lighter: LighterBalanceSnapshot): UnifiedVenue {
@@ -493,33 +430,18 @@ function UnifiedPositionsTable({ venues }: { venues: UnifiedVenue[] }) {
   venues.forEach((venue) => {
     venue.positionGroups.forEach((group) => {
       group.rows.forEach((row) => {
-        if (venue.id === "drift") {
-          // Drift 格式: [市场, 仓位, 盈亏（USD）]
-          allPositions.push({
-            venue: venue.name,
-            market: row.cells[0],
-            position: parseFloat(row.cells[1].replace(/,/g, "")),
-            positionValue: parseFloat(
-              row.cells[2].replace(/[$,]/g, ""),
-            ),
-            unrealizedPnl: parseFloat(
-              row.cells[2].replace(/[$,]/g, ""),
-            ),
-          });
-        } else if (venue.id === "lighter") {
-          // Lighter 格式: [市场, 仓位, 持仓价值, 未实现盈亏]
-          allPositions.push({
-            venue: venue.name,
-            market: row.cells[0],
-            position: parseFloat(row.cells[1].replace(/,/g, "")),
-            positionValue: parseFloat(
-              row.cells[2].replace(/[$,]/g, ""),
-            ),
-            unrealizedPnl: parseFloat(
-              row.cells[3].replace(/[$,]/g, ""),
-            ),
-          });
-        }
+        const position = parseFloat((row.cells[1] ?? "").replace(/,/g, ""));
+        const positionValue = parseFloat((row.cells[2] ?? "").replace(/[$,]/g, ""));
+        const unrealized = row.cells[3]
+          ? parseFloat(row.cells[3].replace(/[$,]/g, ""))
+          : null;
+        allPositions.push({
+          venue: venue.name,
+          market: row.cells[0],
+          position: Number.isFinite(position) ? position : 0,
+          positionValue: Number.isFinite(positionValue) ? positionValue : 0,
+          unrealizedPnl: Number.isFinite(unrealized ?? NaN) ? unrealized : null,
+        });
       });
     });
   });
@@ -630,7 +552,7 @@ function AuthRequiredCard() {
         <CardHeader className="space-y-2">
           <CardTitle className="text-2xl font-semibold">需要登录</CardTitle>
           <CardDescription className="text-sm text-muted-foreground">
-            请先登录以查看 Drift / Lighter 账户余额并开启订单簿监控。
+            请先登录以查看 Lighter 账户余额并开启订单簿监控。
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">

@@ -8,7 +8,6 @@ type Props = {
   orderBook: OrderBookSnapshot | null;
   status: WebSocketStatus;
   hasSnapshot: boolean;
-  hasDrift: boolean;
   hasLighter: boolean;
 };
 
@@ -242,7 +241,7 @@ function VenueOrderBookTable({
   );
 }
 
-export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasDrift, hasLighter }: Props) {
+export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasLighter }: Props) {
   const [displayMode, setDisplayMode] = useState<DisplayMode>("usd");
   const toggleMode = () => setDisplayMode((m) => (m === "usd" ? "base" : "usd"));
 
@@ -256,22 +255,6 @@ export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasDrift, has
           显示：{displayMode === "usd" ? "USD" : "原始数量"}
         </button>
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-      <Card className="border-none shadow-none bg-transparent">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg text-[#2f2a5a]">Drift 订单簿</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <VenueOrderBookTable
-            venue={orderBook?.drift}
-            status={status}
-            hasSnapshot={hasSnapshot}
-            venueReady={hasDrift}
-            displayMode={displayMode}
-          />
-        </CardContent>
-      </Card>
-
       <Card className="border-none shadow-none bg-transparent">
         <CardHeader className="pb-2">
           <CardTitle className="text-lg text-[#2f2a5a]">Lighter 订单簿</CardTitle>
@@ -286,7 +269,6 @@ export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasDrift, has
           />
         </CardContent>
       </Card>
-      </div>
     </>
   );
 }

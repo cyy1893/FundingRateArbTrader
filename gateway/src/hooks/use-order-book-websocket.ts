@@ -13,7 +13,7 @@ export type OrderBookSide = {
 };
 
 export type VenueOrderBook = {
-  venue: 'drift' | 'lighter';
+  venue: 'lighter';
   symbol: string;
   bids: OrderBookSide;
   asks: OrderBookSide;
@@ -21,20 +21,16 @@ export type VenueOrderBook = {
 };
 
 export type OrderBookSnapshot = {
-  drift?: VenueOrderBook;
   lighter?: VenueOrderBook;
 };
 
 export type OrderBookSubscription = {
   symbol: string;
-  drift_leverage: number;
   lighter_leverage: number;
-  drift_direction: 'long' | 'short';
   lighter_direction: 'long' | 'short';
   notional_value: number;
   depth: number;
   throttle_ms?: number;
-  drift_poll_ms?: number;
 };
 
 export type WebSocketStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -42,7 +38,6 @@ export type WebSocketStatus = 'disconnected' | 'connecting' | 'connected' | 'err
 export function useOrderBookWebSocket(subscription: OrderBookSubscription | null) {
   const [orderBook, setOrderBook] = useState<OrderBookSnapshot | null>(null);
   const [hasSnapshot, setHasSnapshot] = useState(false);
-  const [hasDrift, setHasDrift] = useState(false);
   const [hasLighter, setHasLighter] = useState(false);
   const [status, setStatus] = useState<WebSocketStatus>('disconnected');
   const [error, setError] = useState<string | null>(null);
@@ -52,11 +47,6 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
   const latestSnapshotRef = useRef<OrderBookSnapshot | null>(null);
   const throttleIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const normalizeSymbol = useCallback((sym: string | undefined | null) => {
-    if (!sym) return "";
-    return sym.replace(/-PERP$/i, "").trim().toUpperCase();
-  }, []);
-
   const connect = useCallback(function doConnect(sub?: OrderBookSubscription | null) {
     const activeSub = sub ?? subscriptionRef.current;
     if (!activeSub) return;
@@ -65,7 +55,6 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     setError(null);
     setOrderBook(null);
     setHasSnapshot(false);
-    setHasDrift(false);
     setHasLighter(false);
     latestSnapshotRef.current = null;
 
@@ -100,19 +89,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
             return;
           }
 
-          const currentSymbol = subscriptionRef.current?.symbol;
-          if (currentSymbol) {
-            const target = normalizeSymbol(currentSymbol);
-            const symbols = [data.drift?.symbol, data.lighter?.symbol]
-              .map((sym) => normalizeSymbol(sym))
-              .filter(Boolean);
-            if (symbols.length > 0 && symbols.some((sym) => sym !== target)) {
-              return;
-            }
-          }
-
           setHasSnapshot(true);
-          setHasDrift(Boolean(data.drift));
           setHasLighter(Boolean(data.lighter));
           latestSnapshotRef.current = data;
         } catch (err) {
@@ -125,7 +102,6 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
         setError('WebSocket connection error');
         setStatus('error');
         setHasSnapshot(false);
-        setHasDrift(false);
         setHasLighter(false);
       };
 
@@ -133,7 +109,6 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
         setStatus('disconnected');
         wsRef.current = null;
         setHasSnapshot(false);
-        setHasDrift(false);
         setHasLighter(false);
 
         // Auto-reconnect after 3 seconds
@@ -146,7 +121,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
       setError(err instanceof Error ? err.message : 'Failed to connect');
       setStatus('error');
     }
-  }, [normalizeSymbol]);
+  }, []);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -163,7 +138,6 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     setOrderBook(null);
     setError(null);
     setHasSnapshot(false);
-    setHasDrift(false);
     setHasLighter(false);
     latestSnapshotRef.current = null;
   }, []);
@@ -179,7 +153,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     return () => {
       disconnect();
     };
-  }, [subscription, connect, disconnect, normalizeSymbol]);
+  }, [subscription, connect, disconnect]);
 
   useEffect(() => {
     throttleIntervalRef.current = setInterval(() => {
@@ -201,7 +175,6 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     status,
     error,
     hasSnapshot,
-    hasDrift,
     hasLighter,
     reconnect: connect,
   };

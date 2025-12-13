@@ -24,7 +24,7 @@ export type ResolvedComparisonSelection = {
 };
 
 const STORAGE_KEY = "fra:last-comparison-selection";
-const SOURCE_IDS: SourceId[] = ["hyperliquid", "drift", "lighter"];
+const SOURCE_IDS: SourceId[] = ["hyperliquid", "lighter", "grvt"];
 
 const isBrowser = typeof window !== "undefined";
 

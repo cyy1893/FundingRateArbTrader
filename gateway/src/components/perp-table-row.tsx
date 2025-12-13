@@ -117,9 +117,6 @@ function buildMarketUrl(provider: SourceProvider, symbol: string | null | undefi
   if (!symbol) {
     return null;
   }
-  if (provider === "drift") {
-    return `https://app.drift.trade/trade/${encodeURIComponent(symbol)}`;
-  }
   if (provider === "lighter") {
     return `https://app.lighter.xyz/trade/${encodeURIComponent(symbol)}`;
   }

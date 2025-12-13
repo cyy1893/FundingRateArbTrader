@@ -1,6 +1,6 @@
-export type SourceId = "hyperliquid" | "drift" | "lighter" | "grvt";
+export type SourceId = "hyperliquid" | "lighter" | "grvt";
 
-export type SourceProvider = "hyperliquid" | "drift" | "lighter" | "grvt";
+export type SourceProvider = "hyperliquid" | "lighter" | "grvt";
 
 export type SourceConfig = {
   id: SourceId;
@@ -13,11 +13,6 @@ export const SOURCE_OPTIONS: SourceConfig[] = [
     id: "hyperliquid",
     label: "Hyperliquid",
     provider: "hyperliquid",
-  },
-  {
-    id: "drift",
-    label: "Drift",
-    provider: "drift",
   },
   {
     id: "lighter",
@@ -41,7 +36,7 @@ export const DEFAULT_LEFT_SOURCE =
   findSourceOrDefault("lighter") ?? SOURCE_OPTIONS[0];
 
 export const DEFAULT_RIGHT_SOURCE =
-  findSourceOrDefault("drift") ??
+  findSourceOrDefault("grvt") ??
   SOURCE_OPTIONS.find((option) => option.id !== DEFAULT_LEFT_SOURCE.id) ??
   SOURCE_OPTIONS[0];
 

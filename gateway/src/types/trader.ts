@@ -1,27 +1,3 @@
-export type DriftSpotBalance = {
-  market_index: number;
-  market_name: string;
-  balance_type: "deposit" | "borrow";
-  amount: number;
-  raw_amount: number;
-  decimals: number;
-};
-
-export type DriftPerpBalance = {
-  market_index: number;
-  market_name: string;
-  base_asset_amount: number;
-  raw_base_asset_amount: number;
-  quote_break_even_amount: number;
-  raw_quote_break_even_amount: number;
-};
-
-export type DriftBalanceSnapshot = {
-  sub_account_id: number;
-  spot_positions: DriftSpotBalance[];
-  perp_positions: DriftPerpBalance[];
-};
-
 export type LighterPositionBalance = {
   market_id: number;
   symbol: string;
@@ -44,6 +20,5 @@ export type LighterBalanceSnapshot = {
 };
 
 export type BalancesResponse = {
-  drift: DriftBalanceSnapshot;
   lighter: LighterBalanceSnapshot;
 };

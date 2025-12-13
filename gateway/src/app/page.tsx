@@ -113,11 +113,9 @@ async function DashboardContent({
   const apiErrors = snapshot?.errors ?? [];
   const hasExternalMarketData = rows.some((row) => row.right != null);
   const secondaryErrorSource =
-    secondarySource.provider === "drift"
-      ? "Drift Data API"
-      : secondarySource.provider === "lighter"
-        ? "Lighter API"
-        : secondarySource.label;
+    secondarySource.provider === "lighter"
+      ? "Lighter API"
+      : secondarySource.label;
   const hasExplicitExternalError = apiErrors.some(
     (apiError) => apiError.source === secondaryErrorSource,
   );

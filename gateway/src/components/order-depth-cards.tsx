@@ -33,7 +33,6 @@ type OrderBookCardProps = {
 
 const DEFAULT_DEPTH = 10;
 const DEFAULT_THROTTLE_MS = 500;
-const DEFAULT_DRIFT_POLL_MS = 1000;
 
 export function MonitoringConfigCard({
     onClose,
@@ -43,9 +42,7 @@ export function MonitoringConfigCard({
     secondaryLabel,
 }: MonitoringConfigCardProps) {
     const [symbol, setSymbol] = useState("");
-    const [driftLeverage, setDriftLeverage] = useState("1");
     const [lighterLeverage, setLighterLeverage] = useState("1");
-    const [driftDirection, setDriftDirection] = useState<"long" | "short">("long");
     const [lighterDirection, setLighterDirection] = useState<"long" | "short">("long");
     const [notionalValue, setNotionalValue] = useState("");
     const hasSymbols = availableSymbols.length > 0;
@@ -67,18 +64,15 @@ export function MonitoringConfigCard({
 
         const sub: OrderBookSubscription = {
             symbol,
-            drift_leverage: parseFloat(driftLeverage) || 1,
             lighter_leverage: parseFloat(lighterLeverage) || 1,
-            drift_direction: driftDirection,
             lighter_direction: lighterDirection,
             notional_value: parseFloat(notionalValue) || 1000,
             depth: DEFAULT_DEPTH,
             throttle_ms: DEFAULT_THROTTLE_MS,
-            drift_poll_ms: DEFAULT_DRIFT_POLL_MS,
         };
 
         onStartMonitoring(sub);
-    }, [symbol, driftLeverage, lighterLeverage, driftDirection, lighterDirection, notionalValue, onStartMonitoring]);
+    }, [symbol, lighterLeverage, lighterDirection, notionalValue, onStartMonitoring]);
 
     return (
         <div className="rounded-xl border border-dashed bg-background/60 p-4 shadow-sm">
@@ -120,32 +114,6 @@ export function MonitoringConfigCard({
                 {/* Step 2: Leverage and Direction */}
                 <div className="space-y-2">
                     <h3 className="text-sm font-semibold">步骤 2: 配置杠杆和方向</h3>
-                    <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-2">
-                            <Label htmlFor="drift-leverage">Drift 杠杆</Label>
-                            <Input
-                                id="drift-leverage"
-                                type="number"
-                                min="1"
-                                max="20"
-                                value={driftLeverage}
-                                onChange={(e) => setDriftLeverage(e.target.value)}
-                                placeholder="1-20"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="drift-direction">Drift 方向</Label>
-                            <Select value={driftDirection} onValueChange={(v) => setDriftDirection(v as "long" | "short")}>
-                                <SelectTrigger id="drift-direction">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="long">做多 (Long)</SelectItem>
-                                    <SelectItem value="short">做空 (Short)</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
                     <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-2">
                             <Label htmlFor="lighter-leverage">Lighter 杠杆</Label>
@@ -200,7 +168,7 @@ export function MonitoringConfigCard({
 }
 
 export function OrderBookCard({ subscription, onReset }: OrderBookCardProps) {
-    const { orderBook, status, error, hasSnapshot, hasDrift, hasLighter } = useOrderBookWebSocket(subscription);
+    const { orderBook, status, error, hasSnapshot, hasLighter } = useOrderBookWebSocket(subscription);
 
     return (
         <Card className="border-border/60">
@@ -251,7 +219,6 @@ export function OrderBookCard({ subscription, onReset }: OrderBookCardProps) {
                     orderBook={orderBook}
                     status={status}
                     hasSnapshot={hasSnapshot}
-                    hasDrift={hasDrift}
                     hasLighter={hasLighter}
                 />
             </CardContent>
