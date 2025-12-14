@@ -13,7 +13,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.config import get_settings
 from app.events import EventBroadcaster
 from app.models import (
+    ArbitrageSnapshotRequest,
+    ArbitrageSnapshotResponse,
     BalancesResponse,
+    FundingHistoryRequest,
+    FundingHistoryResponse,
     LighterOrderRequest,
     LoginRequest,
     LoginResponse,
@@ -155,6 +159,46 @@ async def perp_snapshot(
         return await service.get_perp_snapshot(payload.primary_source, payload.secondary_source)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@app.post("/funding-history", response_model=FundingHistoryResponse)
+async def funding_history(
+    payload: FundingHistoryRequest,
+    service: MarketDataService = Depends(get_market_data_service),
+) -> FundingHistoryResponse:
+    try:
+        dataset = await service.get_funding_history(
+            left_source=payload.left_source,
+            right_source=payload.right_source,
+            left_symbol=payload.left_symbol,
+            right_symbol=payload.right_symbol,
+            days=payload.days,
+            left_funding_period_hours=payload.left_funding_period_hours,
+            right_funding_period_hours=payload.right_funding_period_hours,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return FundingHistoryResponse(dataset=dataset)
+
+
+@app.post("/arbitrage", response_model=ArbitrageSnapshotResponse)
+async def arbitrage_snapshot(
+    payload: ArbitrageSnapshotRequest,
+    service: MarketDataService = Depends(get_market_data_service),
+) -> ArbitrageSnapshotResponse:
+    try:
+        snapshot = await service.get_arbitrage_snapshot(
+            primary=payload.primary_source,
+            secondary=payload.secondary_source,
+            volume_threshold=payload.volume_threshold,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return snapshot
 
 
 @app.post("/login", response_model=LoginResponse)

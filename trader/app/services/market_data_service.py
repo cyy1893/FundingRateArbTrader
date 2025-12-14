@@ -10,6 +10,7 @@ import httpx
 
 from app.config import Settings
 from app.models import (
+    ArbitrageSnapshotResponse,
     ApiError,
     ExchangeMarketMetrics,
     ExchangeSnapshot,
@@ -25,6 +26,10 @@ MAX_HYPER_FUNDING_POINTS = 500
 MAX_HYPER_LOOKBACK_MS = MAX_HYPER_FUNDING_POINTS * MS_PER_HOUR
 DEFAULT_LEFT_SOURCE = "lighter"
 DEFAULT_RIGHT_SOURCE = "grvt"
+ARBITRAGE_LOOKBACK_DAYS = 1
+ARBITRAGE_LOOKBACK_HOURS = 24
+ARBITRAGE_HOURS_PER_YEAR = 24 * 365
+MAX_ARBITRAGE_WORKERS = 5
 SYMBOL_RENAMES: dict[str, str] = {
     "1000PEPE": "kPEPE",
     "1000SHIB": "kSHIB",
@@ -479,6 +484,117 @@ class MarketDataService:
             raise ValueError("暂无可用的资金费率历史数据")
 
         return self._merge_funding_history_series(left_history, right_history)
+
+    async def get_arbitrage_snapshot(
+        self,
+        primary: str,
+        secondary: str,
+        volume_threshold: float = 0.0,
+    ) -> ArbitrageSnapshotResponse:
+        """
+        Compute 24h arbitrage annualized metrics server-side using funding history.
+        """
+        snapshot = await self.get_perp_snapshot(primary, secondary)
+        fetched_at = snapshot.fetched_at
+        volume_cutoff = max(volume_threshold, 0.0)
+        entries: list[dict[str, Any]] = []
+        failures: list[dict[str, str]] = []
+
+        def _passes_volume(row: MarketRow) -> bool:
+            if volume_cutoff <= 0:
+                return True
+            left_volume = _parse_float(row.day_notional_volume) or 0.0
+            right_payload = row.right if isinstance(row.right, dict) else None
+            right_volume = _parse_float(right_payload.get("volume_usd")) if right_payload else None
+            return left_volume >= volume_cutoff and (right_volume or 0.0) >= volume_cutoff
+
+        eligible_rows = [
+            row
+            for row in snapshot.rows
+            if isinstance(row.right, dict) and row.right.get("symbol") and _passes_volume(row)
+        ]
+
+        semaphore = asyncio.Semaphore(MAX_ARBITRAGE_WORKERS)
+
+        async def _compute_row(row: MarketRow) -> None:
+            async with semaphore:
+                symbol_label = row.symbol or row.left_symbol
+                right_payload = row.right if isinstance(row.right, dict) else {}
+                right_symbol = str(right_payload.get("symbol") or "").upper()
+                if not right_symbol:
+                    failures.append({"symbol": symbol_label, "reason": "右侧市场缺失"})
+                    return
+
+                try:
+                    dataset = await self.get_funding_history(
+                        left_source=primary,
+                        right_source=secondary,
+                        left_symbol=row.left_symbol,
+                        right_symbol=right_symbol,
+                        days=ARBITRAGE_LOOKBACK_DAYS,
+                        left_funding_period_hours=row.left_funding_period_hours,
+                        right_funding_period_hours=_parse_float(right_payload.get("funding_period_hours")),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    failures.append({"symbol": symbol_label, "reason": str(exc)})
+                    return
+
+                if not dataset:
+                    failures.append({"symbol": symbol_label, "reason": "暂无资金费率历史数据"})
+                    return
+
+                latest_time = dataset[-1].time
+                lookback_start = latest_time - ARBITRAGE_LOOKBACK_HOURS * MS_PER_HOUR
+                sample_count = 0
+                total_decimal = 0.0
+                directional_sum = 0.0
+
+                for point in dataset:
+                    if point.time < lookback_start:
+                        continue
+                    if point.spread is None or not math.isfinite(point.spread):
+                        continue
+                    decimal_spread = abs(point.spread) / 100.0
+                    total_decimal += decimal_spread
+                    directional_sum += point.spread
+                    sample_count += 1
+
+                if sample_count == 0 or total_decimal == 0:
+                    failures.append({"symbol": symbol_label, "reason": "24 小时内有效样本不足"})
+                    return
+
+                average_hourly_decimal = total_decimal / sample_count
+                annualized_decimal = average_hourly_decimal * ARBITRAGE_HOURS_PER_YEAR
+                direction = "unknown"
+                if directional_sum > 0:
+                    direction = "leftLong"
+                elif directional_sum < 0:
+                    direction = "rightLong"
+
+                entries.append(
+                    {
+                        "symbol": row.symbol or row.left_symbol,
+                        "display_name": row.display_name or row.symbol or row.left_symbol,
+                        "left_symbol": row.left_symbol,
+                        "right_symbol": right_symbol,
+                        "total_decimal": total_decimal,
+                        "average_hourly_decimal": average_hourly_decimal,
+                        "annualized_decimal": annualized_decimal,
+                        "sample_count": sample_count,
+                        "direction": direction,
+                    }
+                )
+
+        await asyncio.gather(*(_compute_row(row) for row in eligible_rows))
+
+        entries.sort(key=lambda entry: entry.get("annualized_decimal", 0), reverse=True)
+
+        return ArbitrageSnapshotResponse(
+            entries=entries,
+            failures=failures,
+            fetched_at=fetched_at,
+            errors=snapshot.errors,
+        )
 
     async def fetch_exchange_snapshot(self, source: str) -> ExchangeSnapshot:
         provider = source.lower()

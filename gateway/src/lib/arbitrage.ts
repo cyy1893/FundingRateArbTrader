@@ -1,11 +1,11 @@
-import { buildFundingHistoryDataset, MS_PER_HOUR } from "@/lib/funding-history";
 import type { SourceConfig } from "@/lib/external";
-import type { MarketRow } from "@/types/market";
+import type { ApiError } from "@/types/api";
 
-const LOOKBACK_DAYS = 1;
-const LOOKBACK_HOURS = 24;
-const HOURS_PER_YEAR = 24 * 365;
-const MAX_WORKERS = 4;
+const TRADER_API_BASE_URL =
+  process.env.TRADER_API_BASE_URL ??
+  process.env.API_BASE_URL ??
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  "http://localhost:8080";
 
 export type ArbitrageDirection = "leftLong" | "rightLong" | "unknown";
 
@@ -24,120 +24,61 @@ export type ArbitrageAnnualizedEntry = {
 export type ArbitrageAnnualizedSnapshot = {
   entries: ArbitrageAnnualizedEntry[];
   failures: Array<{ symbol: string; reason: string }>;
+  fetchedAt: Date | null;
+  errors: ApiError[];
 };
 
-async function computeAnnualizedForRow(
-  row: MarketRow,
-  leftSource: SourceConfig,
-  rightSource: SourceConfig,
-): Promise<ArbitrageAnnualizedEntry | null> {
-  if (!row.right?.symbol) {
-    return null;
-  }
-
-  const dataset = await buildFundingHistoryDataset(
-    leftSource,
-    rightSource,
-    row.leftSymbol,
-    row.right.symbol,
-    LOOKBACK_DAYS,
-    row.leftFundingPeriodHours ?? null,
-    row.right.fundingPeriodHours ?? null,
-  );
-
-  if (!dataset.length) {
-    return null;
-  }
-
-  const latestTime = dataset[dataset.length - 1]?.time;
-  if (!Number.isFinite(latestTime)) {
-    return null;
-  }
-
-  const lookbackStart = Number(latestTime) - LOOKBACK_HOURS * MS_PER_HOUR;
-  let sampleCount = 0;
-  let totalDecimal = 0;
-  let directionalSum = 0;
-
-  dataset.forEach((point) => {
-    if (
-      point.time >= lookbackStart &&
-      typeof point.spread === "number" &&
-      Number.isFinite(point.spread)
-    ) {
-      const decimalSpread = Math.abs(point.spread) / 100;
-      totalDecimal += decimalSpread;
-      directionalSum += point.spread;
-      sampleCount += 1;
-    }
+export async function fetchArbitrageSnapshot(
+  primarySource: SourceConfig,
+  secondarySource: SourceConfig,
+  volumeThreshold: number,
+): Promise<ArbitrageAnnualizedSnapshot> {
+  const upstream = `${TRADER_API_BASE_URL.replace(/\/$/, "")}/arbitrage`;
+  const response = await fetch(upstream, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      primary_source: primarySource.provider,
+      secondary_source: secondarySource.provider,
+      volume_threshold: volumeThreshold,
+    }),
   });
 
-  if (sampleCount === 0 || totalDecimal === 0) {
-    return null;
+  const payload = (await response.json().catch(() => ({}))) as {
+    entries?: Array<Record<string, unknown>>;
+    failures?: Array<{ symbol: string; reason: string }>;
+    fetched_at?: string | null;
+    errors?: ApiError[];
+    error?: string;
+  };
+
+  if (!response.ok || !payload.entries) {
+    const message = payload.error || "无法获取套利年化数据";
+    throw new Error(message);
   }
 
-  const averageHourlyDecimal = totalDecimal / sampleCount;
-  const annualizedDecimal = averageHourlyDecimal * HOURS_PER_YEAR;
-  let direction: ArbitrageDirection = "unknown";
-  if (directionalSum > 0) {
-    direction = "leftLong";
-  } else if (directionalSum < 0) {
-    direction = "rightLong";
-  }
+  const fetchedAt = payload.fetched_at ? new Date(payload.fetched_at) : null;
+  const entries: ArbitrageAnnualizedEntry[] = (payload.entries ?? []).map(
+    (entry) => ({
+      symbol: String(entry.symbol ?? ""),
+      displayName: String(entry.display_name ?? entry.symbol ?? ""),
+      leftSymbol: String(entry.left_symbol ?? ""),
+      rightSymbol: String(entry.right_symbol ?? ""),
+      totalDecimal: Number(entry.total_decimal ?? 0),
+      averageHourlyDecimal: Number(entry.average_hourly_decimal ?? 0),
+      annualizedDecimal: Number(entry.annualized_decimal ?? 0),
+      sampleCount: Number(entry.sample_count ?? 0),
+      direction: (entry.direction as ArbitrageDirection) ?? "unknown",
+    }),
+  );
 
   return {
-    symbol: row.symbol,
-    displayName: row.displayName,
-    leftSymbol: row.leftSymbol,
-    rightSymbol: row.right.symbol,
-    totalDecimal,
-    averageHourlyDecimal,
-    annualizedDecimal,
-    sampleCount,
-    direction,
+    entries,
+    failures: payload.failures ?? [],
+    fetchedAt,
+    errors: payload.errors ?? [],
   };
-}
-
-export async function computeArbitrageAnnualizedSnapshot(
-  rows: MarketRow[],
-  leftSource: SourceConfig,
-  rightSource: SourceConfig,
-): Promise<ArbitrageAnnualizedSnapshot> {
-  const eligible = rows.filter((row) => row.right?.symbol);
-  const queue = [...eligible];
-  const entries: ArbitrageAnnualizedEntry[] = [];
-  const failures: Array<{ symbol: string; reason: string }> = [];
-
-  async function worker() {
-    while (queue.length) {
-      const next = queue.shift();
-      if (!next) {
-        return;
-      }
-      try {
-        const entry = await computeAnnualizedForRow(next, leftSource, rightSource);
-        if (entry) {
-          entries.push(entry);
-        }
-      } catch (error) {
-        failures.push({
-          symbol: next.symbol,
-          reason:
-            error instanceof Error
-              ? error.message
-              : "无法计算该市场的套利年化收益。",
-        });
-      }
-    }
-  }
-
-  const workers = Array.from(
-    { length: Math.min(MAX_WORKERS, queue.length) || 1 },
-    () => worker(),
-  );
-  await Promise.all(workers);
-
-  entries.sort((a, b) => b.annualizedDecimal - a.annualizedDecimal);
-
-  return { entries, failures };
 }

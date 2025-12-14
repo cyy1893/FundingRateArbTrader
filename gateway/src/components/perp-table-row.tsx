@@ -121,7 +121,16 @@ function buildMarketUrl(provider: SourceProvider, symbol: string | null | undefi
     return `https://app.lighter.xyz/trade/${encodeURIComponent(symbol)}`;
   }
   if (provider === "grvt") {
-    return `https://app.grvt.io/trade/${encodeURIComponent(symbol)}`;
+    const base = symbol
+      .replace(/[-_/]?PERP$/i, "")
+      .replace(/[_/]/g, "-")
+      .trim()
+      .toUpperCase();
+    if (!base) {
+      return null;
+    }
+    const pair = base.includes("-") ? base : `${base}-USDT`;
+    return `https://grvt.io/exchange/perpetual/${encodeURIComponent(pair)}`;
   }
   if (provider === "hyperliquid") {
     return `https://app.hyperliquid.xyz/trade/${encodeURIComponent(symbol)}`;
@@ -133,12 +142,12 @@ function formatFundingPeriodHours(
   provider: SourceProvider,
   value: number | null | undefined,
 ): string {
-  const fallback =
-    provider === "lighter"
-      ? 1
-      : null;
+  if (provider === "lighter") {
+    return "1h";
+  }
+
   const normalized =
-    Number.isFinite(value) && value !== null ? Number(value) : fallback;
+    Number.isFinite(value) && value !== null ? Number(value) : null;
   if (!normalized || !Number.isFinite(normalized)) {
     return "—";
   }

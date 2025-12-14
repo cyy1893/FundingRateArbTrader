@@ -7,9 +7,7 @@ import {
   type SourceConfig,
 } from "@/lib/external";
 import { DEFAULT_VOLUME_THRESHOLD } from "@/lib/volume-filter";
-import { computeArbitrageAnnualizedSnapshot } from "@/lib/arbitrage";
-import { getPerpetualSnapshot } from "@/lib/perp-snapshot";
-import type { MarketRow } from "@/types/market";
+import { fetchArbitrageSnapshot } from "@/lib/arbitrage";
 import { formatVolume } from "@/lib/formatters";
 
 function extractFirst(value?: string | string[] | null): string | undefined {
@@ -51,31 +49,6 @@ function resolveVolumeThreshold(searchParams: URLSearchParams): number {
     : DEFAULT_VOLUME_THRESHOLD;
 }
 
-function filterRowsByVolume(
-  rows: MarketRow[],
-  volumeThreshold: number,
-): MarketRow[] {
-  if (volumeThreshold <= 0) {
-    return rows.filter((row) => row.right?.symbol);
-  }
-  return rows.filter((row) => {
-    if (!row.right?.symbol) {
-      return false;
-    }
-    const leftVolume =
-      Number.isFinite(row.dayNotionalVolume ?? NaN) &&
-      row.dayNotionalVolume != null
-        ? row.dayNotionalVolume
-        : 0;
-    const rightVolume =
-      Number.isFinite(row.right.volumeUsd ?? NaN) &&
-      row.right.volumeUsd != null
-        ? row.right.volumeUsd
-        : 0;
-    return leftVolume >= volumeThreshold && rightVolume >= volumeThreshold;
-  });
-}
-
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const searchParams = url.searchParams;
@@ -83,33 +56,30 @@ export async function GET(request: Request) {
   const volumeThreshold = resolveVolumeThreshold(searchParams);
 
   try {
-    const snapshot = await getPerpetualSnapshot(
+    const arbitrageSnapshot = await fetchArbitrageSnapshot(
       primarySource,
       secondarySource,
-    );
-    const rows = snapshot?.rows ?? [];
-    const filteredRows = filterRowsByVolume(rows, volumeThreshold);
-
-    const arbitrageSnapshot = await computeArbitrageAnnualizedSnapshot(
-      filteredRows,
-      primarySource,
-      secondarySource,
+      volumeThreshold,
     );
 
     const volumeLabel =
       volumeThreshold <= 0
         ? "两端不限"
         : `两端 ≥ ${formatVolume(volumeThreshold)}`;
+    const fetchedAt = arbitrageSnapshot.fetchedAt
+      ? arbitrageSnapshot.fetchedAt.toISOString()
+      : null;
 
     return NextResponse.json({
       metadata: {
         primarySourceLabel: primarySource.label,
         secondarySourceLabel: secondarySource.label,
         volumeLabel,
-        fetchedAt: snapshot?.fetchedAt?.toISOString() ?? null,
+        fetchedAt,
       },
       entries: arbitrageSnapshot.entries,
       failures: arbitrageSnapshot.failures,
+      errors: arbitrageSnapshot.errors,
     });
   } catch (error) {
     const message =

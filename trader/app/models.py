@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class LighterOrderRequest(BaseModel):
@@ -182,3 +182,56 @@ class PerpSnapshot(BaseModel):
 class PerpSnapshotRequest(BaseModel):
     primary_source: str
     secondary_source: str
+
+
+class FundingHistoryRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    left_symbol: str = Field(..., alias="leftSymbol")
+    right_symbol: str | None = Field(None, alias="rightSymbol")
+    days: int = 7
+    left_funding_period_hours: float | None = Field(None, alias="leftFundingPeriodHours")
+    right_funding_period_hours: float | None = Field(None, alias="rightFundingPeriodHours")
+    left_source: str | None = Field(None, alias="leftSourceId")
+    right_source: str | None = Field(None, alias="rightSourceId")
+
+
+class FundingHistoryPoint(BaseModel):
+    time: int
+    left: float | None
+    right: float | None
+    spread: float | None
+
+
+class FundingHistoryResponse(BaseModel):
+    dataset: list[FundingHistoryPoint]
+
+
+class ArbitrageAnnualizedEntry(BaseModel):
+    symbol: str
+    display_name: str
+    left_symbol: str
+    right_symbol: str
+    total_decimal: float
+    average_hourly_decimal: float
+    annualized_decimal: float
+    sample_count: int
+    direction: Literal["leftLong", "rightLong", "unknown"]
+
+
+class ArbitrageFailure(BaseModel):
+    symbol: str
+    reason: str
+
+
+class ArbitrageSnapshotRequest(BaseModel):
+    primary_source: str
+    secondary_source: str
+    volume_threshold: float = 0.0
+
+
+class ArbitrageSnapshotResponse(BaseModel):
+    entries: list[ArbitrageAnnualizedEntry]
+    failures: list[ArbitrageFailure]
+    fetched_at: datetime | None = None
+    errors: list[ApiError] = Field(default_factory=list)

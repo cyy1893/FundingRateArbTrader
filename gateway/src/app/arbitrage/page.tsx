@@ -26,11 +26,9 @@ import {
 } from "@/lib/external";
 import { DEFAULT_VOLUME_THRESHOLD } from "@/lib/volume-filter";
 import {
-  computeArbitrageAnnualizedSnapshot,
+  fetchArbitrageSnapshot,
   type ArbitrageAnnualizedEntry,
 } from "@/lib/arbitrage";
-import { getPerpetualSnapshot } from "@/lib/perp-snapshot";
-import type { MarketRow } from "@/types/market";
 
 type ArbitrageSearchParams = {
   sourceA?: string | string[];
@@ -86,29 +84,6 @@ function resolveVolumeThreshold(
     : DEFAULT_VOLUME_THRESHOLD;
 }
 
-function filterRowsByVolume(
-  rows: MarketRow[],
-  volumeThreshold: number,
-): MarketRow[] {
-  return rows.filter((row) => {
-    if (!row.right?.symbol) {
-      return false;
-    }
-    if (volumeThreshold <= 0) {
-      return true;
-    }
-    const leftVolume =
-      Number.isFinite(row.dayNotionalVolume ?? NaN) && row.dayNotionalVolume != null
-        ? row.dayNotionalVolume
-        : 0;
-    const rightVolume =
-      Number.isFinite(row.right.volumeUsd ?? NaN) && row.right.volumeUsd != null
-        ? row.right.volumeUsd
-        : 0;
-    return leftVolume >= volumeThreshold && rightVolume >= volumeThreshold;
-  });
-}
-
 function describeDirection(
   entry: ArbitrageAnnualizedEntry,
   leftLabel: string,
@@ -132,39 +107,28 @@ export default async function ArbitragePage({
   );
   const volumeThreshold = resolveVolumeThreshold(resolvedSearchParams);
 
-  let snapshot = null;
   let errorMessage: string | null = null;
+  let arbitrageSnapshot = null;
 
   try {
-    snapshot = await getPerpetualSnapshot(primarySource, secondarySource);
+    arbitrageSnapshot = await fetchArbitrageSnapshot(
+      primarySource,
+      secondarySource,
+      volumeThreshold,
+    );
   } catch (error) {
     errorMessage =
       error instanceof Error
         ? error.message
-        : `无法加载 ${primarySource.label} 市场数据。`;
-  }
-
-  const rows = snapshot?.rows ?? [];
-  const filteredRows = filterRowsByVolume(rows, volumeThreshold);
-  let arbitrageSnapshot = null;
-
-  if (!errorMessage) {
-    try {
-      arbitrageSnapshot = await computeArbitrageAnnualizedSnapshot(
-        filteredRows,
-        primarySource,
-        secondarySource,
-      );
-    } catch (error) {
-      errorMessage =
-        error instanceof Error
-          ? error.message
-          : "无法计算套利年化收益。";
-    }
+        : "无法计算套利年化收益。";
   }
 
   const entries = arbitrageSnapshot?.entries ?? [];
   const failures = arbitrageSnapshot?.failures ?? [];
+  const fetchedAt =
+    arbitrageSnapshot?.fetchedAt instanceof Date
+      ? arbitrageSnapshot.fetchedAt
+      : null;
   const searchParamsForLinks = new URLSearchParams({
     sourceA: primarySource.id,
     sourceB: secondarySource.id,
@@ -193,8 +157,8 @@ export default async function ArbitragePage({
               <div>
                 数据来源更新时间：{" "}
                 <span className="font-medium text-foreground">
-                  {snapshot?.fetchedAt
-                    ? snapshot.fetchedAt.toLocaleString("zh-CN")
+                  {fetchedAt
+                    ? fetchedAt.toLocaleString("zh-CN")
                     : "—"}
                 </span>
               </div>
