@@ -9,9 +9,22 @@ from typing import Any
 import httpx
 
 from app.config import Settings
-from app.models import ApiError, ExchangeMarketMetrics, ExchangeSnapshot, MarketRow, PerpSnapshot
+from app.models import (
+    ApiError,
+    ExchangeMarketMetrics,
+    ExchangeSnapshot,
+    FundingHistoryPoint,
+    MarketRow,
+    PerpSnapshot,
+)
 
 DEFAULT_FUNDING_PERIOD_HOURS = 1.0
+LIGHTER_FUNDING_PERIOD_HOURS = 8.0
+MS_PER_HOUR = 60 * 60 * 1000
+MAX_HYPER_FUNDING_POINTS = 500
+MAX_HYPER_LOOKBACK_MS = MAX_HYPER_FUNDING_POINTS * MS_PER_HOUR
+DEFAULT_LEFT_SOURCE = "lighter"
+DEFAULT_RIGHT_SOURCE = "grvt"
 SYMBOL_RENAMES: dict[str, str] = {
     "1000PEPE": "kPEPE",
     "1000SHIB": "kSHIB",
@@ -126,7 +139,7 @@ class MarketDataService:
                         price_change_7d=None,
                         max_leverage=None,
                         funding_rate_hourly=None,
-                        funding_period_hours=DEFAULT_FUNDING_PERIOD_HOURS,
+                        funding_period_hours=LIGHTER_FUNDING_PERIOD_HOURS,
                         day_notional_volume=None,
                         open_interest=None,
                         volume_usd=None,
@@ -160,7 +173,7 @@ class MarketDataService:
         for symbol, rate in funding_map.items():
             market = symbol_to_market.get(symbol) or symbol_to_market.get(f"{symbol}-PERP")
             if market:
-                market.funding_rate_hourly = rate / max(DEFAULT_FUNDING_PERIOD_HOURS, 1)
+                market.funding_rate_hourly = rate / max(LIGHTER_FUNDING_PERIOD_HOURS, 1)
         for symbol, volume in volume_by_symbol.items():
             market = symbol_to_market.get(symbol) or symbol_to_market.get(f"{symbol}-PERP")
             if market:
@@ -251,6 +264,221 @@ class MarketDataService:
             )
 
         return ExchangeSnapshot(markets=markets, errors=errors)
+
+    async def _fetch_hyperliquid_funding_history(self, symbol: str, start_time_ms: int) -> list[tuple[int, float]]:
+        """Fetch hourly funding history points from Hyperliquid."""
+        response = await self._client.post(
+            "https://api.hyperliquid.xyz/info",
+            json={"type": "fundingHistory", "coin": symbol, "startTime": start_time_ms},
+        )
+        response.raise_for_status()
+        raw = response.json()
+        series: list[tuple[int, float]] = []
+        if isinstance(raw, list):
+            for entry in raw:
+                if not isinstance(entry, dict):
+                    continue
+                normalized_time = _normalize_timestamp_to_hour(entry.get("time"))
+                rate = _parse_float(entry.get("fundingRate"))
+                if normalized_time is not None and rate is not None:
+                    series.append((normalized_time, rate * 100.0))
+        return series
+
+    async def _fetch_lighter_funding_history(self, symbol: str, start_time_ms: int) -> list[tuple[int, float]]:
+        """Fetch hourly funding history points from Lighter."""
+        normalized_symbol = _normalize_lighter_symbol(symbol)
+        base_symbol = normalized_symbol[:-5] if normalized_symbol.endswith("-PERP") else normalized_symbol
+        if not base_symbol:
+            raise ValueError("Invalid Lighter symbol requested.")
+
+        order_books_res = await self._client.get(f"{self._lighter_base_url}/api/v1/orderBooks")
+        order_books_res.raise_for_status()
+        order_books = order_books_res.json()
+        market_id: int | None = None
+        if isinstance(order_books, dict):
+            for market in order_books.get("order_books", []) or []:
+                if not isinstance(market, dict):
+                    continue
+                if _normalize_lighter_symbol(str(market.get("symbol") or "")) == base_symbol:
+                    market_id_value = _parse_float(market.get("market_id"))
+                    if market_id_value is not None and market_id_value > 0:
+                        market_id = int(market_id_value)
+                    break
+        if market_id is None or market_id <= 0:
+            raise ValueError("Unknown Lighter market.")
+
+        end_timestamp_seconds = math.floor(datetime.now(tz=timezone.utc).timestamp())
+        start_timestamp_seconds = max(math.floor(start_time_ms / 1000), 0)
+        duration_hours = max(1, math.ceil((end_timestamp_seconds - start_timestamp_seconds) / 3600))
+        params = {
+            "market_id": str(market_id),
+            "resolution": "1h",
+            "start_timestamp": str(start_timestamp_seconds),
+            "end_timestamp": str(end_timestamp_seconds),
+            "count_back": str(min(duration_hours, 1000)),
+        }
+        funding_res = await self._client.get(f"{self._lighter_base_url}/api/v1/fundings", params=params)
+        funding_res.raise_for_status()
+        payload = funding_res.json()
+        series: list[tuple[int, float]] = []
+        if isinstance(payload, dict):
+            for entry in payload.get("fundings", []) or []:
+                if not isinstance(entry, dict):
+                    continue
+                timestamp_seconds = _parse_float(entry.get("timestamp"))
+                rate_value = _parse_float(entry.get("rate")) or _parse_float(entry.get("value"))
+                if timestamp_seconds is None or rate_value is None:
+                    continue
+                direction = str(entry.get("direction") or "").lower()
+                signed_rate = -rate_value if direction == "short" else rate_value
+                timestamp_ms = int(timestamp_seconds * 1000)
+                normalized_time = _normalize_timestamp_to_hour(timestamp_ms)
+                if normalized_time is not None:
+                    series.append((normalized_time, signed_rate))
+        return series
+
+    async def _fetch_grvt_funding_history(
+        self,
+        symbol: str,
+        start_time_ms: int,
+        funding_period_hours: float | None = None,
+    ) -> list[tuple[int, float]]:
+        """Fetch hourly funding history points from GRVT, normalized to 1h."""
+        base = _normalize_grvt_base_symbol(symbol)
+        if not base:
+            raise ValueError("Invalid GRVT symbol requested.")
+        instrument = f"{base}_USDT_Perp"
+        start_ns = max(0, int(start_time_ms * 1_000_000))
+        body = {"instrument": instrument, "start_time": str(start_ns), "limit": 1000}
+        period_hours = funding_period_hours or 8.0
+        normalized_hours = max(period_hours, 1.0)
+        response = await self._client.post(
+            f"{self._grvt_market_data_base}/full/v1/funding",
+            json=body,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        series: list[tuple[int, float]] = []
+        if isinstance(payload, dict):
+            for entry in payload.get("result", []) or []:
+                if not isinstance(entry, dict):
+                    continue
+                rate = _parse_float(entry.get("funding_rate"))
+                time_ns = _parse_float(entry.get("funding_time"))
+                if rate is None or time_ns is None:
+                    continue
+                hourly_rate = rate / normalized_hours
+                time_ms = math.floor(time_ns / 1_000_000)
+                normalized_time = _normalize_timestamp_to_hour(time_ms)
+                if normalized_time is not None:
+                    series.append((normalized_time, hourly_rate))
+        return series
+
+    async def _fetch_history_series_for_source(
+        self,
+        source: str,
+        symbol: str,
+        start_time_ms: int,
+        funding_period_hours: float | None = None,
+    ) -> list[tuple[int, float]]:
+        """Fetch funding history series for a given provider."""
+        provider = source.lower()
+        if provider == "hyperliquid":
+            return await self._fetch_hyperliquid_funding_history(symbol, start_time_ms)
+        if provider == "lighter":
+            return await self._fetch_lighter_funding_history(symbol, start_time_ms)
+        if provider == "grvt":
+            return await self._fetch_grvt_funding_history(symbol, start_time_ms, funding_period_hours)
+        raise ValueError(f"Unsupported provider: {source}")
+
+    def _merge_funding_history_series(
+        self,
+        left_history: list[tuple[int, float]],
+        right_history: list[tuple[int, float]],
+    ) -> list[FundingHistoryPoint]:
+        """Merge left/right funding series into a unified dataset."""
+        sorted_left = sorted(left_history, key=lambda entry: entry[0])
+        sorted_right = sorted(right_history, key=lambda entry: entry[0])
+
+        if not sorted_left and sorted_right:
+            return [
+                FundingHistoryPoint(time=time, left=None, right=rate, spread=None)
+                for time, rate in sorted_right
+            ]
+
+        dataset: list[FundingHistoryPoint] = []
+        right_index = 0
+        current_right: float | None = None
+
+        for time, left_rate in sorted_left:
+            while right_index < len(sorted_right) and sorted_right[right_index][0] <= time:
+                next_right = sorted_right[right_index][1]
+                if next_right is not None and math.isfinite(next_right):
+                    current_right = next_right
+                right_index += 1
+            spread = current_right - left_rate if current_right is not None else None
+            dataset.append(
+                FundingHistoryPoint(
+                    time=time,
+                    left=left_rate,
+                    right=current_right,
+                    spread=spread,
+                )
+            )
+        return dataset
+
+    async def get_funding_history(
+        self,
+        left_source: str | None,
+        right_source: str | None,
+        left_symbol: str,
+        right_symbol: str | None,
+        days: int,
+        left_funding_period_hours: float | None = None,
+        right_funding_period_hours: float | None = None,
+    ) -> list[FundingHistoryPoint]:
+        """
+        Fetch funding history for the given symbols and sources, merging them into a dataset.
+        """
+        if not left_symbol:
+            raise ValueError("left_symbol is required")
+
+        normalized_days = max(days, 1)
+        now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+        desired_start = now_ms - normalized_days * 24 * MS_PER_HOUR
+        start_time_ms = max(desired_start, now_ms - MAX_HYPER_LOOKBACK_MS)
+
+        left_provider = (left_source or DEFAULT_LEFT_SOURCE).lower()
+        right_provider = (right_source or DEFAULT_RIGHT_SOURCE).lower()
+
+        left_history: list[tuple[int, float]] = []
+        right_history: list[tuple[int, float]] = []
+
+        try:
+            left_history = await self._fetch_history_series_for_source(
+                left_provider,
+                left_symbol,
+                start_time_ms,
+                left_funding_period_hours,
+            )
+        except Exception:
+            left_history = []
+
+        if right_symbol:
+            try:
+                right_history = await self._fetch_history_series_for_source(
+                    right_provider,
+                    right_symbol,
+                    start_time_ms,
+                    right_funding_period_hours,
+                )
+            except Exception:
+                right_history = []
+
+        if not left_history and not right_history:
+            raise ValueError("暂无可用的资金费率历史数据")
+
+        return self._merge_funding_history_series(left_history, right_history)
 
     async def fetch_exchange_snapshot(self, source: str) -> ExchangeSnapshot:
         provider = source.lower()
@@ -401,6 +629,24 @@ def _parse_lighter_leverage_markdown(markdown: str, overrides: dict[str, float])
             leverage_map[symbol] = value
             leverage_map[f"{symbol}-PERP"] = value
     return leverage_map
+
+
+def _normalize_timestamp_to_hour(value: Any) -> int | None:
+    try:
+        ts = int(float(value))
+    except Exception:  # noqa: BLE001
+        return None
+    return (ts // MS_PER_HOUR) * MS_PER_HOUR
+
+
+def _normalize_lighter_symbol(value: str | None) -> str:
+    return value.strip().upper() if value else ""
+
+
+def _normalize_grvt_base_symbol(symbol: str) -> str:
+    if not symbol:
+        return ""
+    return re.sub(r"[-_]PERP$", "", symbol.upper())
 
 
 def _parse_float(value: Any) -> float | None:
