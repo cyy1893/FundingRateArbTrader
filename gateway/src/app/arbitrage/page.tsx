@@ -90,10 +90,10 @@ function describeDirection(
   rightLabel: string,
 ): string {
   if (entry.direction === "leftLong") {
-    return `${leftLabel} 开多 / ${rightLabel} 开空`;
+    return `${leftLabel} 做多 / ${rightLabel} 做空`;
   }
   if (entry.direction === "rightLong") {
-    return `${rightLabel} 开多 / ${leftLabel} 开空`;
+    return `${leftLabel} 做空 / ${rightLabel} 做多`;
   }
   return "方向不明";
 }

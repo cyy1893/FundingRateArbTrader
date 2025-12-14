@@ -259,10 +259,10 @@ function renderDirection(
     return (
       <div className="space-y-1 leading-tight">
         <p className="font-medium text-emerald-500">
-          {metadata.primarySourceLabel} 开多
+          {metadata.primarySourceLabel} 做多
         </p>
         <p className="font-medium text-rose-500">
-          {metadata.secondarySourceLabel} 开空
+          {metadata.secondarySourceLabel} 做空
         </p>
       </div>
     );
@@ -270,11 +270,11 @@ function renderDirection(
   if (entry.direction === "rightLong") {
     return (
       <div className="space-y-1 leading-tight">
-        <p className="font-medium text-emerald-500">
-          {metadata.secondarySourceLabel} 开多
-        </p>
         <p className="font-medium text-rose-500">
-          {metadata.primarySourceLabel} 开空
+          {metadata.primarySourceLabel} 做空
+        </p>
+        <p className="font-medium text-emerald-500">
+          {metadata.secondarySourceLabel} 做多
         </p>
       </div>
     );
