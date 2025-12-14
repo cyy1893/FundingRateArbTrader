@@ -74,7 +74,7 @@ export default async function Home({
 
   return (
     <div className="min-h-screen py-8">
-      <div className="mx-auto max-w-[1800px] px-8">
+      <div className="w-full px-4 md:px-8">
         <Suspense fallback={<DashboardSkeleton />}>
           <DashboardContent
             primarySource={primarySource}

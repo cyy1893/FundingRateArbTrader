@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 
-import { SideNav } from "@/components/side-nav";
+import { TopNav } from "@/components/top-nav";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -24,9 +24,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable} suppressHydrationWarning>
       <body className="bg-background font-sans text-foreground antialiased">
-        {/* 2-Column Layout */}
-        <SideNav />
-        <main className="ml-64 min-h-screen">
+        {/* Top Navigation Layout */}
+        <TopNav />
+        <main className="min-h-screen">
           {children}
         </main>
       </body>
