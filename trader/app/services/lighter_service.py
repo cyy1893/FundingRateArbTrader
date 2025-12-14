@@ -64,17 +64,10 @@ class LighterService:
             if self._settings.lighter_nonce_manager.lower() == "api":
                 nonce_type = nonce_manager.NonceManagerType.API
 
-            api_private_keys = {
-                self._settings.lighter_api_key_index: self._settings.lighter_private_key,
-            }
-
             client = SignerClient(
                 url=self._settings.lighter_base_url,
-                private_key=self._settings.lighter_private_key,
-                api_key_index=self._settings.lighter_api_key_index,
                 account_index=self._settings.lighter_account_index,
-                max_api_key_index=self._settings.lighter_max_api_key_index or -1,
-                private_keys=api_private_keys,
+                api_private_keys={self._settings.lighter_api_key_index: self._settings.lighter_private_key},
                 nonce_management_type=nonce_type,
             )
 
@@ -96,8 +89,8 @@ class LighterService:
                 avg_execution_price=request.avg_execution_price,  # type: ignore[arg-type]
                 is_ask=request.is_ask,
                 reduce_only=request.reduce_only,
-                nonce=request.nonce or -1,
-                api_key_index=request.api_key_index or -1,
+                nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
+                api_key_index=request.api_key_index if request.api_key_index is not None else SignerClient.DEFAULT_API_KEY_INDEX,
             )
         else:
             time_in_force = {
@@ -117,8 +110,8 @@ class LighterService:
                 reduce_only=request.reduce_only,
                 trigger_price=request.trigger_price or SignerClient.NIL_TRIGGER_PRICE,
                 order_expiry=request.order_expiry_secs or SignerClient.DEFAULT_28_DAY_ORDER_EXPIRY,
-                nonce=request.nonce or -1,
-                api_key_index=request.api_key_index or -1,
+                nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
+                api_key_index=request.api_key_index if request.api_key_index is not None else SignerClient.DEFAULT_API_KEY_INDEX,
             )
 
         if err is not None:
