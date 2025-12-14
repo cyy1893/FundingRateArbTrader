@@ -241,7 +241,7 @@ class MarketDataService:
                     price_change_1h=None,
                     price_change_24h=None,
                     price_change_7d=None,
-                    max_leverage=None,
+                    max_leverage=50.0,
                     funding_rate_hourly=funding_rate_hourly,
                     funding_period_hours=interval_hours,
                     day_notional_volume=volume_q if volume_q > 0 else None,

@@ -11,9 +11,20 @@ import {
 export const MS_PER_HOUR = 60 * 60 * 1000;
 const MAX_HYPER_FUNDING_POINTS = 500;
 const MAX_HYPER_LOOKBACK_MS = MAX_HYPER_FUNDING_POINTS * MS_PER_HOUR;
+const GRVT_MARKET_DATA_BASE =
+  process.env.GRVT_MARKET_DATA_URL ??
+  process.env.NEXT_PUBLIC_GRVT_MARKET_DATA_URL ??
+  "https://market-data.grvt.io";
 
 function normalizeTimestampToHour(value: number): number {
   return Math.floor(value / MS_PER_HOUR) * MS_PER_HOUR;
+}
+
+function normalizePerpBaseSymbol(symbol: string): string {
+  if (!symbol) {
+    return "";
+  }
+  return symbol.toUpperCase().replace(/[-_]PERP$/, "");
 }
 
 async function fetchHyperliquidFundingHistorySeries(
@@ -131,6 +142,66 @@ async function fetchLighterFundingHistorySeries(
     );
 }
 
+async function fetchGrvtFundingHistorySeries(
+  symbol: string,
+  startTime: number,
+): Promise<Array<{ time: number; rate: number }>> {
+  const base = normalizePerpBaseSymbol(symbol);
+  if (!base) {
+    throw new Error("Invalid GRVT symbol requested.");
+  }
+
+  const instrument = `${base}_USDT_Perp`;
+  const startNs = Math.max(0, Math.floor(startTime * 1_000_000));
+  const body: Record<string, string | number> = {
+    instrument,
+    start_time: `${startNs}`,
+    limit: 1000,
+  };
+
+  const response = await fetch(`${GRVT_MARKET_DATA_BASE}/full/v1/funding`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error("GRVT funding history request failed.");
+  }
+
+  const payload = (await response.json()) as {
+    result?: Array<{
+      funding_rate?: string | number | null;
+      funding_time?: string | number | null;
+    }>;
+  };
+
+  return (payload.result ?? [])
+    .map((entry) => {
+      const rate =
+        typeof entry?.funding_rate === "string"
+          ? Number.parseFloat(entry.funding_rate)
+          : Number(entry?.funding_rate);
+      const timeNs =
+        typeof entry?.funding_time === "string"
+          ? Number.parseInt(entry.funding_time, 10)
+          : Number(entry?.funding_time);
+      if (!Number.isFinite(rate) || !Number.isFinite(timeNs)) {
+        return null;
+      }
+      const timeMs = Math.floor(timeNs / 1_000_000);
+      return {
+        time: normalizeTimestampToHour(timeMs),
+        rate,
+      };
+    })
+    .filter(
+      (point): point is { time: number; rate: number } =>
+        point !== null && point.time >= startTime,
+    );
+}
+
 async function fetchHistorySeriesForSource(
   source: SourceConfig,
   symbol: string | null,
@@ -149,7 +220,7 @@ async function fetchHistorySeriesForSource(
     return fetchLighterFundingHistorySeries(symbol, startTime);
   }
   if (source.provider === "grvt") {
-    return [];
+    return fetchGrvtFundingHistorySeries(symbol, startTime);
   }
   return [];
 }

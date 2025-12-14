@@ -1349,6 +1349,12 @@ export function PerpTable({
                   </button>
                 </TableHead>
                 <TableHead className="text-left font-semibold text-[11px] text-muted-foreground">
+                  {leftSource.label} 资金费率周期
+                </TableHead>
+                <TableHead className="text-left font-semibold text-[11px] text-muted-foreground">
+                  {rightSource.label} 资金费率周期
+                </TableHead>
+                <TableHead className="text-left font-semibold text-[11px] text-muted-foreground">
                   <button
                     type="button"
                     onClick={() => cycleSort("arbitrage")}
@@ -1387,7 +1393,7 @@ export function PerpTable({
               {currentRows.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={13}
+                    colSpan={15}
                     className="py-12 text-center text-sm text-muted-foreground"
                   >
                     未找到匹配的资产。

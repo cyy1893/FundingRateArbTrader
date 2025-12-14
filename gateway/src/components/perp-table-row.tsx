@@ -129,6 +129,26 @@ function buildMarketUrl(provider: SourceProvider, symbol: string | null | undefi
   return null;
 }
 
+function formatFundingPeriodHours(
+  provider: SourceProvider,
+  value: number | null | undefined,
+): string {
+  const fallback =
+    provider === "lighter"
+      ? 1
+      : null;
+  const normalized =
+    Number.isFinite(value) && value !== null ? Number(value) : fallback;
+  if (!normalized || !Number.isFinite(normalized)) {
+    return "—";
+  }
+  const display =
+    Number.isInteger(normalized) || normalized >= 10
+      ? normalized.toString()
+      : normalized.toFixed(2).replace(/\.?0+$/, "");
+  return `${display}h`;
+}
+
 function PerpTableRowComponent({
   row,
   liveFunding,
@@ -176,6 +196,14 @@ function PerpTableRowComponent({
       : null;
   const colorAbsArbDelta =
     colorArbDelta !== null ? Math.abs(colorArbDelta) : null;
+  const leftFundingPeriodLabel = formatFundingPeriodHours(
+    row.leftProvider,
+    row.leftFundingPeriodHours,
+  );
+  const rightFundingPeriodLabel = formatFundingPeriodHours(
+    row.right?.source ?? row.rightProvider,
+    row.right?.fundingPeriodHours ?? null,
+  );
 
   let arbitrageBadgeClass =
     "border-border bg-muted/80 text-muted-foreground";
@@ -377,6 +405,12 @@ function PerpTableRowComponent({
             —
           </Badge>
         )}
+      </TableCell>
+      <TableCell className="text-xs font-medium tabular-nums text-muted-foreground">
+        {leftFundingPeriodLabel}
+      </TableCell>
+      <TableCell className="text-xs font-medium tabular-nums text-muted-foreground">
+        {row.right ? rightFundingPeriodLabel : "—"}
       </TableCell>
       <TableCell>
         {absArbDelta !== null ? (
