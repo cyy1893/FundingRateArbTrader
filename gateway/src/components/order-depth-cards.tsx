@@ -32,7 +32,7 @@ type OrderBookCardProps = {
 };
 
 const DEFAULT_DEPTH = 10;
-const DEFAULT_THROTTLE_MS = 500;
+const DEFAULT_THROTTLE_MS = 100;
 
 export function MonitoringConfigCard({
     onClose,
@@ -168,7 +168,7 @@ export function MonitoringConfigCard({
 }
 
 export function OrderBookCard({ subscription, onReset }: OrderBookCardProps) {
-    const { orderBook, status, error, hasSnapshot, hasLighter, hasGrvt } = useOrderBookWebSocket(subscription);
+    const { orderBook, trades, status, error, hasSnapshot, hasLighter, hasGrvt } = useOrderBookWebSocket(subscription);
 
     return (
         <Card className="border-border/60">
@@ -217,6 +217,7 @@ export function OrderBookCard({ subscription, onReset }: OrderBookCardProps) {
                 {/* Order Book Display */}
                 <OrderBookDisplay
                     orderBook={orderBook}
+                    trades={trades}
                     status={status}
                     hasSnapshot={hasSnapshot}
                     hasLighter={hasLighter}

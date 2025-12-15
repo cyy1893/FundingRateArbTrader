@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { OrderBookSnapshot, VenueOrderBook, OrderBookLevel, WebSocketStatus } from "@/hooks/use-order-book-websocket";
+import type { OrderBookSnapshot, VenueOrderBook, OrderBookLevel, WebSocketStatus, TradesSnapshot, TradeEntry } from "@/hooks/use-order-book-websocket";
 
 type Props = {
   orderBook: OrderBookSnapshot | null;
+  trades: TradesSnapshot | null;
   status: WebSocketStatus;
   hasSnapshot: boolean;
   hasLighter: boolean;
@@ -242,9 +243,53 @@ function VenueOrderBookTable({
   );
 }
 
-export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasLighter, hasGrvt }: Props) {
+export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLighter, hasGrvt }: Props) {
   const [displayMode, setDisplayMode] = useState<DisplayMode>("usd");
   const toggleMode = () => setDisplayMode((m) => (m === "usd" ? "base" : "usd"));
+
+  const timeFormatter = useState(
+    () =>
+      new Intl.DateTimeFormat("zh-CN", {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        fractionalSecondDigits: 3,
+      }),
+  )[0];
+
+  const renderTrades = (entries: TradeEntry[] | undefined) => {
+    if (!entries || entries.length === 0) {
+      return <div className="text-xs text-muted-foreground py-3">暂无成交</div>;
+    }
+    return (
+      <div className="max-h-64 overflow-y-auto text-xs">
+        <div className="grid grid-cols-3 px-2 py-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+          <span>价格</span>
+          <span className="text-center">数量</span>
+          <span className="text-right">时间</span>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {entries.map((t, idx) => {
+            const time = timeFormatter.format(new Date(t.timestamp * 1000));
+            const color = t.is_buy ? "text-green-600" : "text-red-600";
+            const sizeValue = displayMode === "usd" ? t.size * t.price : t.size;
+            return (
+              <div key={`${t.timestamp}-${idx}`} className="grid grid-cols-3 px-2 py-1 text-xs">
+                <span className={color}>
+                  {t.price.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                </span>
+                <span className="text-center">
+                  {displayMode === "usd" ? `$${sizeValue.toFixed(2)}` : sizeValue.toFixed(3)}
+                </span>
+                <span className="text-right text-muted-foreground">{time}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -269,6 +314,10 @@ export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasLighter, h
               venueReady={hasLighter}
               displayMode={displayMode}
             />
+            <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
+              <div className="text-[11px] font-semibold text-muted-foreground mb-1">逐笔成交</div>
+              {renderTrades(trades?.lighter)}
+            </div>
           </CardContent>
         </Card>
 
@@ -284,6 +333,10 @@ export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasLighter, h
               venueReady={hasGrvt}
               displayMode={displayMode}
             />
+            <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
+              <div className="text-[11px] font-semibold text-muted-foreground mb-1">逐笔成交</div>
+              {renderTrades(trades?.grvt)}
+            </div>
           </CardContent>
         </Card>
       </div>

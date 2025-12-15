@@ -149,6 +149,20 @@ class OrderBookSnapshot(BaseModel):
     grvt: Optional[VenueOrderBook] = None
 
 
+class TradeEntry(BaseModel):
+    venue: Literal["lighter", "grvt"]
+    symbol: str
+    price: float
+    size: float
+    is_buy: bool
+    timestamp: float
+
+
+class TradesSnapshot(BaseModel):
+    lighter: list[TradeEntry] = Field(default_factory=list)
+    grvt: list[TradeEntry] = Field(default_factory=list)
+
+
 class OrderBookSubscription(BaseModel):
     """WebSocket subscription request for order book data."""
     symbol: str = Field(..., description="Trading symbol (e.g., BTC, ETH, SOL)")

@@ -18,6 +18,7 @@ from app.models import (
     BalancesResponse,
     FundingHistoryRequest,
     FundingHistoryResponse,
+    TradesSnapshot,
     LighterOrderRequest,
     LoginRequest,
     LoginResponse,
@@ -308,7 +309,17 @@ async def ws_orderbook(
         )
         tasks.append(
             asyncio.create_task(
+                forward_updates("lighter_trades", lighter.stream_trades(subscription.symbol, limit=50))
+            )
+        )
+        tasks.append(
+            asyncio.create_task(
                 forward_updates("grvt", grvt.stream_orderbook(subscription.symbol, subscription.depth))
+            )
+        )
+        tasks.append(
+            asyncio.create_task(
+                forward_updates("grvt_trades", grvt.stream_trades(subscription.symbol, limit=50))
             )
         )
     except Exception as exc:  # noqa: BLE001
@@ -322,12 +333,18 @@ async def ws_orderbook(
         while True:
             await asyncio.sleep(throttle)
             if latest_snapshots:
-                snapshot = OrderBookSnapshot(
-                    lighter=latest_snapshots.get("lighter"),
-                    grvt=latest_snapshots.get("grvt"),
-                )
+                snapshot = {
+                    "orderbooks": OrderBookSnapshot(
+                        lighter=latest_snapshots.get("lighter"),
+                        grvt=latest_snapshots.get("grvt"),
+                    ).model_dump(),
+                    "trades": TradesSnapshot(
+                        lighter=latest_snapshots.get("lighter_trades") or [],
+                        grvt=latest_snapshots.get("grvt_trades") or [],
+                    ).model_dump(),
+                }
                 try:
-                    await websocket.send_json(snapshot.model_dump())
+                    await websocket.send_json(snapshot)
                 except Exception:
                     stop_event.set()
                     break

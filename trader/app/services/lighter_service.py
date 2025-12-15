@@ -23,6 +23,7 @@ from app.models import (
     LighterPositionBalance,
     OrderBookLevel,
     OrderBookSide,
+    TradeEntry,
     VenueOrderBook,
 )
 
@@ -255,6 +256,59 @@ class LighterService:
                     timestamp=timestamp,
                 )
 
+    async def stream_trades(self, symbol: str, limit: int = 50) -> AsyncIterator[list[TradeEntry]]:
+        market_id = await self._get_market_id(symbol)
+        normalized_symbol = symbol.strip().upper()
+        ws_url = self._ws_endpoint
+        backoff = 1.0
+
+        while True:
+            try:
+                async with websockets.connect(
+                    ws_url,
+                    ping_interval=20,
+                    ping_timeout=20,
+                ) as ws:
+                    try:
+                        first_msg = await ws.recv()
+                        data = json.loads(first_msg)
+                        if data.get("type") == "connected":
+                            await ws.send(json.dumps({"type": "subscribe", "channel": f"trade/{market_id}", "limit": limit}))
+                        else:
+                            await ws.send(json.dumps({"type": "subscribe", "channel": f"trade/{market_id}", "limit": limit}))
+                    except Exception:
+                        await ws.send(json.dumps({"type": "subscribe", "channel": f"trade/{market_id}", "limit": limit}))
+
+                    async for raw_message in ws:
+                        data = json.loads(raw_message)
+                        message_type = data.get("type")
+                        if message_type == "ping":
+                            await ws.send(json.dumps({"type": "pong"}))
+                            continue
+                        # trade channel returns types like subscribed/trade, update/trade, or others with trade payloads
+                        if "trade" not in (message_type or ""):
+                            continue
+                        trades_payload = data.get("trades") or data.get("trade") or data.get("liquidation_trades")
+                        trades: list[TradeEntry] = []
+                        if isinstance(trades_payload, list):
+                            for entry in trades_payload:
+                                parsed = self._parse_trade_entry(entry, normalized_symbol)
+                                if parsed:
+                                    trades.append(parsed)
+                        elif isinstance(trades_payload, dict):
+                            parsed = self._parse_trade_entry(trades_payload, normalized_symbol)
+                            if parsed:
+                                trades.append(parsed)
+                        if trades:
+                            yield trades
+                    backoff = 1.0
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("Lighter trades stream error: %s", exc)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30.0)
+
     def _apply_lighter_updates(
         self,
         order_book_state: dict[str, list[dict[str, str]]],
@@ -374,6 +428,31 @@ class LighterService:
             return Decimal(str(value))
         except (InvalidOperation, ValueError):
             return Decimal(0)
+
+    def _parse_trade_entry(self, entry: dict[str, Any], symbol: str) -> TradeEntry | None:
+        try:
+            price = float(self._parse_decimal(entry.get("price")))
+            size = float(self._parse_decimal(entry.get("size")))
+        except Exception:
+            return None
+        if price <= 0 or size <= 0:
+            return None
+        is_buy = bool(entry.get("is_buy") or entry.get("is_buyer"))
+        if not is_buy and "is_maker_ask" in entry:
+            is_buy = not bool(entry.get("is_maker_ask"))
+        timestamp_raw = entry.get("timestamp") or entry.get("event_time")
+        try:
+            ts_float = float(timestamp_raw) / 1000.0 if timestamp_raw else 0.0
+        except Exception:
+            ts_float = 0.0
+        return TradeEntry(
+            venue="lighter",
+            symbol=symbol,
+            price=price,
+            size=size,
+            is_buy=is_buy,
+            timestamp=ts_float,
+        )
 
     @staticmethod
     def _parse_timestamp(value: Any) -> float:

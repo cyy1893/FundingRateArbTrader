@@ -25,6 +25,25 @@ export type OrderBookSnapshot = {
   grvt?: VenueOrderBook;
 };
 
+export type TradeEntry = {
+  venue: 'lighter' | 'grvt';
+  symbol: string;
+  price: number;
+  size: number;
+  is_buy: boolean;
+  timestamp: number;
+};
+
+export type TradesSnapshot = {
+  lighter?: TradeEntry[];
+  grvt?: TradeEntry[];
+};
+
+export type OrderBookPayload = {
+  orderbooks?: OrderBookSnapshot;
+  trades?: TradesSnapshot;
+};
+
 export type OrderBookSubscription = {
   symbol: string;
   lighter_leverage: number;
@@ -38,6 +57,7 @@ export type WebSocketStatus = 'disconnected' | 'connecting' | 'connected' | 'err
 
 export function useOrderBookWebSocket(subscription: OrderBookSubscription | null) {
   const [orderBook, setOrderBook] = useState<OrderBookSnapshot | null>(null);
+  const [trades, setTrades] = useState<TradesSnapshot | null>(null);
   const [hasSnapshot, setHasSnapshot] = useState(false);
   const [hasLighter, setHasLighter] = useState(false);
   const [hasGrvt, setHasGrvt] = useState(false);
@@ -46,8 +66,9 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const subscriptionRef = useRef<OrderBookSubscription | null>(null);
-  const latestSnapshotRef = useRef<OrderBookSnapshot | null>(null);
+  const latestSnapshotRef = useRef<OrderBookPayload | null>(null);
   const throttleIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const tradeBufferRef = useRef<TradesSnapshot>({});
 
   const connect = useCallback(function doConnect(sub?: OrderBookSubscription | null) {
     const activeSub = sub ?? subscriptionRef.current;
@@ -60,6 +81,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     setHasLighter(false);
     setHasGrvt(false);
     latestSnapshotRef.current = null;
+    tradeBufferRef.current = {};
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const base =
@@ -92,10 +114,14 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
             return;
           }
 
-          setHasSnapshot(true);
-          setHasLighter(Boolean(data.lighter));
-          setHasGrvt(Boolean(data.grvt));
-          latestSnapshotRef.current = data;
+          const payload = data as OrderBookPayload;
+          const ob = payload.orderbooks ?? {};
+          const tr = payload.trades ?? {};
+
+          setHasSnapshot(Boolean(payload.orderbooks));
+          setHasLighter(Boolean(ob.lighter || tr.lighter));
+          setHasGrvt(Boolean(ob.grvt || tr.grvt));
+          latestSnapshotRef.current = payload;
         } catch (err) {
           console.error('Failed to parse WebSocket message:', err);
         }
@@ -108,6 +134,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
         setHasSnapshot(false);
         setHasLighter(false);
         setHasGrvt(false);
+        tradeBufferRef.current = {};
       };
 
       ws.onclose = () => {
@@ -146,6 +173,20 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     setHasLighter(false);
     setHasGrvt(false);
     latestSnapshotRef.current = null;
+    tradeBufferRef.current = {};
+  }, []);
+
+  const mergeTrades = useCallback((incoming: TradeEntry[] | undefined, venue: 'lighter' | 'grvt') => {
+    if (!incoming || incoming.length === 0) {
+      return;
+    }
+    const existing = tradeBufferRef.current[venue] ?? [];
+    const combined = [...incoming, ...existing];
+    combined.sort((a, b) => b.timestamp - a.timestamp);
+    tradeBufferRef.current = {
+      ...tradeBufferRef.current,
+      [venue]: combined.slice(0, 100),
+    };
   }, []);
 
   useEffect(() => {
@@ -163,8 +204,16 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
 
   useEffect(() => {
     throttleIntervalRef.current = setInterval(() => {
-      if (latestSnapshotRef.current) {
-        setOrderBook(latestSnapshotRef.current);
+      const payload = latestSnapshotRef.current;
+      if (payload) {
+        if (payload.orderbooks) {
+          setOrderBook(payload.orderbooks);
+        }
+        if (payload.trades) {
+          mergeTrades(payload.trades.lighter, 'lighter');
+          mergeTrades(payload.trades.grvt, 'grvt');
+          setTrades({ ...tradeBufferRef.current });
+        }
       }
     }, 500);
 
@@ -178,6 +227,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
 
   return {
     orderBook,
+    trades,
     status,
     error,
     hasSnapshot,

@@ -13,7 +13,7 @@ from pysdk.grvt_ccxt_env import GrvtEnv, GrvtWSEndpointType, get_grvt_ws_endpoin
 from pysdk.grvt_ccxt_pro import GrvtCcxtPro
 
 from app.config import Settings
-from app.models import GrvtAssetBalance, GrvtBalanceSnapshot, GrvtPositionBalance, OrderBookLevel, OrderBookSide, VenueOrderBook
+from app.models import GrvtAssetBalance, GrvtBalanceSnapshot, GrvtPositionBalance, OrderBookLevel, OrderBookSide, TradeEntry, VenueOrderBook
 
 
 class GrvtService:
@@ -180,6 +180,82 @@ class GrvtService:
             fallback_task.cancel()
             await asyncio.gather(ws_task, fallback_task, return_exceptions=True)
 
+    async def stream_trades(self, symbol: str, limit: int = 50) -> asyncio.AsyncIterator[list[TradeEntry]]:
+        """
+        Stream recent trades over WebSocket; falls back to HTTP if WS has not yielded yet.
+        """
+
+        instrument = await self._get_instrument(symbol)
+        client = await self._ensure_client()
+        await client.refresh_cookie()
+        cookie = getattr(client, "_cookie", {}) or {}
+        gravity = cookie.get("gravity")
+        account_id = cookie.get("X-Grvt-Account-Id")
+        headers = {}
+        if gravity:
+            headers["Cookie"] = f"gravity={gravity}"
+        if account_id:
+            headers["X-Grvt-Account-Id"] = account_id
+
+        ws_url = get_grvt_ws_endpoint(self._settings.grvt_env, GrvtWSEndpointType.MARKET_DATA)
+        version_prefix = self._settings.grvt_ws_stream_version
+        stream = f"{version_prefix}.trade" if version_prefix != "v0" else "trade"
+        selector = f"{instrument}@{limit}"
+        subscribe_json = json.dumps(
+            {
+                "request_id": 2,
+                "stream": stream,
+                "feed": [selector],
+                "method": "subscribe",
+                "is_full": True,
+            }
+        )
+
+        queue: asyncio.Queue[list[TradeEntry]] = asyncio.Queue()
+        ws_received = asyncio.Event()
+        backoff = 0.5
+
+        async def ws_loop() -> None:
+            nonlocal backoff
+            while True:
+                try:
+                    async with websockets.connect(ws_url, extra_headers=headers, open_timeout=5) as ws:
+                        await ws.send(subscribe_json)
+                        async for message in ws:
+                            trades = self._parse_trades_message(json.loads(message), symbol)
+                            if trades:
+                                ws_received.set()
+                                await queue.put(trades)
+                                backoff = 0.5
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    backoff = min(backoff * 2, 5.0)
+                    await asyncio.sleep(backoff)
+
+        async def fallback_loop() -> None:
+            while not ws_received.is_set():
+                try:
+                    raw_trades = await client.fetch_recent_trades(instrument, limit=limit)
+                    trades = self._parse_trades_message({"data": raw_trades}, symbol)
+                    if trades:
+                        await queue.put(trades)
+                except Exception:
+                    pass
+                await asyncio.sleep(1.0)
+
+        ws_task = asyncio.create_task(ws_loop())
+        fallback_task = asyncio.create_task(fallback_loop())
+
+        try:
+            while True:
+                trades = await queue.get()
+                yield trades
+        finally:
+            ws_task.cancel()
+            fallback_task.cancel()
+            await asyncio.gather(ws_task, fallback_task, return_exceptions=True)
+
     async def _ensure_client(self) -> GrvtCcxtPro:
         if self._client is not None:
             return self._client
@@ -294,3 +370,36 @@ class GrvtService:
             asks=asks_side,
             timestamp=timestamp,
         )
+
+    def _parse_trades_message(self, message: Any, symbol: str) -> list[TradeEntry] | None:
+        payload = None
+        if isinstance(message, dict):
+            payload = message.get("data") or message.get("result") or message
+        if payload is None:
+            return None
+
+        entries = payload.get("trades") if isinstance(payload, dict) else payload
+        if not isinstance(entries, list):
+            return None
+
+        trades: list[TradeEntry] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            price = self._to_float(entry.get("price"))
+            size = self._to_float(entry.get("size"))
+            if price <= 0 or size <= 0:
+                continue
+            event_time = self._parse_timestamp(entry.get("event_time"))
+            is_buyer = entry.get("is_taker_buyer") or entry.get("is_buyer")
+            trades.append(
+                TradeEntry(
+                    venue="grvt",
+                    symbol=symbol,
+                    price=price,
+                    size=size,
+                    is_buy=bool(is_buyer),
+                    timestamp=event_time.timestamp() if isinstance(event_time, datetime) else datetime.now(tz=timezone.utc).timestamp(),
+                )
+            )
+        return trades or None
