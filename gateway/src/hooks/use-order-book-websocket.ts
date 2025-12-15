@@ -13,7 +13,7 @@ export type OrderBookSide = {
 };
 
 export type VenueOrderBook = {
-  venue: 'lighter';
+  venue: 'lighter' | 'grvt';
   symbol: string;
   bids: OrderBookSide;
   asks: OrderBookSide;
@@ -22,6 +22,7 @@ export type VenueOrderBook = {
 
 export type OrderBookSnapshot = {
   lighter?: VenueOrderBook;
+  grvt?: VenueOrderBook;
 };
 
 export type OrderBookSubscription = {
@@ -39,6 +40,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
   const [orderBook, setOrderBook] = useState<OrderBookSnapshot | null>(null);
   const [hasSnapshot, setHasSnapshot] = useState(false);
   const [hasLighter, setHasLighter] = useState(false);
+  const [hasGrvt, setHasGrvt] = useState(false);
   const [status, setStatus] = useState<WebSocketStatus>('disconnected');
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -56,6 +58,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     setOrderBook(null);
     setHasSnapshot(false);
     setHasLighter(false);
+    setHasGrvt(false);
     latestSnapshotRef.current = null;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -91,6 +94,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
 
           setHasSnapshot(true);
           setHasLighter(Boolean(data.lighter));
+          setHasGrvt(Boolean(data.grvt));
           latestSnapshotRef.current = data;
         } catch (err) {
           console.error('Failed to parse WebSocket message:', err);
@@ -103,6 +107,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
         setStatus('error');
         setHasSnapshot(false);
         setHasLighter(false);
+        setHasGrvt(false);
       };
 
       ws.onclose = () => {
@@ -139,6 +144,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     setError(null);
     setHasSnapshot(false);
     setHasLighter(false);
+    setHasGrvt(false);
     latestSnapshotRef.current = null;
   }, []);
 
@@ -176,6 +182,7 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     error,
     hasSnapshot,
     hasLighter,
+    hasGrvt,
     reconnect: connect,
   };
 }

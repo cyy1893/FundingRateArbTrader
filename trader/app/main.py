@@ -262,6 +262,7 @@ async def ws_events(
 async def ws_orderbook(
     websocket: WebSocket,
     lighter: LighterService = Depends(get_lighter_service),
+    grvt: GrvtService = Depends(get_grvt_service),
 ):
     try:
         await authenticate_websocket(websocket, auth_manager)
@@ -305,6 +306,11 @@ async def ws_orderbook(
                 forward_updates("lighter", lighter.stream_orderbook(subscription.symbol, subscription.depth))
             )
         )
+        tasks.append(
+            asyncio.create_task(
+                forward_updates("grvt", grvt.stream_orderbook(subscription.symbol, subscription.depth))
+            )
+        )
     except Exception as exc:  # noqa: BLE001
         await websocket.send_json({"error": str(exc)})
         for task in tasks:
@@ -318,6 +324,7 @@ async def ws_orderbook(
             if latest_snapshots:
                 snapshot = OrderBookSnapshot(
                     lighter=latest_snapshots.get("lighter"),
+                    grvt=latest_snapshots.get("grvt"),
                 )
                 try:
                     await websocket.send_json(snapshot.model_dump())

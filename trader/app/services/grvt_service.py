@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Optional
 
-from pysdk.grvt_ccxt_env import GrvtEnv
+import websockets
+
+from pysdk.grvt_ccxt_env import GrvtEnv, GrvtWSEndpointType, get_grvt_ws_endpoint
 from pysdk.grvt_ccxt_pro import GrvtCcxtPro
 
 from app.config import Settings
-from app.models import GrvtAssetBalance, GrvtBalanceSnapshot, GrvtPositionBalance
+from app.models import GrvtAssetBalance, GrvtBalanceSnapshot, GrvtPositionBalance, OrderBookLevel, OrderBookSide, VenueOrderBook
 
 
 class GrvtService:
@@ -22,6 +25,8 @@ class GrvtService:
         self._settings = settings
         self._client: GrvtCcxtPro | None = None
         self._lock = asyncio.Lock()
+        self._instrument_map: dict[str, str] = {}
+        self._instrument_lock = asyncio.Lock()
         self._apply_env_overrides()
 
     async def start(self) -> None:
@@ -98,6 +103,83 @@ class GrvtService:
             positions=positions,
         )
 
+    async def stream_orderbook(self, symbol: str, depth: int) -> asyncio.AsyncIterator[VenueOrderBook]:
+        """
+        Stream GRVT order books over WebSocket (market data only).
+        """
+
+        instrument = await self._get_instrument(symbol)
+        client = await self._ensure_client()
+        await client.refresh_cookie()
+        cookie = getattr(client, "_cookie", {}) or {}
+        gravity = cookie.get("gravity")
+        account_id = cookie.get("X-Grvt-Account-Id")
+        headers = {}
+        if gravity:
+            headers["Cookie"] = f"gravity={gravity}"
+        if account_id:
+            headers["X-Grvt-Account-Id"] = account_id
+
+        ws_url = get_grvt_ws_endpoint(self._settings.grvt_env, GrvtWSEndpointType.MARKET_DATA)
+        version_prefix = self._settings.grvt_ws_stream_version
+        stream = f"{version_prefix}.book.s" if version_prefix != "v0" else "book.s"
+        rate_ms = 500
+        selector = f"{instrument}@{rate_ms}-{depth}"
+        subscribe_json = json.dumps(
+            {
+                "request_id": 1,
+                "stream": stream,
+                "feed": [selector],
+                "method": "subscribe",
+                "is_full": True,
+            }
+        )
+
+        queue: asyncio.Queue[VenueOrderBook] = asyncio.Queue()
+        ws_received = asyncio.Event()
+        backoff = 0.5
+
+        async def ws_loop() -> None:
+            nonlocal backoff
+            while True:
+                try:
+                    async with websockets.connect(ws_url, extra_headers=headers, open_timeout=5) as ws:
+                        await ws.send(subscribe_json)
+                        async for message in ws:
+                            snapshot = self._parse_orderbook_message(json.loads(message), symbol)
+                            if snapshot:
+                                ws_received.set()
+                                await queue.put(snapshot)
+                                backoff = 0.5
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    backoff = min(backoff * 2, 5.0)
+                    await asyncio.sleep(backoff)
+
+        async def fallback_loop() -> None:
+            while not ws_received.is_set():
+                try:
+                    raw = await client.fetch_order_book(instrument, limit=depth)
+                    snapshot = self._parse_orderbook_message({"data": raw}, symbol)
+                    if snapshot:
+                        await queue.put(snapshot)
+                except Exception:
+                    pass
+                await asyncio.sleep(rate_ms / 1000)
+
+        ws_task = asyncio.create_task(ws_loop())
+        fallback_task = asyncio.create_task(fallback_loop())
+
+        try:
+            while True:
+                snapshot = await queue.get()
+                yield snapshot
+        finally:
+            ws_task.cancel()
+            fallback_task.cancel()
+            await asyncio.gather(ws_task, fallback_task, return_exceptions=True)
+
     async def _ensure_client(self) -> GrvtCcxtPro:
         if self._client is not None:
             return self._client
@@ -130,6 +212,28 @@ class GrvtService:
 
         return self._client
 
+    async def _get_instrument(self, symbol: str) -> str:
+        normalized = symbol.strip().upper().replace("-PERP", "").replace("_PERP", "")
+        async with self._instrument_lock:
+            if normalized in self._instrument_map:
+                return self._instrument_map[normalized]
+
+            client = await self._ensure_client()
+            markets = await client.fetch_markets({"is_active": True, "kind": "PERPETUAL"})
+            for entry in markets:
+                base = str(entry.get("base", "")).upper()
+                instrument = str(entry.get("instrument", "")).strip()
+                if not base or not instrument:
+                    continue
+                self._instrument_map[base] = instrument
+
+            if normalized not in self._instrument_map:
+                # Fall back to default convention if not found
+                inferred = f"{normalized}_USDT_Perp"
+                self._instrument_map[normalized] = inferred
+
+            return self._instrument_map[normalized]
+
     def _apply_env_overrides(self) -> None:
         os.environ.setdefault("GRVT_END_POINT_VERSION", self._settings.grvt_endpoint_version)
         os.environ.setdefault("GRVT_WS_STREAM_VERSION", self._settings.grvt_ws_stream_version)
@@ -150,3 +254,43 @@ class GrvtService:
             return float(Decimal(str(value)))
         except (InvalidOperation, TypeError, ValueError):
             return 0.0
+
+    @classmethod
+    def _build_side(cls, levels: list[dict[str, Any]], descending: bool = False) -> OrderBookSide:
+        ordered = sorted(levels or [], key=lambda l: cls._to_float(l.get("price")), reverse=descending)
+        cumulative = 0.0
+        parsed_levels: list[OrderBookLevel] = []
+        for entry in ordered:
+            price = cls._to_float(entry.get("price"))
+            size = cls._to_float(entry.get("size"))
+            if price <= 0 or size <= 0:
+                continue
+            cumulative += size
+            parsed_levels.append(OrderBookLevel(price=price, size=size, total=cumulative))
+
+        return OrderBookSide(levels=parsed_levels)
+
+    def _parse_orderbook_message(self, message: Any, symbol: str) -> VenueOrderBook | None:
+        payload: dict[str, Any] | None = None
+        if isinstance(message, dict):
+            payload = message.get("data") or message.get("result") or message
+        if not isinstance(payload, dict):
+            return None
+
+        asks = payload.get("asks") or []
+        bids = payload.get("bids") or []
+        if not asks and not bids:
+            return None
+
+        asks_side = self._build_side(asks, descending=False)
+        bids_side = self._build_side(bids, descending=True)
+        ts = self._parse_timestamp(payload.get("event_time"))
+        timestamp = ts.timestamp() if isinstance(ts, datetime) else datetime.now(tz=timezone.utc).timestamp()
+
+        return VenueOrderBook(
+            venue="grvt",
+            symbol=symbol,
+            bids=bids_side,
+            asks=asks_side,
+            timestamp=timestamp,
+        )

@@ -136,7 +136,7 @@ class OrderBookSide(BaseModel):
 
 class VenueOrderBook(BaseModel):
     """Order book for a single venue."""
-    venue: Literal["lighter"]
+    venue: Literal["lighter", "grvt"]
     symbol: str
     bids: OrderBookSide
     asks: OrderBookSide
@@ -146,6 +146,7 @@ class VenueOrderBook(BaseModel):
 class OrderBookSnapshot(BaseModel):
     """Order book snapshot for available venues."""
     lighter: Optional[VenueOrderBook] = None
+    grvt: Optional[VenueOrderBook] = None
 
 
 class OrderBookSubscription(BaseModel):

@@ -9,6 +9,7 @@ type Props = {
   status: WebSocketStatus;
   hasSnapshot: boolean;
   hasLighter: boolean;
+  hasGrvt: boolean;
 };
 
 const formatPrice = (price: number) => price.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -241,7 +242,7 @@ function VenueOrderBookTable({
   );
 }
 
-export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasLighter }: Props) {
+export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasLighter, hasGrvt }: Props) {
   const [displayMode, setDisplayMode] = useState<DisplayMode>("usd");
   const toggleMode = () => setDisplayMode((m) => (m === "usd" ? "base" : "usd"));
 
@@ -255,20 +256,37 @@ export function OrderBookDisplay({ orderBook, status, hasSnapshot, hasLighter }:
           显示：{displayMode === "usd" ? "USD" : "原始数量"}
         </button>
       </div>
-      <Card className="border-none shadow-none bg-transparent">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg text-[#2f2a5a]">Lighter 订单簿</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <VenueOrderBookTable
-            venue={orderBook?.lighter}
-            status={status}
-            hasSnapshot={hasSnapshot}
-            venueReady={hasLighter}
-            displayMode={displayMode}
-          />
-        </CardContent>
-      </Card>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="border-none shadow-none bg-transparent">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg text-[#2f2a5a]">Lighter 订单簿</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <VenueOrderBookTable
+              venue={orderBook?.lighter}
+              status={status}
+              hasSnapshot={hasSnapshot}
+              venueReady={hasLighter}
+              displayMode={displayMode}
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-none bg-transparent">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg text-[#2f2a5a]">GRVT 订单簿</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <VenueOrderBookTable
+              venue={orderBook?.grvt}
+              status={status}
+              hasSnapshot={hasSnapshot}
+              venueReady={hasGrvt}
+              displayMode={displayMode}
+            />
+          </CardContent>
+        </Card>
+      </div>
     </>
   );
 }

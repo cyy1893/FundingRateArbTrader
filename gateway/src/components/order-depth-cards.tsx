@@ -96,7 +96,7 @@ export function MonitoringConfigCard({
                         <SelectTrigger id="symbol">
                             <SelectValue placeholder="选择币种" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="max-h-64 overflow-y-auto">
                             {availableSymbols.map((option) => (
                                 <SelectItem key={option.symbol} value={option.symbol}>
                                     {option.displayName} ({option.symbol})
@@ -168,7 +168,7 @@ export function MonitoringConfigCard({
 }
 
 export function OrderBookCard({ subscription, onReset }: OrderBookCardProps) {
-    const { orderBook, status, error, hasSnapshot, hasLighter } = useOrderBookWebSocket(subscription);
+    const { orderBook, status, error, hasSnapshot, hasLighter, hasGrvt } = useOrderBookWebSocket(subscription);
 
     return (
         <Card className="border-border/60">
@@ -220,6 +220,7 @@ export function OrderBookCard({ subscription, onReset }: OrderBookCardProps) {
                     status={status}
                     hasSnapshot={hasSnapshot}
                     hasLighter={hasLighter}
+                    hasGrvt={hasGrvt}
                 />
             </CardContent>
         </Card>
