@@ -2,7 +2,7 @@
 
 This repository now bundles both sides of the Funding Rate Arbitrage stack:
 
-- `trader/`: the FastAPI backend (original FundingRateArbTrader service). It exposes Drift/Lighter REST and `/ws/events`.
+- `trader/`: the FastAPI backend (original FundingRateArbTrader service). It exposes Lighter REST and `/ws/events`.
 - `gateway/`: the Next.js frontend (original FundingRateArb app) that consumes the backend APIs and websocket feed.
 
 ### Run Everything with Docker Compose

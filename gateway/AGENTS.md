@@ -31,7 +31,7 @@ All sidebars across the application must follow a consistent slide-in animation 
 This pattern ensures that all monitoring cards, detail panels, and auxiliary information slides in uniformly from the right, creating a cohesive visual experience throughout the app.
 
 ## Testing Guidelines
-There is no formal test runner yet, so every PR needs manual QA notes (e.g., “Run `npm run dev`, toggle each exchange, confirm settlement timer matches Drift interval”). When adding deterministic helpers, colocate `*.spec.ts` files next to the source and exercise them via `node --test` or a lightweight Vitest harness; aim for ~80% coverage in `src/lib` modules that handle math or symbol mapping.
+There is no formal test runner yet, so every PR needs manual QA notes (e.g., “Run `npm run dev`, toggle each exchange, confirm settlement timer matches the active exchange interval”). When adding deterministic helpers, colocate `*.spec.ts` files next to the source and exercise them via `node --test` or a lightweight Vitest harness; aim for ~80% coverage in `src/lib` modules that handle math or symbol mapping.
 
 ## Commit & Pull Request Guidelines
 Follow the conventional style found in history (`feat(coingecko): …`, `chore: …`, `refactor: …`), keeping scopes meaningful (`lighter`, `ui`, `infra`). Commits should remain small and cohesive—if you regenerate `data/coingecko-map.json`, keep the script change and the artifact together. Pull requests must describe the motivation, include screenshots or console output when UI/data change, list manual QA steps, and mention which external APIs were touched.

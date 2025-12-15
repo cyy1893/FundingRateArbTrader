@@ -38,10 +38,15 @@ export function computeNextSettlementTimestamp(
     return baseDate.toISOString();
   }
 
-  const period = Math.max(1, Math.floor(periodHours));
-  const utcMs = baseDate.getTime();
-  const nextSettlementMs =
-    Math.ceil(utcMs / (period * MS_PER_HOUR)) * period * MS_PER_HOUR;
+  const periodMs = Math.max(1, Math.floor(periodHours)) * MS_PER_HOUR;
+  const anchorMs = Date.UTC(
+    baseDate.getUTCFullYear(),
+    baseDate.getUTCMonth(),
+    baseDate.getUTCDate(),
+  );
+  const elapsedMs = Math.max(0, baseDate.getTime() - anchorMs);
+  const periodsElapsed = Math.ceil(elapsedMs / periodMs);
+  const nextSettlementMs = anchorMs + periodsElapsed * periodMs;
 
   return new Date(nextSettlementMs).toISOString();
 }

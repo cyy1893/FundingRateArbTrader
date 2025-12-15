@@ -75,8 +75,40 @@ class LighterBalanceSnapshot(BaseModel):
     positions: list[LighterPositionBalance]
 
 
+class GrvtAssetBalance(BaseModel):
+    currency: str
+    total: float
+    free: float
+    used: float
+    usd_value: float | None = None
+
+
+class GrvtPositionBalance(BaseModel):
+    instrument: str
+    size: float
+    notional: float
+    entry_price: float
+    mark_price: float
+    unrealized_pnl: float
+    realized_pnl: float
+    total_pnl: float
+    leverage: float | None = None
+
+
+class GrvtBalanceSnapshot(BaseModel):
+    sub_account_id: str
+    settle_currency: str
+    available_balance: float
+    total_equity: float
+    unrealized_pnl: float
+    timestamp: datetime | None = None
+    balances: list[GrvtAssetBalance] = Field(default_factory=list)
+    positions: list[GrvtPositionBalance] = Field(default_factory=list)
+
+
 class BalancesResponse(BaseModel):
     lighter: LighterBalanceSnapshot
+    grvt: GrvtBalanceSnapshot
 
 
 class LoginRequest(BaseModel):

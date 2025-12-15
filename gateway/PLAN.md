@@ -1,7 +1,7 @@
 # Refactor Plan for Arbitrary Exchange Pair Comparison
 
 1. Introduce unified source modeling:
-   - Extend `src/lib/external.ts` to describe every exchange (Hyperliquid, Binance, Drift, Lighter) via a common `SourceConfig`.
+   - Extend `src/lib/external.ts` to describe every exchange (Hyperliquid, Binance, Lighter) via a common `SourceConfig`.
    - Update UI selectors (`src/components/source-controls.tsx`) and market row types (`src/types/market.ts`) so the app consistently talks about “left/right” exchanges rather than “Hyperliquid vs external”.
 
 2. Normalize snapshot gathering:

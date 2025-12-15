@@ -7,12 +7,17 @@ import { cn } from "@/lib/utils";
 
 type SettlementCountdownProps = {
   targetIso: string;
+  periodHours?: number;
   className?: string;
 };
 
-function rollForward(currentMs: number, initialTargetMs: number): number {
+function rollForward(
+  currentMs: number,
+  initialTargetMs: number,
+  periodMs: number,
+): number {
   if (!Number.isFinite(initialTargetMs)) {
-    return currentMs + MS_PER_HOUR;
+    return currentMs + periodMs;
   }
 
   if (currentMs < initialTargetMs) {
@@ -20,12 +25,13 @@ function rollForward(currentMs: number, initialTargetMs: number): number {
   }
 
   const elapsed = currentMs - initialTargetMs;
-  const periodsToAdd = Math.floor(elapsed / MS_PER_HOUR) + 1;
-  return initialTargetMs + periodsToAdd * MS_PER_HOUR;
+  const periodsToAdd = Math.floor(elapsed / periodMs) + 1;
+  return initialTargetMs + periodsToAdd * periodMs;
 }
 
 export function SettlementCountdown({
   targetIso,
+  periodHours = 1,
   className,
 }: SettlementCountdownProps) {
   const baseTargetMs = useMemo(() => {
@@ -34,6 +40,7 @@ export function SettlementCountdown({
   }, [targetIso]);
 
   const [nowMs, setNowMs] = useState<number | null>(null);
+  const periodMs = Math.max(1, Math.round(periodHours * MS_PER_HOUR));
 
   useEffect(() => {
     const update = () => setNowMs(Date.now());
@@ -50,7 +57,7 @@ export function SettlementCountdown({
     );
   }
 
-  const targetMs = rollForward(nowMs, baseTargetMs);
+  const targetMs = rollForward(nowMs, baseTargetMs, periodMs);
   const diffMs = Math.max(0, targetMs - nowMs);
   const hours = Math.floor(diffMs / MS_PER_HOUR);
   const minutes = Math.floor((diffMs % MS_PER_HOUR) / MS_PER_MINUTE);

@@ -139,11 +139,11 @@ async function DashboardContent({
     });
   }
 
-  const settlementPeriodHours = 1;
-  const nextSettlementIso = computeNextSettlementTimestamp(
-    fetchedAt,
-    settlementPeriodHours,
-  );
+  const settlementPeriods = [1, 4, 8];
+  const settlementTargets = settlementPeriods.map((hours) => ({
+    periodHours: hours,
+    targetIso: computeNextSettlementTimestamp(fetchedAt, hours),
+  }));
   return (
     <ArbitrageSidebarProvider>
       <div className="flex gap-6">
@@ -161,14 +161,19 @@ async function DashboardContent({
             </div>
             
             <div className="flex items-center gap-4">
-              <div className="flex flex-col items-end gap-1">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  下次结算
-                </span>
-                <SettlementCountdown
-                  targetIso={nextSettlementIso}
-                  className="text-base font-semibold tabular-nums"
-                />
+              <div className="flex flex-wrap items-start gap-4">
+                {settlementTargets.map((target) => (
+                  <div key={`settlement-${target.periodHours}`} className="flex flex-col items-end gap-1">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      {target.periodHours}h 下次结算
+                    </span>
+                    <SettlementCountdown
+                      targetIso={target.targetIso}
+                      periodHours={target.periodHours}
+                      className="text-base font-semibold tabular-nums"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
           </div>

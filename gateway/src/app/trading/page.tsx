@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import type {
   BalancesResponse,
   LighterBalanceSnapshot,
+  GrvtBalanceSnapshot,
 } from "@/types/trader";
 import { MonitoringConfigCard, OrderBookCard } from "@/components/order-depth-cards";
 import type { OrderBookSubscription } from "@/hooks/use-order-book-websocket";
@@ -220,6 +221,7 @@ function TradingPageContent() {
               ) : normalized ? (
                 <>
                   <CompactWalletSummary totalUsd={normalized.totalUsd} venues={normalized.venues} />
+                  <VenueBalances venues={normalized.venues} />
 
                   {/* Monitoring area sits between summary and positions */}
                   {showMonitoringArea && (
@@ -312,7 +314,7 @@ export default function TradingPage() {
 }
 
 type UnifiedVenue = {
-  id: "lighter";
+  id: "lighter" | "grvt";
   name: string;
   subtitle: string | null;
   totalUsd: number;
@@ -337,7 +339,8 @@ type UnifiedWalletData = {
 
 function normalizeBalances(balances: BalancesResponse): UnifiedWalletData {
   const lighterInfo = summarizeLighter(balances.lighter);
-  const venues = [lighterInfo];
+  const grvtInfo = summarizeGrvt(balances.grvt);
+  const venues = [lighterInfo, grvtInfo];
 
   const totalUsd = venues.reduce((sum, venue) => sum + venue.totalUsd, 0);
 
@@ -393,6 +396,53 @@ function summarizeLighter(lighter: LighterBalanceSnapshot): UnifiedVenue {
   };
 }
 
+function summarizeGrvt(grvt: GrvtBalanceSnapshot): UnifiedVenue {
+  const availableUsd = grvt.total_equity || grvt.available_balance;
+
+  const balanceRows = grvt.balances.map((asset) => ({
+    key: `${asset.currency}`,
+    cells: [
+      asset.currency,
+      formatNumber(asset.total),
+      formatNumber(asset.free),
+    ],
+  }));
+
+  const filteredPositions = grvt.positions.filter(
+    (position) => Math.abs(position.notional) >= 1,
+  );
+  const positionRows = filteredPositions.map((position) => ({
+    key: position.instrument,
+    cells: [
+      position.instrument,
+      formatNumber(position.size),
+      formatUsd(position.notional),
+      formatUsd(position.unrealized_pnl),
+    ],
+  }));
+
+  return {
+    id: "grvt",
+    name: "GRVT 账户",
+    subtitle: null,
+    totalUsd: availableUsd,
+    balances: {
+      title: "余额",
+      headers: ["货币", "总额", "可用"],
+      rows: balanceRows,
+      emptyMessage: "暂无余额",
+    },
+    positionGroups: [
+      {
+        title: "持仓",
+        headers: ["市场", "仓位", "持仓价值", "未实现盈亏"],
+        rows: positionRows,
+        emptyMessage: "暂无持仓",
+      },
+    ],
+  };
+}
+
 function CompactWalletSummary({ totalUsd, venues }: { totalUsd: number; venues: UnifiedVenue[] }) {
   return (
     <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
@@ -412,6 +462,62 @@ function CompactWalletSummary({ totalUsd, venues }: { totalUsd: number; venues: 
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function VenueBalances({ venues }: { venues: UnifiedVenue[] }) {
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      {venues.map((venue) => (
+        <Card key={venue.id} className="border-border/60">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold">{venue.name}</CardTitle>
+            {venue.subtitle ? (
+              <CardDescription className="text-xs text-muted-foreground">
+                {venue.subtitle}
+              </CardDescription>
+            ) : null}
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {venue.balances.headers.map((header) => (
+                      <TableHead key={`${venue.id}-${header}`} className="text-xs">
+                        {header}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {venue.balances.rows.length > 0 ? (
+                    venue.balances.rows.map((row) => (
+                      <TableRow key={row.key}>
+                        {row.cells.map((cell, idx) => (
+                          <TableCell key={`${row.key}-${idx}`} className="text-xs">
+                            {cell}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell
+                        colSpan={venue.balances.headers.length}
+                        className="text-xs text-muted-foreground"
+                      >
+                        {venue.balances.emptyMessage}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }

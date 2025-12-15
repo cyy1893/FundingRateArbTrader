@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     grvt_env: Literal["prod", "testnet", "staging", "dev"] = Field(
         "prod", description="Target GRVT environment for public market data"
     )
+    grvt_api_key: str = Field(..., description="GRVT API key for authenticated calls")
+    grvt_private_key: str = Field(..., description="GRVT private key used for signing")
+    grvt_trading_account_id: str = Field(..., description="GRVT trading account identifier")
+    grvt_endpoint_version: str = Field("v1", description="GRVT REST endpoint version (GRVT_END_POINT_VERSION)")
+    grvt_ws_stream_version: str = Field(
+        "v1", description="GRVT websocket stream version (GRVT_WS_STREAM_VERSION)"
+    )
     auth_users: str = Field(
         ...,
         description="Comma-separated username:password pairs for local auth (e.g. alice:pass,bob:pass)",

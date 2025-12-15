@@ -29,6 +29,7 @@ from app.models import (
     PerpSnapshotRequest,
 )
 from app.services.lighter_service import LighterService
+from app.services.grvt_service import GrvtService
 from app.services.market_data_service import MarketDataService
 from app.utils.auth import AuthError, AuthManager, LockoutError, parse_users
 
@@ -41,6 +42,7 @@ logging.getLogger("websockets.client").setLevel(logging.WARNING)
 settings = get_settings()
 event_broadcaster = EventBroadcaster()
 lighter_service = LighterService(settings)
+grvt_service = GrvtService(settings)
 market_data_service = MarketDataService(settings)
 auth_manager = AuthManager(
     users=parse_users([entry.strip() for entry in settings.auth_users.split(",") if entry.strip()]),
@@ -55,9 +57,9 @@ auth_scheme = HTTPBearer()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await lighter_service.start()
+    await asyncio.gather(lighter_service.start(), grvt_service.start())
     yield
-    await asyncio.gather(lighter_service.stop(), market_data_service.close())
+    await asyncio.gather(lighter_service.stop(), grvt_service.stop(), market_data_service.close())
 
 
 app = FastAPI(title="Funding Rate Arbitrage Trader", version="0.1.0", lifespan=lifespan)
@@ -65,6 +67,10 @@ app = FastAPI(title="Funding Rate Arbitrage Trader", version="0.1.0", lifespan=l
 
 def get_lighter_service() -> LighterService:
     return lighter_service
+
+
+def get_grvt_service() -> GrvtService:
+    return grvt_service
 
 
 def get_broadcaster() -> EventBroadcaster:
@@ -112,20 +118,32 @@ async def health() -> Dict[str, Any]:
     return {
         "status": "ok",
         "lighter_connected": lighter_service.is_ready,
+        "grvt_connected": grvt_service.is_ready,
     }
 
 
 @app.get("/balances", response_model=BalancesResponse)
 async def balances(
     lighter: LighterService = Depends(get_lighter_service),
+    grvt: GrvtService = Depends(get_grvt_service),
     _: str = Depends(get_current_user),
 ) -> BalancesResponse:
-    try:
-        lighter_balances = await lighter.get_balances()
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch Lighter balances: {exc}") from exc
+    lighter_result, grvt_result = await asyncio.gather(
+        lighter.get_balances(),
+        grvt.get_balances(),
+        return_exceptions=True,
+    )
 
-    return BalancesResponse(lighter=lighter_balances)
+    if isinstance(lighter_result, Exception):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch Lighter balances: {lighter_result}"
+        ) from lighter_result
+    if isinstance(grvt_result, Exception):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch GRVT balances: {grvt_result}"
+        ) from grvt_result
+
+    return BalancesResponse(lighter=lighter_result, grvt=grvt_result)
 
 
 @app.post("/orders/lighter")

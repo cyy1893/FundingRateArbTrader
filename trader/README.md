@@ -25,9 +25,15 @@ LIGHTER_MAX_API_KEY_INDEX=0
 LIGHTER_NONCE_MANAGER=optimistic  # or api
 
 GRVT_ENV=prod  # prod | testnet | staging | dev for market data lookups
+GRVT_API_KEY=your-grvt-api-key
+GRVT_PRIVATE_KEY=your-grvt-private-key
+GRVT_TRADING_ACCOUNT_ID=your-grvt-trading-account-id
+GRVT_END_POINT_VERSION=v1
+GRVT_WS_STREAM_VERSION=v1
 ```
 
 > **Note:** Private keys are loaded directly from env vars. Keep the `.env` file out of version control.
+> GRVT balances are fetched through the official SDK—set the `GRVT_*` variables above before calling `/balances`.
 
 ### 2. Run the FastAPI app
 
