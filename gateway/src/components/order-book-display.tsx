@@ -40,7 +40,7 @@ const bidColors = {
 
 function LoadingState({ message }: { message: string }) {
   return (
-    <div className="h-72 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+    <div className="h-64 flex flex-col items-center justify-center gap-3 text-muted-foreground">
       <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
       <p className="text-sm text-foreground/80">{message}</p>
     </div>
@@ -87,8 +87,8 @@ function DepthRow({
         className="absolute inset-y-0 left-0"
         style={{ width: `${sizeWidthPct}%`, backgroundColor: palette.sizeBg }}
       />
-      <div className="relative z-10 flex items-center gap-3 px-2 py-2 text-sm font-semibold">
-        <span className={`${palette.text} min-w-[80px] text-right font-semibold`}>
+      <div className="relative z-10 flex items-center gap-3 px-2 py-1 text-[12px] font-semibold leading-tight">
+        <span className={`${palette.text} min-w-[68px] text-right font-semibold`}>
           {formatPrice(level.price)}
         </span>
         <span className="text-foreground/80 min-w-[70px] text-right font-semibold">
@@ -179,24 +179,24 @@ function VenueOrderBookTable({
   const totalHeader = displayMode === "usd" ? "总计 (USD)" : "总计";
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 px-3 py-3">
-        <div className="flex items-center justify-between text-sm font-semibold text-slate-800">
+    <div className="border border-slate-200 bg-white shadow-sm rounded-none">
+      <div className="border-b border-slate-200 px-3 py-2">
+        <div className="flex items-center justify-between text-[12px] font-semibold text-slate-800">
           <span>Orderbook</span>
           <span className="text-xs text-slate-500">{displayMode === "usd" ? "USD" : "Base"}</span>
         </div>
       </div>
 
       <div className="px-3 pb-3 pt-2">
-        <div className="grid grid-cols-3 gap-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+        <div className="grid grid-cols-3 gap-4 py-1.5 text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
           <span className="text-left">价格</span>
           <span className="text-center">{sizeHeader}</span>
           <span className="text-right">{totalHeader}</span>
         </div>
 
-        <div className="overflow-hidden border border-slate-200">
+        <div className="overflow-hidden border border-slate-200 bg-slate-50/50 rounded-none">
           {asksBase.length === 0 ? (
-            <div className="h-24 flex items-center justify-center text-muted-foreground text-sm bg-slate-50">
+            <div className="h-20 flex items-center justify-center text-muted-foreground text-sm bg-slate-50">
               暂无卖单
             </div>
           ) : (
@@ -214,13 +214,13 @@ function VenueOrderBookTable({
             </div>
           )}
 
-          <div className="flex items-center justify-between bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+          <div className="flex items-center justify-between bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-600">
             <span>{spread ? `点差 ${spread.toFixed(1)}` : "点差 --"}</span>
             <span>{spreadPct ? `${spreadPct.toFixed(3)}%` : "--"}</span>
           </div>
 
           {bidsBase.length === 0 ? (
-            <div className="h-24 flex items-center justify-center text-muted-foreground text-sm bg-slate-50">
+            <div className="h-20 flex items-center justify-center text-muted-foreground text-sm bg-slate-50">
               暂无买单
             </div>
           ) : (
@@ -302,7 +302,7 @@ export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLi
         </button>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
-        <Card className="border-none shadow-none bg-transparent">
+        <Card className="border-none shadow-none bg-transparent rounded-none">
           <CardHeader className="pb-2">
             <CardTitle className="text-lg text-[#2f2a5a]">Lighter 订单簿</CardTitle>
           </CardHeader>
@@ -314,14 +314,14 @@ export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLi
               venueReady={hasLighter}
               displayMode={displayMode}
             />
-            <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
+            <div className="mt-2 border border-slate-200 bg-white p-2 rounded-none">
               <div className="text-[11px] font-semibold text-muted-foreground mb-1">逐笔成交</div>
               {renderTrades(trades?.lighter)}
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border-none shadow-none bg-transparent">
+        <Card className="border-none shadow-none bg-transparent rounded-none">
           <CardHeader className="pb-2">
             <CardTitle className="text-lg text-[#2f2a5a]">GRVT 订单簿</CardTitle>
           </CardHeader>
@@ -333,7 +333,7 @@ export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLi
               venueReady={hasGrvt}
               displayMode={displayMode}
             />
-            <div className="mt-2 rounded-md border border-slate-200 bg-white p-2">
+            <div className="mt-2 border border-slate-200 bg-white p-2 rounded-none">
               <div className="text-[11px] font-semibold text-muted-foreground mb-1">逐笔成交</div>
               {renderTrades(trades?.grvt)}
             </div>
