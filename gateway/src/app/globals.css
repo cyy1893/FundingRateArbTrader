@@ -91,3 +91,30 @@
     font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
 }
+
+/* Trading Terminal Animations */
+@keyframes flash-green {
+  0%, 100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(34, 197, 94, 0.2);
+  }
+}
+
+@keyframes flash-red {
+  0%, 100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(239, 68, 68, 0.2);
+  }
+}
+
+.animate-flash-green {
+  animation: flash-green 300ms ease-in-out;
+}
+
+.animate-flash-red {
+  animation: flash-red 300ms ease-in-out;
+}
