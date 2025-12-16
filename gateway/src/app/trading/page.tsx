@@ -343,15 +343,18 @@ function TradingPageContent() {
 }
 
 function OrderBookDisplay({ subscription }: { subscription: OrderBookSubscription }) {
-  const { orderBook, status, hasLighter, hasGrvt } = useOrderBookWebSocket(subscription);
+  const { orderBook, trades, status, hasLighter, hasGrvt } = useOrderBookWebSocket(subscription);
 
   const lighterBids = hasLighter && orderBook?.lighter?.bids?.levels ? orderBook.lighter.bids.levels : [];
   const lighterAsks = hasLighter && orderBook?.lighter?.asks?.levels ? orderBook.lighter.asks.levels : [];
   const grvtBids = hasGrvt && orderBook?.grvt?.bids?.levels ? orderBook.grvt.bids.levels : [];
   const grvtAsks = hasGrvt && orderBook?.grvt?.asks?.levels ? orderBook.grvt.asks.levels : [];
+  
+  const lighterTrades = trades?.lighter || [];
+  const grvtTrades = trades?.grvt || [];
 
   // Map error status to disconnected for the terminal component
-  const mappedStatus: "connected" | "connecting" | "disconnected" =
+  const mappedStatus: "connected" | "connecting" | "disconnected" = 
     status === "error" ? "disconnected" : status;
 
   return (
@@ -360,12 +363,14 @@ function OrderBookDisplay({ subscription }: { subscription: OrderBookSubscriptio
         exchange="Lighter"
         bids={lighterBids}
         asks={lighterAsks}
+        trades={lighterTrades}
         status={mappedStatus}
       />
       <TerminalOrderBook
         exchange="GRVT"
         bids={grvtBids}
         asks={grvtAsks}
+        trades={grvtTrades}
         status={mappedStatus}
       />
     </div>

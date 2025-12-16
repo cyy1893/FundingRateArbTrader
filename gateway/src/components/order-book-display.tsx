@@ -314,7 +314,7 @@ export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLi
               venueReady={hasLighter}
               displayMode={displayMode}
             />
-            <div className="mt-2 border border-slate-200 bg-white p-2 rounded-none">
+            <div className="border border-slate-200 bg-white p-2 rounded-none">
               <div className="text-[11px] font-semibold text-muted-foreground mb-1">逐笔成交</div>
               {renderTrades(trades?.lighter)}
             </div>
@@ -333,7 +333,7 @@ export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLi
               venueReady={hasGrvt}
               displayMode={displayMode}
             />
-            <div className="mt-2 border border-slate-200 bg-white p-2 rounded-none">
+            <div className="border border-slate-200 bg-white p-2 rounded-none">
               <div className="text-[11px] font-semibold text-muted-foreground mb-1">逐笔成交</div>
               {renderTrades(trades?.grvt)}
             </div>
