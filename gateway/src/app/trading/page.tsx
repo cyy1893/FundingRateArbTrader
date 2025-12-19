@@ -344,6 +344,7 @@ function TradingPageContent() {
 
 function OrderBookDisplay({ subscription }: { subscription: OrderBookSubscription }) {
   const { orderBook, trades, status, hasLighter, hasGrvt } = useOrderBookWebSocket(subscription);
+  const [displayMode, setDisplayMode] = useState<"base" | "usd">("usd");
 
   const lighterBids = hasLighter && orderBook?.lighter?.bids?.levels ? orderBook.lighter.bids.levels : [];
   const lighterAsks = hasLighter && orderBook?.lighter?.asks?.levels ? orderBook.lighter.asks.levels : [];
@@ -358,21 +359,33 @@ function OrderBookDisplay({ subscription }: { subscription: OrderBookSubscriptio
     status === "error" ? "disconnected" : status;
 
   return (
-    <div className="flex-1 grid grid-cols-2 gap-4 p-4">
-      <TerminalOrderBook
-        exchange="Lighter"
-        bids={lighterBids}
-        asks={lighterAsks}
-        trades={lighterTrades}
-        status={mappedStatus}
-      />
-      <TerminalOrderBook
-        exchange="GRVT"
-        bids={grvtBids}
-        asks={grvtAsks}
-        trades={grvtTrades}
-        status={mappedStatus}
-      />
+    <div className="flex-1 flex flex-col p-4 gap-3">
+      <div className="flex items-center justify-end">
+        <button
+          onClick={() => setDisplayMode((mode) => (mode === "usd" ? "base" : "usd"))}
+          className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          显示：{displayMode === "usd" ? "USD" : "原始数量"}
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <TerminalOrderBook
+          exchange="Lighter"
+          bids={lighterBids}
+          asks={lighterAsks}
+          trades={lighterTrades}
+          status={mappedStatus}
+          displayMode={displayMode}
+        />
+        <TerminalOrderBook
+          exchange="GRVT"
+          bids={grvtBids}
+          asks={grvtAsks}
+          trades={grvtTrades}
+          status={mappedStatus}
+          displayMode={displayMode}
+        />
+      </div>
     </div>
   );
 }
