@@ -48,6 +48,8 @@ export type OrderBookSubscription = {
   symbol: string;
   lighter_leverage: number;
   lighter_direction: 'long' | 'short';
+  grvt_leverage?: number;
+  grvt_direction?: 'long' | 'short';
   notional_value: number;
   depth: number;
   throttle_ms?: number;

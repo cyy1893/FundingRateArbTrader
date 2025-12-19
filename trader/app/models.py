@@ -168,6 +168,8 @@ class OrderBookSubscription(BaseModel):
     symbol: str = Field(..., description="Trading symbol (e.g., BTC, ETH, SOL)")
     lighter_leverage: float = Field(..., gt=0, description="Leverage for Lighter")
     lighter_direction: Literal["long", "short"] = Field(..., description="Position direction for Lighter")
+    grvt_leverage: float = Field(1, gt=0, description="Leverage for GRVT")
+    grvt_direction: Literal["long", "short"] = Field("long", description="Position direction for GRVT")
     notional_value: float = Field(..., gt=0, description="Contract notional value in USD")
     depth: int = Field(10, ge=1, le=50, description="Number of price levels to include")
     throttle_ms: int = Field(500, ge=50, le=5000, description="Throttle interval in milliseconds for order book updates")

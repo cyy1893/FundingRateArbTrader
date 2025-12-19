@@ -18,6 +18,7 @@ import { getClientAuthToken } from "@/lib/auth";
 import { readComparisonSelection, type ResolvedComparisonSelection } from "@/lib/comparison-selection";
 import { DEFAULT_LEFT_SOURCE, DEFAULT_RIGHT_SOURCE, normalizeSource } from "@/lib/external";
 import { DEFAULT_VOLUME_THRESHOLD } from "@/lib/volume-filter";
+import { getPerpetualSnapshot } from "@/lib/perp-snapshot";
 
 type ErrorPayload = { detail?: string; error?: string };
 
@@ -177,6 +178,9 @@ function TradingPageContent() {
   const [normalized, setNormalized] = useState<UnifiedWalletData | null>(null);
   const [subscription, setSubscription] = useState<OrderBookSubscription | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [maxLeverageBySymbol, setMaxLeverageBySymbol] = useState<Record<string, { lighter?: number; grvt?: number }>>(
+    {},
+  );
   const [comparisonSelection, setComparisonSelection] = useState<ResolvedComparisonSelection>({
     primarySource: DEFAULT_LEFT_SOURCE,
     secondarySource: DEFAULT_RIGHT_SOURCE,
@@ -262,6 +266,51 @@ function TradingPageContent() {
     });
   }, [searchParams]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLeverageCaps = async () => {
+      try {
+        const snapshot = await getPerpetualSnapshot(
+          comparisonSelection.primarySource,
+          comparisonSelection.secondarySource,
+        );
+        if (cancelled) {
+          return;
+        }
+        const caps: Record<string, { lighter?: number; grvt?: number }> = {};
+        for (const row of snapshot.rows) {
+          const symbol = row.symbol?.toUpperCase();
+          if (!symbol) {
+            continue;
+          }
+          const entry = caps[symbol] ?? {};
+          if (row.leftProvider === "lighter" && Number.isFinite(row.maxLeverage)) {
+            entry.lighter = row.maxLeverage;
+          } else if (row.leftProvider === "grvt" && Number.isFinite(row.maxLeverage)) {
+            entry.grvt = row.maxLeverage;
+          }
+          if (row.right?.source === "lighter" && Number.isFinite(row.right.maxLeverage)) {
+            entry.lighter = row.right.maxLeverage ?? entry.lighter;
+          } else if (row.right?.source === "grvt" && Number.isFinite(row.right.maxLeverage)) {
+            entry.grvt = row.right.maxLeverage ?? entry.grvt;
+          }
+          caps[symbol] = entry;
+        }
+        setMaxLeverageBySymbol(caps);
+      } catch (error) {
+        if (!cancelled) {
+          setMaxLeverageBySymbol({});
+        }
+      }
+    };
+
+    loadLeverageCaps();
+    return () => {
+      cancelled = true;
+    };
+  }, [comparisonSelection.primarySource, comparisonSelection.secondarySource]);
+
   const handleStartMonitoring = useCallback((sub: OrderBookSubscription) => {
     setSubscription(sub);
   }, []);
@@ -313,6 +362,7 @@ function TradingPageContent() {
           <QuickTradePanel
             onStartMonitoring={handleStartMonitoring}
             availableSymbols={availableSymbols}
+            leverageCapsBySymbol={maxLeverageBySymbol}
             primaryLabel={comparisonSelection.primarySource.label}
             secondaryLabel={comparisonSelection.secondarySource.label}
             isMonitoring={subscription !== null}
