@@ -24,3 +24,39 @@ Follow an imperative subject line (`lighter: handle oracle orders`) with optiona
 
 ## Security & Configuration Tips
 Never commit `.env` or credential snippets. Rotate Lighter keys immediately if exposed, and rely on the startup readiness checks (`GET /health`) before issuing production orders. When logging, redact `private_key`, `nonce`, and signature material—prefer referencing `client_order_index` or transaction hashes instead.
+
+## Funding Rate Arbitrage Plan
+The core strategy is to open equal-notional perpetual positions on two venues at the same price level (or a favorable spread where the long entry price is strictly lower than the short entry price). Orders must be limit-maker only, so the system must avoid crossing the book and allow only passive fills.
+
+### Entry Conditions
+- **Price parity or favorable spread:** `long_price <= short_price - min_spread` after fees.
+- **Maker-only constraint:** both orders must post without crossing the best price; otherwise skip.
+- **Notional parity:** per-venue size is derived from the same USD notional within tolerance.
+- **Funding edge:** projected funding differential exceeds `min_funding_edge` after fees.
+
+### Order Placement Flow
+- **Select target prices:** pick maker prices just inside each venue’s best bid/ask without crossing.
+- **Asymmetric first leg:** place on the thinner/liquidity-poor venue first to reduce half-fill risk.
+- **Second leg gated:** only place the opposing leg when the spread condition still holds.
+- **Timeouts:** cancel both orders if not filled within `order_ttl_ms`.
+
+### Fill Coordination & Risk Controls
+- **Partial fills:** track filled size; adjust counter-order to maintain notional parity.
+- **Single-leg exposure:** if one side fills and the other doesn’t, either reprice the other side or hedge/flatten after `hedge_timeout_ms`.
+- **Spread invalidation:** cancel unfilled orders immediately if spread breaks.
+- **Max slippage:** refuse to follow price beyond `max_slippage_bps`.
+
+### Margin & Sizing
+- **Margin estimate:** `margin = notional / leverage`, tracked per venue.
+- **Min/Max caps:** enforce per-venue leverage caps and notional floor per instrument.
+- **Precision:** respect exchange min size and tick size; round to venue rules.
+
+### Hold & Exit
+- **Hold window:** keep hedge open across funding cycles if funding edge persists.
+- **Exit trigger:** close when funding edge dissipates or risk limits breached.
+- **Exit method:** use maker-only exit where possible; allow taker only for emergency flattening.
+
+### Telemetry & Audit
+- **State machine:** `idle -> pending -> partially_filled -> hedged -> exiting -> closed`.
+- **Logs:** record prices, sizes, fills, timing, spread at decision points.
+- **Post-trade:** compute realized PnL + funding PnL + fees for review/backtest.
