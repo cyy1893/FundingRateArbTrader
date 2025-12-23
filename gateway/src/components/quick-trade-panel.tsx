@@ -12,12 +12,15 @@ import type { OrderBookSubscription } from "@/hooks/use-order-book-websocket";
 type SymbolOption = { symbol: string; displayName: string };
 
 type QuickTradePanelProps = {
-  onStartMonitoring: (subscription: OrderBookSubscription) => void;
+  onExecuteArbitrage: () => void;
+  onConfigChange: (subscription: OrderBookSubscription | null) => void;
+  onNotionalReady: (ready: boolean) => void;
+  executeDisabled: boolean;
+  executeLabel: string;
   availableSymbols: SymbolOption[];
   leverageCapsBySymbol?: Record<string, { lighter?: number; grvt?: number }>;
   primaryLabel: string;
   secondaryLabel: string;
-  isMonitoring: boolean;
 };
 
 const LEVERAGE_MIN = 1;
@@ -147,19 +150,22 @@ function LeverageSlider({
 }
 
 export function QuickTradePanel({
-  onStartMonitoring,
+  onExecuteArbitrage,
+  onConfigChange,
+  onNotionalReady,
+  executeDisabled,
+  executeLabel,
   availableSymbols,
   leverageCapsBySymbol,
   primaryLabel,
   secondaryLabel,
-  isMonitoring,
 }: QuickTradePanelProps) {
   const [symbol, setSymbol] = useState("");
   const [lighterLeverage, setLighterLeverage] = useState(1);
   const [lighterDirection, setLighterDirection] = useState<"long" | "short">("long");
   const [grvtLeverage, setGrvtLeverage] = useState(1);
   const [grvtDirection, setGrvtDirection] = useState<"long" | "short">("short");
-  const [notionalValue, setNotionalValue] = useState("1000");
+  const [notionalValue, setNotionalValue] = useState("");
 
   const hasSymbols = availableSymbols.length > 0;
   const symbolKey = symbol.trim().toUpperCase();
@@ -200,12 +206,25 @@ export function QuickTradePanel({
   }, [grvtLeverage, grvtMax]);
 
   const notionalAmount = Number(notionalValue);
-  const safeNotional = Number.isFinite(notionalAmount) && notionalAmount > 0 ? notionalAmount : 0;
-  const lighterMargin = safeNotional > 0 ? safeNotional / Math.max(lighterLeverage, LEVERAGE_MIN) : 0;
-  const grvtMargin = safeNotional > 0 ? safeNotional / Math.max(grvtLeverage, LEVERAGE_MIN) : 0;
+  const safeNotional = Number.isFinite(notionalAmount) && notionalAmount > 0 ? notionalAmount : null;
+  const lighterMargin = safeNotional ? safeNotional / Math.max(lighterLeverage, LEVERAGE_MIN) : null;
+  const grvtMargin = safeNotional ? safeNotional / Math.max(grvtLeverage, LEVERAGE_MIN) : null;
 
-  const handleStart = () => {
-    if (!symbol) return;
+  useEffect(() => {
+    if (!symbol || !safeNotional) {
+      onConfigChange(symbol ? {
+        symbol,
+        lighter_leverage: lighterLeverage,
+        lighter_direction: lighterDirection,
+        grvt_leverage: grvtLeverage,
+        grvt_direction: grvtDirection,
+        notional_value: 1,
+        depth: 10,
+        throttle_ms: 100,
+      } : null);
+      onNotionalReady(false);
+      return;
+    }
 
     const sub: OrderBookSubscription = {
       symbol,
@@ -213,20 +232,30 @@ export function QuickTradePanel({
       lighter_direction: lighterDirection,
       grvt_leverage: grvtLeverage,
       grvt_direction: grvtDirection,
-      notional_value: parseFloat(notionalValue) || 1000,
+      notional_value: safeNotional,
       depth: 10,
       throttle_ms: 100,
     };
 
-    onStartMonitoring(sub);
-  };
+    onConfigChange(sub);
+    onNotionalReady(true);
+  }, [
+    symbol,
+    lighterLeverage,
+    lighterDirection,
+    grvtLeverage,
+    grvtDirection,
+    safeNotional,
+    onConfigChange,
+    onNotionalReady,
+  ]);
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4 h-full flex flex-col shadow-sm">
       {/* Header */}
       <div className="mb-4 pb-3 border-b border-gray-200">
         <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
-          快速交易
+          套利交易
         </h3>
         <p className="text-xs text-gray-600 mt-1">
           {primaryLabel} / {secondaryLabel}
@@ -253,14 +282,14 @@ export function QuickTradePanel({
             >
               <div className="px-1 pb-1">
                 {[...availableSymbols]
-                  .sort((a, b) => a.symbol.localeCompare(b.symbol))
+                  .sort((a, b) => a.displayName.localeCompare(b.displayName))
                   .map((option) => (
                     <SelectItem
                       key={option.symbol}
                       value={option.symbol}
                       className="focus:bg-gray-100 focus:text-gray-900"
                     >
-                      {option.displayName}
+                      {option.displayName} ({option.symbol})
                     </SelectItem>
                   ))}
               </div>
@@ -380,7 +409,7 @@ export function QuickTradePanel({
         {/* Notional Value */}
         <div className="space-y-2">
           <Label htmlFor="notional" className="text-xs text-gray-700 uppercase tracking-wide">
-            名义价值 (USD)
+            合约名义价值 (USD)
           </Label>
           <Input
             id="notional"
@@ -389,7 +418,7 @@ export function QuickTradePanel({
             value={notionalValue}
             onChange={(e) => setNotionalValue(e.target.value)}
             className="bg-white border-gray-300 text-gray-900 font-mono focus:border-blue-500"
-            placeholder="1000"
+            placeholder="请输入名义价值"
           />
           <div className="grid grid-cols-2 gap-3 mt-3">
             <div className="group flex flex-col items-center justify-center space-y-1 rounded-lg border border-blue-100 bg-blue-50/30 p-2.5 transition-all hover:bg-blue-50 hover:border-blue-200">
@@ -397,7 +426,9 @@ export function QuickTradePanel({
                 Lighter 保证金
               </span>
               <span className="font-mono text-xs font-bold text-blue-900">
-                ${lighterMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {lighterMargin != null
+                  ? `$${lighterMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : "--"}
               </span>
             </div>
             <div className="group flex flex-col items-center justify-center space-y-1 rounded-lg border border-indigo-100 bg-indigo-50/30 p-2.5 transition-all hover:bg-indigo-50 hover:border-indigo-200">
@@ -405,7 +436,9 @@ export function QuickTradePanel({
                 GRVT 保证金
               </span>
               <span className="font-mono text-xs font-bold text-indigo-900">
-                ${grvtMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {grvtMargin != null
+                  ? `$${grvtMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : "--"}
               </span>
             </div>
           </div>
@@ -415,12 +448,12 @@ export function QuickTradePanel({
       {/* Action Button */}
       <div className="mt-4 pt-4 border-t border-gray-200">
         <Button
-          onClick={handleStart}
-          disabled={!hasSymbols || isMonitoring}
+          onClick={onExecuteArbitrage}
+          disabled={!hasSymbols || executeDisabled}
           className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 text-sm uppercase tracking-wide transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <TrendingUp className="h-4 w-4 mr-2" />
-          {isMonitoring ? "监控中..." : "开始监控"}
+          {executeLabel}
         </Button>
       </div>
     </div>

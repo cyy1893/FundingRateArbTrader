@@ -177,6 +177,8 @@ function TradingPageContent() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [normalized, setNormalized] = useState<UnifiedWalletData | null>(null);
   const [subscription, setSubscription] = useState<OrderBookSubscription | null>(null);
+  const [draftSubscription, setDraftSubscription] = useState<OrderBookSubscription | null>(null);
+  const [notionalReady, setNotionalReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [maxLeverageBySymbol, setMaxLeverageBySymbol] = useState<Record<string, { lighter?: number; grvt?: number }>>(
     {},
@@ -188,6 +190,9 @@ function TradingPageContent() {
     symbols: [],
     updatedAt: null,
   });
+  const { orderBook, trades, status, hasLighter, hasGrvt } = useOrderBookWebSocket(subscription);
+  const [arbStatus, setArbStatus] = useState<"idle" | "placing" | "success" | "error">("idle");
+  const [arbMessage, setArbMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const syncAuth = () => {
@@ -311,16 +316,161 @@ function TradingPageContent() {
     };
   }, [comparisonSelection.primarySource, comparisonSelection.secondarySource]);
 
-  const handleStartMonitoring = useCallback((sub: OrderBookSubscription) => {
-    setSubscription(sub);
-  }, []);
+  const handleStartMonitoring = useCallback(() => {
+    if (draftSubscription) {
+      setSubscription(draftSubscription);
+    }
+  }, [draftSubscription]);
 
   const availableSymbols = comparisonSelection.symbols;
 
-  // Get connection status from WebSocket
-  const connectionStatus: "connected" | "connecting" | "disconnected" = subscription
-    ? "connected"
-    : "disconnected";
+  const connectionStatus: "connected" | "connecting" | "disconnected" =
+    status === "error" ? "disconnected" : status;
+
+  const getBestPrice = (venue: "lighter" | "grvt", side: "buy" | "sell") => {
+    const book = venue === "lighter" ? orderBook?.lighter : orderBook?.grvt;
+    if (!book) return null;
+    if (side === "buy") {
+      return book.bids?.levels?.[0]?.price ?? null;
+    }
+    return book.asks?.levels?.[0]?.price ?? null;
+  };
+
+  const placeOrder = async (
+    venue: "lighter" | "grvt",
+    payload: Record<string, unknown>,
+  ) => {
+    const response = await fetch(`/api/orders/${venue}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const contentType = response.headers.get("content-type") ?? "";
+    const data = contentType.includes("application/json") ? await response.json() : await response.text();
+    if (!response.ok) {
+      const detail =
+        typeof data === "string"
+          ? data
+          : typeof data?.detail === "string"
+            ? data.detail
+            : typeof data?.error === "string"
+              ? data.error
+              : `HTTP ${response.status}`;
+      return { ok: false, data, error: detail };
+    }
+    return { ok: true, data, error: null };
+  };
+
+  const executeArbitrage = async () => {
+    if (!subscription || arbStatus === "placing") {
+      return;
+    }
+    setArbStatus("placing");
+    setArbMessage(null);
+
+    const lighterSide = subscription.lighter_direction === "long" ? "buy" : "sell";
+    const grvtDirection = subscription.grvt_direction ?? (subscription.lighter_direction === "long" ? "short" : "long");
+    const grvtSide = grvtDirection === "long" ? "buy" : "sell";
+
+    const lighterPrice = getBestPrice("lighter", lighterSide);
+    const grvtPrice = getBestPrice("grvt", grvtSide);
+    if (!lighterPrice || !grvtPrice) {
+      setArbStatus("error");
+      setArbMessage("订单簿数据不足，无法下单。");
+      return;
+    }
+
+    const longPrice = lighterSide === "buy" ? lighterPrice : grvtPrice;
+    const shortPrice = lighterSide === "sell" ? lighterPrice : grvtPrice;
+    if (longPrice > shortPrice) {
+      setArbStatus("error");
+      setArbMessage("当前价差对多头不利，已阻止下单。");
+      return;
+    }
+
+    const notional = subscription.notional_value;
+    const lighterSize = Number((notional / lighterPrice).toFixed(6));
+    const grvtSize = Number((notional / grvtPrice).toFixed(6));
+    if (lighterSize <= 0 || grvtSize <= 0) {
+      setArbStatus("error");
+      setArbMessage("名义价值或价格异常，无法计算下单数量。");
+      return;
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const clientBase = Date.now() % 2_147_483_647;
+
+    const lighterPayload = {
+      symbol: subscription.symbol,
+      client_order_index: clientBase,
+      side: lighterSide,
+      base_amount: lighterSize,
+      price: lighterPrice,
+      reduce_only: false,
+      time_in_force: "post_only",
+      order_expiry_secs: nowSec + 10,
+    };
+    const grvtPayload = {
+      symbol: subscription.symbol,
+      side: grvtSide,
+      amount: grvtSize,
+      price: grvtPrice,
+      post_only: true,
+      reduce_only: false,
+      order_duration_secs: 10,
+      client_order_id: clientBase + 1,
+    };
+
+    const [lighterResult, grvtResult] = await Promise.all([
+      placeOrder("lighter", lighterPayload),
+      placeOrder("grvt", grvtPayload),
+    ]);
+
+    if (lighterResult.ok && grvtResult.ok) {
+      setArbStatus("success");
+      setArbMessage("套利下单已提交，挂单有效期 10 秒。");
+      return;
+    }
+
+    if (lighterResult.ok !== grvtResult.ok) {
+      const retryVenue = lighterResult.ok ? "grvt" : "lighter";
+      const retrySide = retryVenue === "lighter" ? lighterSide : grvtSide;
+      const retryPrice = getBestPrice(retryVenue, retrySide);
+      const otherPrice = retryVenue === "lighter" ? grvtPrice : lighterPrice;
+      if (retryPrice) {
+        const retryLongPrice = retrySide === "buy" ? retryPrice : otherPrice;
+        const retryShortPrice = retrySide === "sell" ? retryPrice : otherPrice;
+        if (retryLongPrice <= retryShortPrice) {
+          const retryPayload =
+            retryVenue === "lighter"
+              ? { ...lighterPayload, price: retryPrice }
+              : { ...grvtPayload, price: retryPrice };
+          const retry = await placeOrder(retryVenue, retryPayload);
+          if (retry.ok) {
+            setArbStatus("success");
+            setArbMessage("套利下单已提交，挂单有效期 10 秒。");
+            return;
+          }
+        }
+      }
+    }
+
+    const errors = [
+      lighterResult.ok ? null : `Lighter: ${lighterResult.error}`,
+      grvtResult.ok ? null : `GRVT: ${grvtResult.error}`,
+    ].filter(Boolean);
+    setArbStatus("error");
+    setArbMessage(errors.join(" | "));
+  };
+
+  const canExecute =
+    Boolean(subscription) &&
+    notionalReady &&
+    connectionStatus === "connected" &&
+    hasLighter &&
+    hasGrvt &&
+    arbStatus !== "placing";
+  const canStartMonitoring = Boolean(draftSubscription) && !subscription;
 
   if (!isAuthenticated) {
     return <AuthRequiredPage />;
@@ -360,29 +510,52 @@ function TradingPageContent() {
         {/* Left Panel - Quick Trade */}
         <div className="w-72 border-r border-gray-200 p-4 bg-white">
           <QuickTradePanel
-            onStartMonitoring={handleStartMonitoring}
+            onExecuteArbitrage={executeArbitrage}
+            onConfigChange={setDraftSubscription}
+            onNotionalReady={setNotionalReady}
+            executeDisabled={!canExecute}
+            executeLabel={arbStatus === "placing" ? "下单中..." : "执行套利/下单"}
             availableSymbols={availableSymbols}
             leverageCapsBySymbol={maxLeverageBySymbol}
             primaryLabel={comparisonSelection.primarySource.label}
             secondaryLabel={comparisonSelection.secondarySource.label}
-            isMonitoring={subscription !== null}
           />
         </div>
 
         {/* Center - Order Books */}
-        <div className="flex-1 flex">
-          {subscription ? (
-            <OrderBookDisplay subscription={subscription} />
-          ) : (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center">
-                <p className="text-gray-600 text-sm mb-2">选择币种并开始监控查看订单簿</p>
-                <p className="text-gray-500 text-xs">
-                  在左侧面板配置参数后点击"开始监控"
-                </p>
-              </div>
+        <div className="flex-1 flex flex-col">
+          <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-2">
+            <div className="text-xs text-gray-500">
+              {arbMessage ? arbMessage : " "}
             </div>
-          )}
+            <button
+              onClick={handleStartMonitoring}
+              disabled={!canStartMonitoring}
+              className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-200 disabled:text-gray-500"
+            >
+              {subscription ? "监控中..." : "开始监控"}
+            </button>
+          </div>
+          <div className="flex-1 flex">
+            {subscription ? (
+              <OrderBookDisplay
+                orderBook={orderBook}
+                trades={trades}
+                status={status}
+                hasLighter={hasLighter}
+                hasGrvt={hasGrvt}
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center">
+                  <p className="text-gray-600 text-sm mb-2">选择币种并开始监控查看订单簿</p>
+                  <p className="text-gray-500 text-xs">
+                    在左侧面板配置参数后点击"开始监控"
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -392,8 +565,19 @@ function TradingPageContent() {
   );
 }
 
-function OrderBookDisplay({ subscription }: { subscription: OrderBookSubscription }) {
-  const { orderBook, trades, status, hasLighter, hasGrvt } = useOrderBookWebSocket(subscription);
+function OrderBookDisplay({
+  orderBook,
+  trades,
+  status,
+  hasLighter,
+  hasGrvt,
+}: {
+  orderBook: ReturnType<typeof useOrderBookWebSocket>["orderBook"];
+  trades: ReturnType<typeof useOrderBookWebSocket>["trades"];
+  status: ReturnType<typeof useOrderBookWebSocket>["status"];
+  hasLighter: boolean;
+  hasGrvt: boolean;
+}) {
   const [displayMode, setDisplayMode] = useState<"base" | "usd">("usd");
 
   const lighterBids = hasLighter && orderBook?.lighter?.bids?.levels ? orderBook.lighter.bids.levels : [];
@@ -404,8 +588,7 @@ function OrderBookDisplay({ subscription }: { subscription: OrderBookSubscriptio
   const lighterTrades = trades?.lighter || [];
   const grvtTrades = trades?.grvt || [];
 
-  // Map error status to disconnected for the terminal component
-  const mappedStatus: "connected" | "connecting" | "disconnected" = 
+  const mappedStatus: "connected" | "connecting" | "disconnected" =
     status === "error" ? "disconnected" : status;
 
   return (

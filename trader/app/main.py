@@ -19,8 +19,12 @@ from app.models import (
     BalancesResponse,
     FundingHistoryRequest,
     FundingHistoryResponse,
+    GrvtOrderRequest,
+    GrvtOrderResponse,
     TradesSnapshot,
     LighterOrderRequest,
+    LighterOrderResponse,
+    LighterSymbolOrderRequest,
     LoginRequest,
     LoginResponse,
     OrderBookSnapshot,
@@ -170,6 +174,50 @@ async def create_lighter_order(
     await broadcaster.publish(
         OrderEvent(
             venue="lighter",
+            payload={"request": order.model_dump(), "response": response.model_dump()},
+            created_at=datetime.now(tz=timezone.utc),
+        ).model_dump()
+    )
+    return response
+
+
+@app.post("/orders/lighter/symbol", response_model=LighterOrderResponse)
+async def create_lighter_order_by_symbol(
+    order: LighterSymbolOrderRequest,
+    service: LighterService = Depends(get_lighter_service),
+    broadcaster: EventBroadcaster = Depends(get_broadcaster),
+    _: str = Depends(get_current_user),
+):
+    try:
+        response = await service.place_order_by_symbol(order)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    await broadcaster.publish(
+        OrderEvent(
+            venue="lighter",
+            payload={"request": order.model_dump(), "response": response.model_dump()},
+            created_at=datetime.now(tz=timezone.utc),
+        ).model_dump()
+    )
+    return response
+
+
+@app.post("/orders/grvt", response_model=GrvtOrderResponse)
+async def create_grvt_order(
+    order: GrvtOrderRequest,
+    service: GrvtService = Depends(get_grvt_service),
+    broadcaster: EventBroadcaster = Depends(get_broadcaster),
+    _: str = Depends(get_current_user),
+):
+    try:
+        response = await service.place_order(order)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    await broadcaster.publish(
+        OrderEvent(
+            venue="grvt",
             payload={"request": order.model_dump(), "response": response.model_dump()},
             created_at=datetime.now(tz=timezone.utc),
         ).model_dump()

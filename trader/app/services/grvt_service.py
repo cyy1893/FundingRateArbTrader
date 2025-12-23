@@ -13,7 +13,17 @@ from pysdk.grvt_ccxt_env import GrvtEnv, GrvtWSEndpointType, get_grvt_ws_endpoin
 from pysdk.grvt_ccxt_pro import GrvtCcxtPro
 
 from app.config import Settings
-from app.models import GrvtAssetBalance, GrvtBalanceSnapshot, GrvtPositionBalance, OrderBookLevel, OrderBookSide, TradeEntry, VenueOrderBook
+from app.models import (
+    GrvtAssetBalance,
+    GrvtBalanceSnapshot,
+    GrvtOrderRequest,
+    GrvtOrderResponse,
+    GrvtPositionBalance,
+    OrderBookLevel,
+    OrderBookSide,
+    TradeEntry,
+    VenueOrderBook,
+)
 
 
 class GrvtService:
@@ -255,6 +265,28 @@ class GrvtService:
             ws_task.cancel()
             fallback_task.cancel()
             await asyncio.gather(ws_task, fallback_task, return_exceptions=True)
+
+    async def place_order(self, request: GrvtOrderRequest) -> GrvtOrderResponse:
+        client = await self._ensure_client()
+        instrument = await self._get_instrument(request.symbol)
+        params: dict[str, Any] = {
+            "post_only": request.post_only,
+            "reduce_only": request.reduce_only,
+            "order_duration_secs": request.order_duration_secs,
+            "time_in_force": "GOOD_TILL_TIME",
+        }
+        if request.client_order_id is not None:
+            params["client_order_id"] = request.client_order_id
+
+        response = await client.create_order(
+            instrument,
+            "limit",
+            request.side,
+            request.amount,
+            request.price,
+            params,
+        )
+        return GrvtOrderResponse(payload=response or {})
 
     async def _ensure_client(self) -> GrvtCcxtPro:
         if self._client is not None:

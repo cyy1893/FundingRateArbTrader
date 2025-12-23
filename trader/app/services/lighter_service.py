@@ -21,6 +21,7 @@ from app.models import (
     LighterOrderRequest,
     LighterOrderResponse,
     LighterPositionBalance,
+    LighterSymbolOrderRequest,
     OrderBookLevel,
     OrderBookSide,
     TradeEntry,
@@ -125,6 +126,27 @@ class LighterService:
             tx_hash=tx_hash_value,
             payload=payload_dict,
         )
+
+    async def place_order_by_symbol(self, request: LighterSymbolOrderRequest) -> LighterOrderResponse:
+        market_index = await self._get_market_id(request.symbol)
+        base_amount = int(round(request.base_amount * 10_000))
+        price = int(round(request.price * 100))
+        if base_amount <= 0 or price <= 0:
+            raise ValueError("Invalid base amount or price for Lighter order")
+
+        normalized = LighterOrderRequest(
+            market_index=market_index,
+            client_order_index=request.client_order_index,
+            base_amount=base_amount,
+            is_ask=request.side == "sell",
+            order_type="limit",
+            price=price,
+            reduce_only=request.reduce_only,
+            time_in_force=request.time_in_force,
+            order_expiry_secs=request.order_expiry_secs,
+            api_key_index=request.api_key_index,
+        )
+        return await self.place_order(normalized)
 
     async def get_balances(self) -> LighterBalanceSnapshot:
         client = await self._ensure_client()

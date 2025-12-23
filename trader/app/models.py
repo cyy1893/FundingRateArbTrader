@@ -43,6 +43,20 @@ class LighterOrderRequest(BaseModel):
         return value
 
 
+class LighterSymbolOrderRequest(BaseModel):
+    symbol: str
+    client_order_index: int = Field(..., ge=0)
+    side: Literal["buy", "sell"]
+    base_amount: float = Field(..., gt=0, description="Base amount in asset units")
+    price: float = Field(..., gt=0, description="Limit price in quote units")
+    reduce_only: bool = False
+    time_in_force: Literal["post_only", "gtc", "ioc"] = "post_only"
+    order_expiry_secs: Optional[int] = Field(
+        None, description="Optional unix timestamp when the order expires"
+    )
+    api_key_index: Optional[int] = None
+
+
 class LighterOrderResponse(BaseModel):
     tx_hash: str
     payload: dict
@@ -173,6 +187,21 @@ class OrderBookSubscription(BaseModel):
     notional_value: float = Field(..., gt=0, description="Contract notional value in USD")
     depth: int = Field(10, ge=1, le=50, description="Number of price levels to include")
     throttle_ms: int = Field(500, ge=50, le=5000, description="Throttle interval in milliseconds for order book updates")
+
+
+class GrvtOrderRequest(BaseModel):
+    symbol: str
+    side: Literal["buy", "sell"]
+    amount: float = Field(..., gt=0, description="Base amount in asset units")
+    price: float = Field(..., gt=0, description="Limit price in quote units")
+    post_only: bool = True
+    reduce_only: bool = False
+    order_duration_secs: int = Field(10, ge=1, le=3600, description="Order lifetime in seconds")
+    client_order_id: Optional[int] = None
+
+
+class GrvtOrderResponse(BaseModel):
+    payload: dict
 
 
 class ApiError(BaseModel):
