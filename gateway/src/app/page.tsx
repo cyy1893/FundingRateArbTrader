@@ -12,13 +12,12 @@ import { PerpTable } from "@/components/perp-table";
 import { SettlementCountdown } from "@/components/settlement-countdown";
 import { SourceControls } from "@/components/source-controls";
 import {
-  ArbitrageSidebar,
   ArbitrageSidebarProvider,
 } from "@/components/arbitrage-sidebar";
 import {
-  FundingPredictionSidebar,
   FundingPredictionSidebarProvider,
 } from "@/components/funding-prediction-sidebar";
+import { RightPanel } from "@/components/right-panel";
 import {
   DEFAULT_LEFT_SOURCE,
   DEFAULT_RIGHT_SOURCE,
@@ -221,10 +220,12 @@ async function DashboardContent({
             />
           </CardContent>
         </Card>
-        <div className="pointer-events-none fixed right-6 top-24 z-50 flex items-start gap-6">
-          <ArbitrageSidebar />
-          <FundingPredictionSidebar />
-        </div>
+        <RightPanel
+          primarySourceId={primarySource.id}
+          secondarySourceId={secondarySource.id}
+          volumeThreshold={volumeThreshold}
+        />
+
       </FundingPredictionSidebarProvider>
     </ArbitrageSidebarProvider>
   );

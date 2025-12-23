@@ -145,63 +145,58 @@ export function useFundingPredictionSidebar() {
   return ctx;
 }
 
-export function FundingPredictionSidebar() {
-  const { isOpen, loading, error, data } = useFundingPredictionSidebar();
+export function FundingPredictionContent() {
+  const { loading, error, data } = useFundingPredictionSidebar();
   const hasContent = Boolean(data && data.entries.length > 0);
 
   return (
-    <aside
-      className={cn(
-        "pointer-events-none flex h-[calc(100vh-8rem)] flex-shrink-0 transition-all duration-300",
-        isOpen ? "w-[460px] opacity-100" : "w-0 opacity-0",
-      )}
-    >
-      <div
-        className={cn(
-          "pointer-events-auto flex h-full w-full max-w-[calc(100vw-2rem)] flex-col border bg-background",
-          !isOpen && "hidden",
-        )}
-      >
-        <div className="flex items-start justify-between border-b p-4">
-          <div>
-            <p className="text-sm font-semibold">预测 24 小时套利 APR</p>
-            <p className="text-xs text-muted-foreground">
-              {data
-                ? `${data.metadata.primarySourceLabel} vs ${data.metadata.secondarySourceLabel}`
-                : "请选择交易对"}
+    <div className="flex h-full flex-col">
+      <div className="flex items-start justify-between border-b p-6">
+        <div>
+          <h2 className="text-lg font-semibold leading-none tracking-tight">
+            预测 24 小时套利 APR
+          </h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {data
+              ? `${data.metadata.primarySourceLabel} vs ${data.metadata.secondarySourceLabel}`
+              : "请选择交易对"}
+          </p>
+          {data?.metadata.fetchedAt ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              数据更新：{" "}
+              {new Date(data.metadata.fetchedAt).toLocaleString("zh-CN")}
             </p>
-            {data?.metadata.fetchedAt ? (
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                数据更新：{" "}
-                {new Date(data.metadata.fetchedAt).toLocaleString("zh-CN")}
-              </p>
-            ) : null}
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading ? (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              <div className="flex items-center gap-2 text-sm">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                预测生成中…
-              </div>
-            </div>
-          ) : error ? (
-            <Alert variant="destructive">
-              <AlertTitle>加载失败</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          ) : hasContent ? (
-            <PredictionResults payload={data!} />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              选择交易所并点击“预测 24 小时套利 APR”以查看结果。
-            </p>
-          )}
+          ) : null}
         </div>
       </div>
-    </aside>
+      <div className="flex-1 overflow-y-auto p-6">
+        {loading ? (
+          <div className="flex h-full items-center justify-center text-muted-foreground">
+            <div className="flex items-center gap-2 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              预测生成中…
+            </div>
+          </div>
+        ) : error ? (
+          <Alert variant="destructive">
+            <AlertTitle>加载失败</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : hasContent ? (
+          <PredictionResults payload={data!} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            选择交易所并点击“预测 24 小时套利 APR”以查看结果。
+          </p>
+        )}
+      </div>
+    </div>
   );
+}
+
+export function FundingPredictionSidebar() {
+  const { isOpen } = useFundingPredictionSidebar();
+  return null;
 }
 
 function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
@@ -270,11 +265,17 @@ function renderDirection(
   if (entry.direction === "leftLong") {
     return (
       <div className="space-y-1 leading-tight">
-        <p className="whitespace-nowrap font-medium text-emerald-500">
-          {metadata.primarySourceLabel} 做多
+        <p className="flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+          <span className="inline-block rounded-[2px] bg-emerald-100 px-1 py-0.5 text-[10px] leading-none text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+            多
+          </span>
+          {metadata.primarySourceLabel}
         </p>
-        <p className="whitespace-nowrap font-medium text-rose-500">
-          {metadata.secondarySourceLabel} 做空
+        <p className="flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400">
+          <span className="inline-block rounded-[2px] bg-rose-100 px-1 py-0.5 text-[10px] leading-none text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
+            空
+          </span>
+          {metadata.secondarySourceLabel}
         </p>
       </div>
     );
@@ -282,11 +283,17 @@ function renderDirection(
   if (entry.direction === "rightLong") {
     return (
       <div className="space-y-1 leading-tight">
-        <p className="whitespace-nowrap font-medium text-rose-500">
-          {metadata.primarySourceLabel} 做空
+        <p className="flex items-center gap-1 font-medium text-rose-600 dark:text-rose-400">
+          <span className="inline-block rounded-[2px] bg-rose-100 px-1 py-0.5 text-[10px] leading-none text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
+            空
+          </span>
+          {metadata.primarySourceLabel}
         </p>
-        <p className="whitespace-nowrap font-medium text-emerald-500">
-          {metadata.secondarySourceLabel} 做多
+        <p className="flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+          <span className="inline-block rounded-[2px] bg-emerald-100 px-1 py-0.5 text-[10px] leading-none text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+            多
+          </span>
+          {metadata.secondarySourceLabel}
         </p>
       </div>
     );
