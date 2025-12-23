@@ -58,12 +58,16 @@ export async function GET(request: Request) {
   const searchParams = url.searchParams;
   const { primarySource, secondarySource } = resolveSources(searchParams);
   const volumeThreshold = resolveVolumeThreshold(searchParams);
+  const forceRefresh =
+    searchParams.get("refresh") === "1" ||
+    searchParams.get("refresh") === "true";
 
   try {
     const arbitrageSnapshot = await fetchArbitrageSnapshot(
       primarySource,
       secondarySource,
       volumeThreshold,
+      forceRefresh,
     );
 
     const volumeLabel =

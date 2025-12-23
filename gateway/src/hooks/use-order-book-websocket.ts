@@ -185,9 +185,22 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     const existing = tradeBufferRef.current[venue] ?? [];
     const combined = [...incoming, ...existing];
     combined.sort((a, b) => b.timestamp - a.timestamp);
+    const seen = new Set<string>();
+    const deduped: TradeEntry[] = [];
+    for (const trade of combined) {
+      const key = `${trade.timestamp}-${trade.price}-${trade.size}-${trade.is_buy}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      deduped.push(trade);
+      if (deduped.length >= 100) {
+        break;
+      }
+    }
     tradeBufferRef.current = {
       ...tradeBufferRef.current,
-      [venue]: combined.slice(0, 100),
+      [venue]: deduped,
     };
   }, []);
 

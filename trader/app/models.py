@@ -311,6 +311,7 @@ class FundingPredictionRequest(BaseModel):
     primary_source: str
     secondary_source: str
     volume_threshold: float = 0.0
+    force_refresh: bool = False
 
 
 class FundingPredictionResponse(BaseModel):
@@ -341,6 +342,7 @@ class ArbitrageSnapshotRequest(BaseModel):
     primary_source: str
     secondary_source: str
     volume_threshold: float = 0.0
+    force_refresh: bool = False
 
 
 class ArbitrageSnapshotResponse(BaseModel):

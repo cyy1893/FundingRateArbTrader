@@ -4,6 +4,7 @@ import math
 import asyncio
 import re
 from datetime import datetime, timezone
+from time import time
 from typing import Any
 
 import httpx
@@ -36,6 +37,7 @@ PREDICTION_LOOKBACK_HOURS = 72
 PREDICTION_HOURS_PER_YEAR = 24 * 365
 MAX_PREDICTION_WORKERS = 5
 PREDICTION_HALF_LIFE_HOURS = 16.0
+CACHE_TTL_SECONDS = 10 * 60
 SYMBOL_RENAMES: dict[str, str] = {
     "1000PEPE": "kPEPE",
     "1000SHIB": "kSHIB",
@@ -49,6 +51,8 @@ class MarketDataService:
         self._client = httpx.AsyncClient(timeout=10.0)
         self._lighter_leverage_map: dict[str, float] | None = None
         self._grvt_market_data_base, _ = self._build_grvt_endpoints(settings.grvt_env)
+        self._arbitrage_cache: dict[tuple[str, str, float], tuple[float, ArbitrageSnapshotResponse]] = {}
+        self._prediction_cache: dict[tuple[str, str, float], tuple[float, FundingPredictionResponse]] = {}
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -496,11 +500,18 @@ class MarketDataService:
         primary: str,
         secondary: str,
         volume_threshold: float = 0.0,
+        force_refresh: bool = False,
     ) -> FundingPredictionResponse:
         """
         Predict 24h funding rates based on recent funding history and return
         the suggested direction plus annualized yield.
         """
+        cache_key = (primary, secondary, float(volume_threshold))
+        if not force_refresh:
+            cached = self._prediction_cache.get(cache_key)
+            if cached and time() - cached[0] < CACHE_TTL_SECONDS:
+                return cached[1]
+
         snapshot = await self.get_perp_snapshot(primary, secondary)
         fetched_at = snapshot.fetched_at
         volume_cutoff = max(volume_threshold, 0.0)
@@ -643,22 +654,31 @@ class MarketDataService:
 
         entries.sort(key=lambda entry: entry.get("annualized_decimal", 0), reverse=True)
 
-        return FundingPredictionResponse(
+        response = FundingPredictionResponse(
             entries=entries,
             failures=failures,
             fetched_at=fetched_at,
             errors=snapshot.errors,
         )
+        self._prediction_cache[cache_key] = (time(), response)
+        return response
 
     async def get_arbitrage_snapshot(
         self,
         primary: str,
         secondary: str,
         volume_threshold: float = 0.0,
+        force_refresh: bool = False,
     ) -> ArbitrageSnapshotResponse:
         """
         Compute 24h arbitrage annualized metrics server-side using funding history.
         """
+        cache_key = (primary, secondary, float(volume_threshold))
+        if not force_refresh:
+            cached = self._arbitrage_cache.get(cache_key)
+            if cached and time() - cached[0] < CACHE_TTL_SECONDS:
+                return cached[1]
+
         snapshot = await self.get_perp_snapshot(primary, secondary)
         fetched_at = snapshot.fetched_at
         volume_cutoff = max(volume_threshold, 0.0)
@@ -754,12 +774,14 @@ class MarketDataService:
 
         entries.sort(key=lambda entry: entry.get("annualized_decimal", 0), reverse=True)
 
-        return ArbitrageSnapshotResponse(
+        response = ArbitrageSnapshotResponse(
             entries=entries,
             failures=failures,
             fetched_at=fetched_at,
             errors=snapshot.errors,
         )
+        self._arbitrage_cache[cache_key] = (time(), response)
+        return response
 
     async def fetch_exchange_snapshot(self, source: str) -> ExchangeSnapshot:
         provider = source.lower()

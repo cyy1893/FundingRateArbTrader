@@ -7,10 +7,11 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 
 import type { FundingPredictionEntry } from "@/lib/funding-prediction";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -25,6 +26,7 @@ type SidebarRequest = {
   sourceA: string;
   sourceB: string;
   volumeThreshold: number;
+  forceRefresh?: boolean;
 };
 
 type PredictionSidebarPayload = {
@@ -44,13 +46,12 @@ type SidebarState = {
   error: string | null;
   data: PredictionSidebarPayload | null;
   lastRequest: SidebarRequest | null;
-  lastFetchedAt: number | null;
   open: (request: SidebarRequest) => void;
+  refresh: () => void;
   close: () => void;
 };
 
 const SidebarContext = createContext<SidebarState | null>(null);
-const CACHE_TTL_MS = 10 * 60 * 1000;
 
 export function FundingPredictionSidebarProvider({
   children,
@@ -62,7 +63,6 @@ export function FundingPredictionSidebarProvider({
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<PredictionSidebarPayload | null>(null);
   const [lastRequest, setLastRequest] = useState<SidebarRequest | null>(null);
-  const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
 
   const open = useCallback(async (request: SidebarRequest) => {
     const sameRequest =
@@ -71,11 +71,8 @@ export function FundingPredictionSidebarProvider({
       lastRequest.sourceB === request.sourceB &&
       lastRequest.volumeThreshold === request.volumeThreshold;
 
-    const cacheFresh =
-      lastFetchedAt != null && Date.now() - lastFetchedAt < CACHE_TTL_MS;
-
-    if (sameRequest && data && cacheFresh) {
-      setIsOpen((prev) => !prev);
+    if (sameRequest && isOpen && !request.forceRefresh) {
+      setIsOpen(false);
       return;
     }
 
@@ -85,6 +82,9 @@ export function FundingPredictionSidebarProvider({
       sourceB: request.sourceB,
       volumeThreshold: String(request.volumeThreshold),
     });
+    if (request.forceRefresh) {
+      params.set("refresh", "1");
+    }
 
     setIsOpen(true);
     setLoading(true);
@@ -102,13 +102,19 @@ export function FundingPredictionSidebarProvider({
       }
       const payload = (await response.json()) as PredictionSidebarPayload;
       setData(payload);
-      setLastFetchedAt(Date.now());
     } catch (err) {
       setError(err instanceof Error ? err.message : "无法加载资金费率预测");
     } finally {
       setLoading(false);
     }
-  }, [data, lastRequest, lastFetchedAt]);
+  }, [data, isOpen, lastRequest]);
+
+  const refresh = useCallback(() => {
+    if (!lastRequest) {
+      return;
+    }
+    open({ ...lastRequest, forceRefresh: true });
+  }, [lastRequest, open]);
 
   const close = useCallback(() => {
     setIsOpen(false);
@@ -123,11 +129,11 @@ export function FundingPredictionSidebarProvider({
       error,
       data,
       lastRequest,
-      lastFetchedAt,
       open,
+      refresh,
       close,
     }),
-    [isOpen, loading, error, data, lastRequest, lastFetchedAt, open, close],
+    [isOpen, loading, error, data, lastRequest, open, refresh, close],
   );
 
   return (
@@ -146,7 +152,7 @@ export function useFundingPredictionSidebar() {
 }
 
 export function FundingPredictionContent() {
-  const { loading, error, data } = useFundingPredictionSidebar();
+  const { loading, error, data, refresh, lastRequest } = useFundingPredictionSidebar();
   const hasContent = Boolean(data && data.entries.length > 0);
 
   return (
@@ -168,6 +174,16 @@ export function FundingPredictionContent() {
             </p>
           ) : null}
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={refresh}
+          disabled={loading || !lastRequest}
+          className="h-8"
+        >
+          <RefreshCw className={cn("mr-2 h-3.5 w-3.5", loading && "animate-spin")} />
+          刷新
+        </Button>
       </div>
       <div className="flex-1 overflow-y-auto p-6">
         {loading ? (

@@ -183,6 +183,7 @@ function TradingPageContent() {
   const [maxLeverageBySymbol, setMaxLeverageBySymbol] = useState<Record<string, { lighter?: number; grvt?: number }>>(
     {},
   );
+  const [availableSymbols, setAvailableSymbols] = useState<Array<{ symbol: string; displayName: string }>>([]);
   const [comparisonSelection, setComparisonSelection] = useState<ResolvedComparisonSelection>({
     primarySource: DEFAULT_LEFT_SOURCE,
     secondarySource: DEFAULT_RIGHT_SOURCE,
@@ -193,6 +194,8 @@ function TradingPageContent() {
   const { orderBook, trades, status, hasLighter, hasGrvt } = useOrderBookWebSocket(subscription);
   const [arbStatus, setArbStatus] = useState<"idle" | "placing" | "success" | "error">("idle");
   const [arbMessage, setArbMessage] = useState<string | null>(null);
+  const symbolsCacheKey = `fra:trade-symbols:${comparisonSelection.primarySource.id}:${comparisonSelection.secondarySource.id}`;
+  const SYMBOLS_CACHE_TTL_MS = 10 * 60 * 1000;
 
   useEffect(() => {
     const syncAuth = () => {
@@ -279,6 +282,26 @@ function TradingPageContent() {
 
     const loadLeverageCaps = async () => {
       try {
+        if (typeof window !== "undefined") {
+          try {
+            const cachedRaw = window.sessionStorage.getItem(symbolsCacheKey);
+            if (cachedRaw) {
+              const cached = JSON.parse(cachedRaw) as {
+                ts: number;
+                symbols: Array<{ symbol: string; displayName: string }>;
+                caps: Record<string, { lighter?: number; grvt?: number }>;
+              };
+              if (cached.ts && Date.now() - cached.ts < SYMBOLS_CACHE_TTL_MS) {
+                setAvailableSymbols(cached.symbols ?? []);
+                setMaxLeverageBySymbol(cached.caps ?? {});
+                return;
+              }
+            }
+          } catch {
+            // ignore cache parse errors
+          }
+        }
+
         const snapshot = await getPerpetualSnapshot(
           comparisonSelection.primarySource,
           comparisonSelection.secondarySource,
@@ -287,10 +310,19 @@ function TradingPageContent() {
           return;
         }
         const caps: Record<string, { lighter?: number; grvt?: number }> = {};
+        const symbols: Array<{ symbol: string; displayName: string }> = [];
+        const seenSymbols = new Set<string>();
         for (const row of snapshot.rows) {
           const symbol = row.symbol?.toUpperCase();
-          if (!symbol) {
+          if (!symbol || !row.right?.symbol) {
             continue;
+          }
+          if (!seenSymbols.has(symbol)) {
+            seenSymbols.add(symbol);
+            symbols.push({
+              symbol,
+              displayName: row.displayName ?? symbol,
+            });
           }
           const entry = caps[symbol] ?? {};
           if (row.leftProvider === "lighter" && Number.isFinite(row.maxLeverage)) {
@@ -306,9 +338,21 @@ function TradingPageContent() {
           caps[symbol] = entry;
         }
         setMaxLeverageBySymbol(caps);
+        setAvailableSymbols(symbols);
+        if (typeof window !== "undefined") {
+          try {
+            window.sessionStorage.setItem(
+              symbolsCacheKey,
+              JSON.stringify({ ts: Date.now(), symbols, caps }),
+            );
+          } catch {
+            // ignore cache write errors
+          }
+        }
       } catch (error) {
         if (!cancelled) {
           setMaxLeverageBySymbol({});
+          setAvailableSymbols([]);
         }
       }
     };
@@ -317,7 +361,7 @@ function TradingPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [comparisonSelection.primarySource, comparisonSelection.secondarySource]);
+  }, [comparisonSelection.primarySource, comparisonSelection.secondarySource, symbolsCacheKey]);
 
   const handleStartMonitoring = useCallback(() => {
     if (draftSubscription) {
@@ -325,7 +369,7 @@ function TradingPageContent() {
     }
   }, [draftSubscription]);
 
-  const availableSymbols = comparisonSelection.symbols;
+  const quickTradeSymbols = availableSymbols;
 
   const connectionStatus: "connected" | "connecting" | "disconnected" =
     status === "error" ? "disconnected" : status;
@@ -518,7 +562,7 @@ function TradingPageContent() {
             onNotionalReady={setNotionalReady}
             executeDisabled={!canExecute}
             executeLabel={arbStatus === "placing" ? "下单中..." : "执行套利/下单"}
-            availableSymbols={availableSymbols}
+            availableSymbols={quickTradeSymbols}
             leverageCapsBySymbol={maxLeverageBySymbol}
             primaryLabel={comparisonSelection.primarySource.label}
             secondaryLabel={comparisonSelection.secondarySource.label}

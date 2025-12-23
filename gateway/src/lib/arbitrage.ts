@@ -32,6 +32,7 @@ export async function fetchArbitrageSnapshot(
   primarySource: SourceConfig,
   secondarySource: SourceConfig,
   volumeThreshold: number,
+  forceRefresh: boolean = false,
 ): Promise<ArbitrageAnnualizedSnapshot> {
   const upstream = `${TRADER_API_BASE_URL.replace(/\/$/, "")}/arbitrage`;
   const response = await fetch(upstream, {
@@ -44,6 +45,7 @@ export async function fetchArbitrageSnapshot(
       primary_source: primarySource.provider,
       secondary_source: secondarySource.provider,
       volume_threshold: volumeThreshold,
+      force_refresh: forceRefresh,
     }),
   });
 

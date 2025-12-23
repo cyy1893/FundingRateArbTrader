@@ -37,6 +37,7 @@ export async function fetchFundingPredictionSnapshot(
   primarySource: SourceConfig,
   secondarySource: SourceConfig,
   volumeThreshold: number,
+  forceRefresh: boolean = false,
 ): Promise<FundingPredictionSnapshot> {
   const upstream = `${TRADER_API_BASE_URL.replace(/\/$/, "")}/funding-prediction`;
   const response = await fetch(upstream, {
@@ -49,6 +50,7 @@ export async function fetchFundingPredictionSnapshot(
       primary_source: primarySource.provider,
       secondary_source: secondarySource.provider,
       volume_threshold: volumeThreshold,
+      force_refresh: forceRefresh,
     }),
   });
 

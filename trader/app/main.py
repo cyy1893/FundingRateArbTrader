@@ -270,6 +270,7 @@ async def funding_prediction(
             primary=payload.primary_source,
             secondary=payload.secondary_source,
             volume_threshold=payload.volume_threshold,
+            force_refresh=payload.force_refresh,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -288,6 +289,7 @@ async def arbitrage_snapshot(
             primary=payload.primary_source,
             secondary=payload.secondary_source,
             volume_threshold=payload.volume_threshold,
+            force_refresh=payload.force_refresh,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

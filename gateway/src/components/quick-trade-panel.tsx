@@ -375,7 +375,7 @@ export function QuickTradePanel({
           </div>
           {!hasSymbols && (
             <p className="text-[10px] text-amber-600">
-              请先在费率比较页筛选币种
+              暂无可用币种，请稍后再试
             </p>
           )}
         </div>
