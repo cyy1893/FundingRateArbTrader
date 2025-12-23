@@ -44,9 +44,13 @@ function resolveVolumeThreshold(searchParams: URLSearchParams): number {
   const volumeParam = extractFirst(searchParams.getAll("volumeThreshold"));
   const parsed =
     volumeParam != null ? Number.parseInt(volumeParam, 10) : NaN;
-  return Number.isFinite(parsed) && parsed >= 0
-    ? parsed
-    : DEFAULT_VOLUME_THRESHOLD;
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_VOLUME_THRESHOLD;
+  }
+  if (parsed > 0 && parsed < DEFAULT_VOLUME_THRESHOLD) {
+    return DEFAULT_VOLUME_THRESHOLD;
+  }
+  return parsed;
 }
 
 export async function GET(request: Request) {

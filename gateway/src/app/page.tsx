@@ -62,10 +62,13 @@ export default async function Home({
     volumeThresholdParam != null
       ? Number.parseInt(volumeThresholdParam, 10)
       : DEFAULT_VOLUME_THRESHOLD;
-  const volumeThreshold =
+  let volumeThreshold =
     Number.isFinite(parsedVolumeThreshold) && parsedVolumeThreshold >= 0
       ? parsedVolumeThreshold
       : DEFAULT_VOLUME_THRESHOLD;
+  if (volumeThreshold > 0 && volumeThreshold < DEFAULT_VOLUME_THRESHOLD) {
+    volumeThreshold = DEFAULT_VOLUME_THRESHOLD;
+  }
   const primarySource = normalizeSource(
     requestedPrimarySource,
     DEFAULT_LEFT_SOURCE,

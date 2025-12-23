@@ -20,10 +20,21 @@ type TerminalOrderBookProps = {
   displayMode: "base" | "usd";
 };
 
-const priceFormatter = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+const formatPrice = (price: number) => {
+  if (!Number.isFinite(price)) {
+    return "—";
+  }
+  if (price >= 1000) {
+    return price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  if (price >= 1) {
+    return price.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  }
+  if (price >= 0.01) {
+    return price.toLocaleString("en-US", { minimumFractionDigits: 5, maximumFractionDigits: 5 });
+  }
+  return price.toLocaleString("en-US", { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+};
 
 const sizeFormatter = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 4,
@@ -93,6 +104,19 @@ export function TerminalOrderBook({
 
   const sizeHeader = displayMode === "usd" ? "数量 (USD)" : "数量";
   const totalHeader = displayMode === "usd" ? "累计 (USD)" : "累计";
+  const formatSpread = (value: number) => {
+    const abs = Math.abs(value);
+    if (abs >= 1000) {
+      return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    if (abs >= 1) {
+      return value.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+    }
+    if (abs >= 0.01) {
+      return value.toLocaleString("en-US", { minimumFractionDigits: 5, maximumFractionDigits: 5 });
+    }
+    return value.toLocaleString("en-US", { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+  };
 
   return (
     <div className="bg-white border border-gray-200 rounded-none flex flex-col shadow-sm overflow-hidden">
@@ -141,7 +165,7 @@ export function TerminalOrderBook({
                       style={{ width: `${widthPercent}%` }}
                     />
                     <div className="relative text-red-600 font-semibold">
-                      {priceFormatter.format(ask.price)}
+                      {formatPrice(ask.price)}
                     </div>
                     <div className="relative text-right text-gray-700">
                       {formatSize(ask.size)}
@@ -158,10 +182,10 @@ export function TerminalOrderBook({
             <div className="px-2 py-2.5 border-y border-gray-100 bg-gray-50/80 shrink-0 backdrop-blur-sm">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-gray-500 font-medium">
-                  Spread {spread ? spread.toFixed(2) : "--"}
+                  Spread {Number.isFinite(spread) ? formatSpread(spread as number) : "--"}
                 </span>
                 <span className="text-gray-500 font-medium">
-                  {spreadPct ? `${spreadPct.toFixed(3)}%` : "--"}
+                  {Number.isFinite(spreadPct) ? `${(spreadPct as number).toFixed(4)}%` : "--"}
                 </span>
               </div>
             </div>
@@ -183,7 +207,7 @@ export function TerminalOrderBook({
                       style={{ width: `${widthPercent}%` }}
                     />
                     <div className="relative text-green-700 font-semibold">
-                      {priceFormatter.format(bid.price)}
+                      {formatPrice(bid.price)}
                     </div>
                     <div className="relative text-right text-gray-700">
                       {formatSize(bid.size)}
@@ -213,7 +237,7 @@ export function TerminalOrderBook({
                         "px-2 py-1.5 font-semibold w-1/3",
                         trade.is_buy ? "text-green-700" : "text-red-600"
                       )}>
-                        {priceFormatter.format(trade.price)}
+                        {formatPrice(trade.price)}
                       </td>
                       <td className="px-2 py-1.5 text-right text-gray-700 w-1/3">
                         {formatSize(displayMode === "usd" ? trade.size * trade.price : trade.size)}

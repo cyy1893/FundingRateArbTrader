@@ -13,11 +13,39 @@ type Props = {
   hasGrvt: boolean;
 };
 
-const formatPrice = (price: number) => price.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const formatPrice = (price: number) => {
+  if (!Number.isFinite(price)) {
+    return "—";
+  }
+  if (price >= 1000) {
+    return price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  if (price >= 1) {
+    return price.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  }
+  if (price >= 0.01) {
+    return price.toLocaleString("en-US", { minimumFractionDigits: 5, maximumFractionDigits: 5 });
+  }
+  return price.toLocaleString("en-US", { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+};
 const formatShort = (val: number) => {
   if (Math.abs(val) >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M`;
   if (Math.abs(val) >= 1_000) return `${(val / 1_000).toFixed(1)}K`;
   return val.toFixed(2);
+};
+
+const formatSpread = (value: number) => {
+  const abs = Math.abs(value);
+  if (abs >= 1000) {
+    return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  if (abs >= 1) {
+    return value.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  }
+  if (abs >= 0.01) {
+    return value.toLocaleString("en-US", { minimumFractionDigits: 5, maximumFractionDigits: 5 });
+  }
+  return value.toLocaleString("en-US", { minimumFractionDigits: 6, maximumFractionDigits: 6 });
 };
 type DisplayMode = "base" | "usd";
 const formatValue = (val: number, mode: DisplayMode) => {
@@ -215,8 +243,12 @@ function VenueOrderBookTable({
           )}
 
           <div className="flex items-center justify-between bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-600">
-            <span>{spread ? `点差 ${spread.toFixed(1)}` : "点差 --"}</span>
-            <span>{spreadPct ? `${spreadPct.toFixed(3)}%` : "--"}</span>
+            <span>
+              {Number.isFinite(spread) ? `点差 ${formatSpread(spread as number)}` : "点差 --"}
+            </span>
+            <span>
+              {Number.isFinite(spreadPct) ? `${(spreadPct as number).toFixed(4)}%` : "--"}
+            </span>
           </div>
 
           {bidsBase.length === 0 ? (
@@ -277,7 +309,7 @@ export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLi
             return (
               <div key={`${t.timestamp}-${idx}`} className="grid grid-cols-3 px-2 py-1 text-xs">
                 <span className={color}>
-                  {t.price.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  {formatPrice(t.price)}
                 </span>
                 <span className="text-center">
                   {displayMode === "usd" ? `$${sizeValue.toFixed(2)}` : sizeValue.toFixed(3)}

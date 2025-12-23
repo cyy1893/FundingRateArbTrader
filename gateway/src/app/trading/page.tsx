@@ -265,7 +265,10 @@ function TradingPageContent() {
     setComparisonSelection({
       primarySource,
       secondarySource,
-      volumeThreshold: stored?.volumeThreshold ?? DEFAULT_VOLUME_THRESHOLD,
+      volumeThreshold:
+        stored?.volumeThreshold && stored.volumeThreshold > 0 && stored.volumeThreshold < DEFAULT_VOLUME_THRESHOLD
+          ? DEFAULT_VOLUME_THRESHOLD
+          : stored?.volumeThreshold ?? DEFAULT_VOLUME_THRESHOLD,
       symbols,
       updatedAt: symbols.length > 0 ? stored?.updatedAt ?? null : null,
     });

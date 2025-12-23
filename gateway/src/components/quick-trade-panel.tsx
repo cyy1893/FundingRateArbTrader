@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { TrendingUp } from "lucide-react";
@@ -149,6 +148,9 @@ function LeverageSlider({
   );
 }
 
+const formatSymbolLabel = (option: SymbolOption) =>
+  `${option.displayName} (${option.symbol})`;
+
 export function QuickTradePanel({
   onExecuteArbitrage,
   onConfigChange,
@@ -161,6 +163,9 @@ export function QuickTradePanel({
   secondaryLabel,
 }: QuickTradePanelProps) {
   const [symbol, setSymbol] = useState("");
+  const [symbolQuery, setSymbolQuery] = useState("");
+  const [isSymbolMenuOpen, setIsSymbolMenuOpen] = useState(false);
+  const symbolBlurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lighterLeverage, setLighterLeverage] = useState(1);
   const [lighterDirection, setLighterDirection] = useState<"long" | "short">("long");
   const [grvtLeverage, setGrvtLeverage] = useState(1);
@@ -178,14 +183,28 @@ export function QuickTradePanel({
   useEffect(() => {
     if (!hasSymbols) {
       setSymbol("");
+      setSymbolQuery("");
       return;
     }
     const exists = availableSymbols.some((option) => option.symbol === symbol);
-    if (!exists) {
-      setSymbol(availableSymbols[0].symbol);
+    if (symbol && !exists) {
+      setSymbol("");
     }
-  }, [availableSymbols, hasSymbols, symbol]);
+    if (symbol && symbolQuery.trim() === "") {
+      const selected = availableSymbols.find((option) => option.symbol === symbol);
+      if (selected) {
+        setSymbolQuery(formatSymbolLabel(selected));
+      }
+    }
+  }, [availableSymbols, hasSymbols, symbol, symbolQuery]);
 
+  useEffect(() => {
+    return () => {
+      if (symbolBlurTimeout.current) {
+        clearTimeout(symbolBlurTimeout.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (lighterLeverage > lighterMax) {
@@ -209,6 +228,24 @@ export function QuickTradePanel({
   const safeNotional = Number.isFinite(notionalAmount) && notionalAmount > 0 ? notionalAmount : null;
   const lighterMargin = safeNotional ? safeNotional / Math.max(lighterLeverage, LEVERAGE_MIN) : null;
   const grvtMargin = safeNotional ? safeNotional / Math.max(grvtLeverage, LEVERAGE_MIN) : null;
+  const sortedSymbols = [...availableSymbols].sort((a, b) =>
+    a.displayName.localeCompare(b.displayName),
+  );
+  const normalizedQuery = symbolQuery.trim().toLowerCase();
+  const filteredSymbols = normalizedQuery
+    ? sortedSymbols.filter(
+        (option) =>
+          option.symbol.toLowerCase().includes(normalizedQuery) ||
+          option.displayName.toLowerCase().includes(normalizedQuery),
+      )
+    : sortedSymbols;
+  const suggestedSymbols = filteredSymbols.slice(0, 12);
+
+  const handleSymbolSelect = (option: SymbolOption) => {
+    setSymbol(option.symbol);
+    setSymbolQuery(formatSymbolLabel(option));
+    setIsSymbolMenuOpen(false);
+  };
 
   useEffect(() => {
     if (!symbol || !safeNotional) {
@@ -269,32 +306,73 @@ export function QuickTradePanel({
           <Label htmlFor="symbol" className="text-xs text-gray-700 uppercase tracking-wide">
             币种
           </Label>
-          <Select value={symbol} onValueChange={setSymbol} disabled={!hasSymbols}>
-            <SelectTrigger
+          <div className="relative">
+            <Input
               id="symbol"
+              name="symbol-search"
+              value={symbolQuery}
+              disabled={!hasSymbols}
+              placeholder="搜索币种 (如 BTC, ETH)"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              onChange={(event) => {
+                if (symbolBlurTimeout.current) {
+                  clearTimeout(symbolBlurTimeout.current);
+                }
+                const next = event.target.value;
+                setSymbolQuery(next);
+                setIsSymbolMenuOpen(true);
+                const exact = availableSymbols.find(
+                  (option) =>
+                    option.symbol.toLowerCase() === next.trim().toLowerCase() ||
+                    option.displayName.toLowerCase() === next.trim().toLowerCase(),
+                );
+                if (exact) {
+                  setSymbol(exact.symbol);
+                } else {
+                  setSymbol("");
+                }
+              }}
+              onFocus={() => setIsSymbolMenuOpen(true)}
+              onBlur={() => {
+                symbolBlurTimeout.current = setTimeout(() => {
+                  setIsSymbolMenuOpen(false);
+                }, 150);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && suggestedSymbols[0]) {
+                  event.preventDefault();
+                  handleSymbolSelect(suggestedSymbols[0]);
+                }
+              }}
               className="bg-white border-gray-300 text-gray-900 focus:border-blue-500"
-            >
-              <SelectValue placeholder="选择币种" />
-            </SelectTrigger>
-            <SelectContent 
-              className="bg-white border-gray-200 text-gray-900 max-h-64 shadow-xl overflow-y-auto"
-              viewportClassName="p-0"
-            >
-              <div className="px-1 pb-1">
-                {[...availableSymbols]
-                  .sort((a, b) => a.displayName.localeCompare(b.displayName))
-                  .map((option) => (
-                    <SelectItem
-                      key={option.symbol}
-                      value={option.symbol}
-                      className="focus:bg-gray-100 focus:text-gray-900"
-                    >
-                      {option.displayName} ({option.symbol})
-                    </SelectItem>
-                  ))}
+            />
+            {isSymbolMenuOpen && hasSymbols ? (
+              <div className="absolute left-0 right-0 top-full z-30 mt-2 max-h-64 overflow-y-auto rounded-md border border-gray-200 bg-white text-gray-900 shadow-xl">
+                {suggestedSymbols.length > 0 ? (
+                  <div className="py-1">
+                    {suggestedSymbols.map((option) => (
+                      <button
+                        key={option.symbol}
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => handleSymbolSelect(option)}
+                        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-100"
+                      >
+                        <span className="font-medium">{option.displayName}</span>
+                        <span className="text-xs text-gray-500">{option.symbol}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="px-3 py-2 text-xs text-gray-500">
+                    没有匹配的币种
+                  </div>
+                )}
               </div>
-            </SelectContent>
-          </Select>
+            ) : null}
+          </div>
           {!hasSymbols && (
             <p className="text-[10px] text-amber-600">
               请先在费率比较页筛选币种

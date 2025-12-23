@@ -108,12 +108,31 @@ export function readComparisonSelection(): ResolvedComparisonSelection | null {
       Number.isFinite(parsed.volumeThreshold) && (parsed.volumeThreshold ?? 0) >= 0
         ? Number(parsed.volumeThreshold)
         : DEFAULT_VOLUME_THRESHOLD;
+    const normalizedVolumeThreshold =
+      volumeThreshold > 0 && volumeThreshold < DEFAULT_VOLUME_THRESHOLD
+        ? DEFAULT_VOLUME_THRESHOLD
+        : volumeThreshold;
     const symbols = normalizeSymbols(parsed.symbols ?? []);
+
+    if (normalizedVolumeThreshold !== volumeThreshold) {
+      try {
+        const updatedPayload: ComparisonSelection = {
+          primarySourceId: primarySource,
+          secondarySourceId: secondarySource,
+          volumeThreshold: normalizedVolumeThreshold,
+          symbols,
+          updatedAt: parsed.updatedAt ?? new Date().toISOString(),
+        };
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedPayload));
+      } catch (error) {
+        console.error("Failed to normalize comparison selection", error);
+      }
+    }
 
     return {
       primarySource: normalizeSource(primarySource, DEFAULT_LEFT_SOURCE),
       secondarySource: normalizeSource(secondarySource, DEFAULT_RIGHT_SOURCE),
-      volumeThreshold,
+      volumeThreshold: normalizedVolumeThreshold,
       symbols,
       updatedAt: parsed.updatedAt ? new Date(parsed.updatedAt) : null,
     };
