@@ -50,6 +50,7 @@ import {
 import { formatVolume } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { useArbitrageSidebar } from "@/components/arbitrage-sidebar";
+import { useFundingPredictionSidebar } from "@/components/funding-prediction-sidebar";
 import { persistComparisonSelection } from "@/lib/comparison-selection";
 import type { MarketRow } from "@/types/market";
 import type { FundingHistoryPoint, LiveFundingResponse } from "@/types/funding";
@@ -426,6 +427,7 @@ export function PerpTable({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const arbitrageSidebar = useArbitrageSidebar();
+  const predictionSidebar = useFundingPredictionSidebar();
 
   const handleVolumeThresholdChange = useCallback(
     (value: string) => {
@@ -1263,7 +1265,21 @@ export function PerpTable({
                 })
               }
             >
-              查看 24 小时套利 APR
+              过去 24 小时套利 APR
+            </Button>
+
+            <Button
+              variant="outline"
+              className="whitespace-nowrap"
+              onClick={() =>
+                predictionSidebar.open({
+                  sourceA: leftSource.id,
+                  sourceB: rightSource.id,
+                  volumeThreshold,
+                })
+              }
+            >
+              预测 24 小时套利 APR
             </Button>
 
             <Button

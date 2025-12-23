@@ -9,7 +9,8 @@ import {
 } from "react";
 import { Loader2 } from "lucide-react";
 
-import type { ArbitrageAnnualizedEntry } from "@/lib/arbitrage";
+import type { FundingPredictionEntry } from "@/lib/funding-prediction";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Table,
   TableBody,
@@ -18,7 +19,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 
 type SidebarRequest = {
@@ -27,14 +27,14 @@ type SidebarRequest = {
   volumeThreshold: number;
 };
 
-type ArbitrageSidebarPayload = {
+type PredictionSidebarPayload = {
   metadata: {
     primarySourceLabel: string;
     secondarySourceLabel: string;
     volumeLabel: string;
     fetchedAt: string | null;
   };
-  entries: ArbitrageAnnualizedEntry[];
+  entries: FundingPredictionEntry[];
   failures: Array<{ symbol: string; reason: string }>;
 };
 
@@ -42,7 +42,7 @@ type SidebarState = {
   isOpen: boolean;
   loading: boolean;
   error: string | null;
-  data: ArbitrageSidebarPayload | null;
+  data: PredictionSidebarPayload | null;
   lastRequest: SidebarRequest | null;
   lastFetchedAt: number | null;
   open: (request: SidebarRequest) => void;
@@ -52,7 +52,7 @@ type SidebarState = {
 const SidebarContext = createContext<SidebarState | null>(null);
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
-export function ArbitrageSidebarProvider({
+export function FundingPredictionSidebarProvider({
   children,
 }: {
   children: React.ReactNode;
@@ -60,7 +60,7 @@ export function ArbitrageSidebarProvider({
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<ArbitrageSidebarPayload | null>(null);
+  const [data, setData] = useState<PredictionSidebarPayload | null>(null);
   const [lastRequest, setLastRequest] = useState<SidebarRequest | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
 
@@ -92,18 +92,19 @@ export function ArbitrageSidebarProvider({
     setData(null);
 
     try {
-      const response = await fetch(`/api/arbitrage?${params.toString()}`, {
-        cache: "no-store",
-      });
+      const response = await fetch(
+        `/api/funding/prediction?${params.toString()}`,
+        { cache: "no-store" },
+      );
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error ?? "无法加载套利数据");
+        throw new Error(payload?.error ?? "无法加载资金费率预测");
       }
-      const payload = (await response.json()) as ArbitrageSidebarPayload;
+      const payload = (await response.json()) as PredictionSidebarPayload;
       setData(payload);
       setLastFetchedAt(Date.now());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "无法加载套利数据");
+      setError(err instanceof Error ? err.message : "无法加载资金费率预测");
     } finally {
       setLoading(false);
     }
@@ -136,16 +137,16 @@ export function ArbitrageSidebarProvider({
   );
 }
 
-export function useArbitrageSidebar() {
+export function useFundingPredictionSidebar() {
   const ctx = useContext(SidebarContext);
   if (!ctx) {
-    throw new Error("useArbitrageSidebar must be used within provider");
+    throw new Error("useFundingPredictionSidebar must be used within provider");
   }
   return ctx;
 }
 
-export function ArbitrageSidebar() {
-  const { isOpen, loading, error, data } = useArbitrageSidebar();
+export function FundingPredictionSidebar() {
+  const { isOpen, loading, error, data } = useFundingPredictionSidebar();
   const hasContent = Boolean(data && data.entries.length > 0);
 
   return (
@@ -163,7 +164,7 @@ export function ArbitrageSidebar() {
       >
         <div className="flex items-start justify-between border-b p-4">
           <div>
-            <p className="text-sm font-semibold">过去 24 小时套利 APR</p>
+            <p className="text-sm font-semibold">预测 24 小时套利 APR</p>
             <p className="text-xs text-muted-foreground">
               {data
                 ? `${data.metadata.primarySourceLabel} vs ${data.metadata.secondarySourceLabel}`
@@ -182,7 +183,7 @@ export function ArbitrageSidebar() {
             <div className="flex h-full items-center justify-center text-muted-foreground">
               <div className="flex items-center gap-2 text-sm">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                计算套利收益…
+                预测生成中…
               </div>
             </div>
           ) : error ? (
@@ -191,10 +192,10 @@ export function ArbitrageSidebar() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : hasContent ? (
-            <ArbitrageResults payload={data!} />
+            <PredictionResults payload={data!} />
           ) : (
             <p className="text-sm text-muted-foreground">
-              选择交易所并点击“过去 24 小时套利 APR”以查看结果。
+              选择交易所并点击“预测 24 小时套利 APR”以查看结果。
             </p>
           )}
         </div>
@@ -203,14 +204,14 @@ export function ArbitrageSidebar() {
   );
 }
 
-function ArbitrageResults({ payload }: { payload: ArbitrageSidebarPayload }) {
+function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
   const topEntries = payload.entries.slice(0, 20);
 
   return (
     <div className="space-y-4">
       <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
         <div>
-          注：仅显示 {payload.metadata.volumeLabel} 且双方均有合约的币种。
+          注：预测使用 16 小时半衰期的 EWMA，窗口为最近 72 小时，且仅显示 {payload.metadata.volumeLabel} 的币种。
         </div>
         {payload.failures.length > 0 ? (
           <div className="mt-2">
@@ -223,9 +224,14 @@ function ArbitrageResults({ payload }: { payload: ArbitrageSidebarPayload }) {
           <TableRow className="text-[11px] uppercase tracking-wide text-muted-foreground">
             <TableHead>币种</TableHead>
             <TableHead>方向</TableHead>
-            <TableHead className="text-right">24 小时收益</TableHead>
-            <TableHead className="text-right">平均每小时</TableHead>
-            <TableHead className="text-right">预计年化</TableHead>
+            <TableHead className="text-right">
+              {payload.metadata.primarySourceLabel} 24h
+            </TableHead>
+            <TableHead className="text-right">
+              {payload.metadata.secondarySourceLabel} 24h
+            </TableHead>
+            <TableHead className="text-right">预测 24 小时收益</TableHead>
+            <TableHead className="text-right">预测年化 APR</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -237,11 +243,14 @@ function ArbitrageResults({ payload }: { payload: ArbitrageSidebarPayload }) {
               <TableCell className="text-xs">
                 {renderDirection(entry, payload.metadata)}
               </TableCell>
-              <TableCell className="text-right text-sm font-medium">
-                {formatDecimalPercent(entry.totalDecimal)}
+              <TableCell className="text-right text-xs text-muted-foreground">
+                {formatPercent(entry.predictedLeft24h)}
               </TableCell>
               <TableCell className="text-right text-xs text-muted-foreground">
-                {formatDecimalPercent(entry.averageHourlyDecimal)}
+                {formatPercent(entry.predictedRight24h)}
+              </TableCell>
+              <TableCell className="text-right text-sm font-medium">
+                {formatDecimalPercent(entry.totalDecimal)}
               </TableCell>
               <TableCell className="text-right font-semibold text-primary">
                 {formatDecimalPercent(entry.annualizedDecimal)}
@@ -255,16 +264,16 @@ function ArbitrageResults({ payload }: { payload: ArbitrageSidebarPayload }) {
 }
 
 function renderDirection(
-  entry: ArbitrageAnnualizedEntry,
-  metadata: ArbitrageSidebarPayload["metadata"],
+  entry: FundingPredictionEntry,
+  metadata: PredictionSidebarPayload["metadata"],
 ) {
   if (entry.direction === "leftLong") {
     return (
       <div className="space-y-1 leading-tight">
-        <p className="font-medium text-emerald-500">
+        <p className="whitespace-nowrap font-medium text-emerald-500">
           {metadata.primarySourceLabel} 做多
         </p>
-        <p className="font-medium text-rose-500">
+        <p className="whitespace-nowrap font-medium text-rose-500">
           {metadata.secondarySourceLabel} 做空
         </p>
       </div>
@@ -273,18 +282,26 @@ function renderDirection(
   if (entry.direction === "rightLong") {
     return (
       <div className="space-y-1 leading-tight">
-        <p className="font-medium text-rose-500">
+        <p className="whitespace-nowrap font-medium text-rose-500">
           {metadata.primarySourceLabel} 做空
         </p>
-        <p className="font-medium text-emerald-500">
+        <p className="whitespace-nowrap font-medium text-emerald-500">
           {metadata.secondarySourceLabel} 做多
         </p>
       </div>
     );
   }
-  return (
-    <p className="text-xs text-muted-foreground">方向不明</p>
-  );
+  return <p className="text-xs text-muted-foreground">方向不明</p>;
+}
+
+function formatPercent(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) {
+    return "—";
+  }
+  if (Math.abs(value) >= 0.01) {
+    return `${value.toFixed(2)}%`;
+  }
+  return `${value.toFixed(4)}%`;
 }
 
 function formatDecimalPercent(value: number): string {

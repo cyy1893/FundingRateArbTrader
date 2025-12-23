@@ -285,6 +285,41 @@ class FundingHistoryResponse(BaseModel):
     dataset: list[FundingHistoryPoint]
 
 
+class FundingPredictionEntry(BaseModel):
+    symbol: str
+    display_name: str
+    left_symbol: str
+    right_symbol: str
+    predicted_left_24h: float | None = None
+    predicted_right_24h: float | None = None
+    predicted_spread_24h: float
+    average_left_hourly: float | None = None
+    average_right_hourly: float | None = None
+    average_spread_hourly: float
+    total_decimal: float
+    annualized_decimal: float
+    sample_count: int
+    direction: Literal["leftLong", "rightLong", "unknown"]
+
+
+class FundingPredictionFailure(BaseModel):
+    symbol: str
+    reason: str
+
+
+class FundingPredictionRequest(BaseModel):
+    primary_source: str
+    secondary_source: str
+    volume_threshold: float = 0.0
+
+
+class FundingPredictionResponse(BaseModel):
+    entries: list[FundingPredictionEntry]
+    failures: list[FundingPredictionFailure]
+    fetched_at: datetime | None = None
+    errors: list[ApiError] = Field(default_factory=list)
+
+
 class ArbitrageAnnualizedEntry(BaseModel):
     symbol: str
     display_name: str

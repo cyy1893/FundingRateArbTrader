@@ -16,6 +16,10 @@ import {
   ArbitrageSidebarProvider,
 } from "@/components/arbitrage-sidebar";
 import {
+  FundingPredictionSidebar,
+  FundingPredictionSidebarProvider,
+} from "@/components/funding-prediction-sidebar";
+import {
   DEFAULT_LEFT_SOURCE,
   DEFAULT_RIGHT_SOURCE,
   normalizeSource,
@@ -146,78 +150,82 @@ async function DashboardContent({
   }));
   return (
     <ArbitrageSidebarProvider>
-      <div className="flex gap-6">
-        <div className="flex-1">
-          <Card className="shadow-sm">
-        <CardHeader className="space-y-6 pb-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-1.5">
-              <CardTitle className="text-2xl font-semibold tracking-tight">
-                资金费率比较
-              </CardTitle>
-              <CardDescription className="text-sm text-muted-foreground">
-                跨交易所资金费率实时监控与套利机会分析
-              </CardDescription>
-            </div>
-            
-            <div className="flex items-center gap-4">
-              <div className="flex flex-wrap items-start gap-4">
-                {settlementTargets.map((target) => (
-                  <div key={`settlement-${target.periodHours}`} className="flex flex-col items-end gap-1">
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                      {target.periodHours}h 下次结算
-                    </span>
-                    <SettlementCountdown
-                      targetIso={target.targetIso}
-                      periodHours={target.periodHours}
-                      className="text-base font-semibold tabular-nums"
-                    />
-                  </div>
-                ))}
+      <FundingPredictionSidebarProvider>
+        <Card className="shadow-sm">
+          <CardHeader className="space-y-6 pb-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div className="space-y-1.5">
+                <CardTitle className="text-2xl font-semibold tracking-tight">
+                  资金费率比较
+                </CardTitle>
+                <CardDescription className="text-sm text-muted-foreground">
+                  跨交易所资金费率实时监控与套利机会分析
+                </CardDescription>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-start gap-4">
+                  {settlementTargets.map((target) => (
+                    <div
+                      key={`settlement-${target.periodHours}`}
+                      className="flex flex-col items-end gap-1"
+                    >
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        {target.periodHours}h 下次结算
+                      </span>
+                      <SettlementCountdown
+                        targetIso={target.targetIso}
+                        periodHours={target.periodHours}
+                        className="text-base font-semibold tabular-nums"
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-        </CardHeader>
-        
-        <CardContent className="space-y-4">
-          {truncatedErrorMessage ? (
-            <Alert variant="destructive" className="border-destructive/50">
-              <AlertTitle className="font-semibold">数据获取失败</AlertTitle>
-              <AlertDescription>{truncatedErrorMessage}</AlertDescription>
-            </Alert>
-          ) : null}
-          {displayedApiErrors.length > 0 ? (
-            <Alert variant="default" className="border-border bg-muted/30">
-              <AlertTitle className="font-semibold">部分数据来源不可用</AlertTitle>
-              <AlertDescription>
-                <ul className="mt-2 list-disc space-y-1 pl-4 text-sm">
-                  {displayedApiErrors.map((apiError) => (
-                    <li key={apiError.key}>
-                      <span className="font-semibold">{apiError.source}:</span>{" "}
-                      <span>{apiError.message}</span>
-                    </li>
-                  ))}
-                </ul>
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          <PerpTable
-            rows={errorMessage ? [] : rows}
-            leftSource={primarySource}
-            rightSource={secondarySource}
-            volumeThreshold={volumeThreshold}
-            headerControls={
-              <SourceControls
-                leftSourceId={primarySource.id}
-                rightSourceId={secondarySource.id}
-              />
-            }
-          />
-        </CardContent>
-      </Card>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            {truncatedErrorMessage ? (
+              <Alert variant="destructive" className="border-destructive/50">
+                <AlertTitle className="font-semibold">数据获取失败</AlertTitle>
+                <AlertDescription>{truncatedErrorMessage}</AlertDescription>
+              </Alert>
+            ) : null}
+            {displayedApiErrors.length > 0 ? (
+              <Alert variant="default" className="border-border bg-muted/30">
+                <AlertTitle className="font-semibold">部分数据来源不可用</AlertTitle>
+                <AlertDescription>
+                  <ul className="mt-2 list-disc space-y-1 pl-4 text-sm">
+                    {displayedApiErrors.map((apiError) => (
+                      <li key={apiError.key}>
+                        <span className="font-semibold">{apiError.source}:</span>{" "}
+                        <span>{apiError.message}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            <PerpTable
+              rows={errorMessage ? [] : rows}
+              leftSource={primarySource}
+              rightSource={secondarySource}
+              volumeThreshold={volumeThreshold}
+              headerControls={
+                <SourceControls
+                  leftSourceId={primarySource.id}
+                  rightSourceId={secondarySource.id}
+                />
+              }
+            />
+          </CardContent>
+        </Card>
+        <div className="pointer-events-none fixed right-6 top-24 z-50 flex items-start gap-6">
+          <ArbitrageSidebar />
+          <FundingPredictionSidebar />
         </div>
-        <ArbitrageSidebar />
-      </div>
+      </FundingPredictionSidebarProvider>
     </ArbitrageSidebarProvider>
   );
 }

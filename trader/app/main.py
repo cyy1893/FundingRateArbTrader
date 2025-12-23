@@ -19,6 +19,8 @@ from app.models import (
     BalancesResponse,
     FundingHistoryRequest,
     FundingHistoryResponse,
+    FundingPredictionRequest,
+    FundingPredictionResponse,
     GrvtOrderRequest,
     GrvtOrderResponse,
     TradesSnapshot,
@@ -256,6 +258,24 @@ async def funding_history(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return FundingHistoryResponse(dataset=dataset)
+
+
+@app.post("/funding-prediction", response_model=FundingPredictionResponse)
+async def funding_prediction(
+    payload: FundingPredictionRequest,
+    service: MarketDataService = Depends(get_market_data_service),
+) -> FundingPredictionResponse:
+    try:
+        snapshot = await service.get_funding_prediction_snapshot(
+            primary=payload.primary_source,
+            secondary=payload.secondary_source,
+            volume_threshold=payload.volume_threshold,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return snapshot
 
 
 @app.post("/arbitrage", response_model=ArbitrageSnapshotResponse)
