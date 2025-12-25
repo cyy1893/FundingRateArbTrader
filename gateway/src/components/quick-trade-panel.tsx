@@ -20,6 +20,9 @@ type QuickTradePanelProps = {
   leverageCapsBySymbol?: Record<string, { lighter?: number; grvt?: number }>;
   primaryLabel: string;
   secondaryLabel: string;
+  defaultSymbol?: string;
+  defaultLighterDirection?: "long" | "short";
+  defaultGrvtDirection?: "long" | "short";
 };
 
 const LEVERAGE_MIN = 1;
@@ -161,15 +164,18 @@ export function QuickTradePanel({
   leverageCapsBySymbol,
   primaryLabel,
   secondaryLabel,
+  defaultSymbol,
+  defaultLighterDirection,
+  defaultGrvtDirection,
 }: QuickTradePanelProps) {
-  const [symbol, setSymbol] = useState("");
+  const [symbol, setSymbol] = useState(defaultSymbol ?? "");
   const [symbolQuery, setSymbolQuery] = useState("");
   const [isSymbolMenuOpen, setIsSymbolMenuOpen] = useState(false);
   const symbolBlurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lighterLeverage, setLighterLeverage] = useState(1);
-  const [lighterDirection, setLighterDirection] = useState<"long" | "short">("long");
+  const [lighterDirection, setLighterDirection] = useState<"long" | "short">(defaultLighterDirection ?? "long");
   const [grvtLeverage, setGrvtLeverage] = useState(1);
-  const [grvtDirection, setGrvtDirection] = useState<"long" | "short">("short");
+  const [grvtDirection, setGrvtDirection] = useState<"long" | "short">(defaultGrvtDirection ?? "short");
   const [notionalValue, setNotionalValue] = useState("");
 
   const hasSymbols = availableSymbols.length > 0;
@@ -182,21 +188,33 @@ export function QuickTradePanel({
 
   useEffect(() => {
     if (!hasSymbols) {
-      setSymbol("");
-      setSymbolQuery("");
+      if (!defaultSymbol) {
+        setSymbol("");
+        setSymbolQuery("");
+      }
       return;
     }
-    const exists = availableSymbols.some((option) => option.symbol === symbol);
-    if (symbol && !exists) {
-      setSymbol("");
-    }
-    if (symbol && symbolQuery.trim() === "") {
-      const selected = availableSymbols.find((option) => option.symbol === symbol);
-      if (selected) {
-        setSymbolQuery(formatSymbolLabel(selected));
+
+    const currentSymbol = symbol || defaultSymbol;
+    if (currentSymbol) {
+      const exists = availableSymbols.some((option) => option.symbol === currentSymbol);
+      if (exists) {
+        // If we haven't set the query yet (initial load with default), do it now
+        if (symbolQuery === "") {
+            const selected = availableSymbols.find((option) => option.symbol === currentSymbol);
+            if (selected) {
+                 setSymbol(selected.symbol);
+                 setSymbolQuery(formatSymbolLabel(selected));
+            }
+        }
+      } else {
+           // Symbol from URL or current state not found in available symbols 
+           if (symbol && !exists) {
+               setSymbol("");
+           }
       }
     }
-  }, [availableSymbols, hasSymbols, symbol, symbolQuery]);
+  }, [availableSymbols, hasSymbols, symbol, symbolQuery, defaultSymbol]);
 
   useEffect(() => {
     return () => {

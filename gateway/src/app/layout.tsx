@@ -1,14 +1,8 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
+import { Toaster } from "sonner";
 
 import { TopNav } from "@/components/top-nav";
-
-const inter = Inter({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-inter",
-});
 
 export const metadata: Metadata = {
   title: "Funding Rate Arbitrage Dashboard",
@@ -22,13 +16,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <body className="bg-background font-sans text-foreground antialiased">
         {/* Top Navigation Layout */}
         <TopNav />
         <main className="min-h-screen">
           {children}
         </main>
+        <Toaster richColors position="top-center" />
       </body>
     </html>
   );

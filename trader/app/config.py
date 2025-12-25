@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     )
     auth_jwt_secret: str = Field(..., description="Secret key used to sign JWTs")
     auth_jwt_algorithm: str = Field("HS256", description="JWT signing algorithm")
-    auth_token_ttl_minutes: int = Field(12 * 60, description="Access token lifetime in minutes")
+    auth_token_ttl_minutes: int = Field(7 * 24 * 60, description="Access token lifetime in minutes")
     auth_lockout_threshold: int = Field(3, description="Number of failed logins before lockout")
     auth_lockout_minutes: int = Field(60, description="Lockout duration in minutes after threshold is reached")
 

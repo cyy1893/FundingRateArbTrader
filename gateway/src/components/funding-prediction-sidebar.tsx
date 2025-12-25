@@ -7,7 +7,8 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, SquareArrowOutUpRight } from "lucide-react";
+import { toast } from "sonner";
 
 import type { FundingPredictionEntry } from "@/lib/funding-prediction";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -104,7 +105,9 @@ export function FundingPredictionSidebarProvider({
       const payload = (await response.json()) as PredictionSidebarPayload;
       setData(payload);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "无法加载资金费率预测");
+      const msg = err instanceof Error ? err.message : "无法加载资金费率预测";
+      setError(msg);
+      toast.error(msg, { className: "bg-destructive text-destructive-foreground" });
     } finally {
       setLoading(false);
     }
@@ -240,6 +243,7 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
             <TableHead className="text-right">GRVT 24h 量</TableHead>
             <TableHead className="text-right">预测 24 小时收益</TableHead>
             <TableHead className="text-right">预测年化 APR</TableHead>
+            <TableHead className="text-right">去交易</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -262,6 +266,17 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
               </TableCell>
               <TableCell className="text-right font-semibold text-primary">
                 {formatDecimalPercent(entry.annualizedDecimal)}
+              </TableCell>
+              <TableCell className="text-right">
+                <a
+                  href={`/trading?symbol=${entry.symbol}&lighterDir=${entry.direction === "leftLong" ? "long" : "short"
+                    }&grvtDir=${entry.direction === "leftLong" ? "short" : "long"
+                    }`}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  title="前往交易"
+                >
+                  <SquareArrowOutUpRight className="h-4 w-4" />
+                </a>
               </TableCell>
             </TableRow>
           ))}

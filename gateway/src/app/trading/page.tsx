@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useState, useEffect, useCallback } from "react";
+import { toast } from "sonner";
+import { Suspense, useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { TradingStatusBar } from "@/components/trading-status-bar";
@@ -174,6 +175,22 @@ function summarizeGrvt(grvt: GrvtBalanceSnapshot): UnifiedVenue {
 
 function TradingPageContent() {
   const searchParams = useSearchParams();
+  const didShowToastRef = useRef(false);
+
+  useEffect(() => {
+    const symbol = searchParams.get("symbol");
+    const lighterDir = searchParams.get("lighterDir");
+    const grvtDir = searchParams.get("grvtDir");
+
+    if (symbol && lighterDir && grvtDir && !didShowToastRef.current) {
+      toast.success(`已自动应用配置：${symbol}`, {
+        description: `Lighter: ${lighterDir === "long" ? "做多" : "做空"} / GRVT: ${grvtDir === "short" ? "做空" : "做多"}`,
+        duration: 5000,
+      });
+      didShowToastRef.current = true;
+    }
+  }, [searchParams]);
+
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [normalized, setNormalized] = useState<UnifiedWalletData | null>(null);
   const [subscription, setSubscription] = useState<OrderBookSubscription | null>(null);
@@ -351,6 +368,8 @@ function TradingPageContent() {
         }
       } catch (error) {
         if (!cancelled) {
+          const msg = error instanceof Error ? error.message : "获取交易对数据失败";
+          toast.error(msg, { className: "bg-destructive text-destructive-foreground" });
           setMaxLeverageBySymbol({});
           setAvailableSymbols([]);
         }
@@ -566,6 +585,9 @@ function TradingPageContent() {
             leverageCapsBySymbol={maxLeverageBySymbol}
             primaryLabel={comparisonSelection.primarySource.label}
             secondaryLabel={comparisonSelection.secondarySource.label}
+            defaultSymbol={searchParams.get("symbol") ?? undefined}
+            defaultLighterDirection={(searchParams.get("lighterDir") as "long" | "short" | null) ?? undefined}
+            defaultGrvtDirection={(searchParams.get("grvtDir") as "long" | "short" | null) ?? undefined}
           />
         </div>
 
@@ -631,7 +653,7 @@ function OrderBookDisplay({
   const lighterAsks = hasLighter && orderBook?.lighter?.asks?.levels ? orderBook.lighter.asks.levels : [];
   const grvtBids = hasGrvt && orderBook?.grvt?.bids?.levels ? orderBook.grvt.bids.levels : [];
   const grvtAsks = hasGrvt && orderBook?.grvt?.asks?.levels ? orderBook.grvt.asks.levels : [];
-  
+
   const lighterTrades = trades?.lighter || [];
   const grvtTrades = trades?.grvt || [];
 

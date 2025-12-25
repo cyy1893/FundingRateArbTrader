@@ -85,7 +85,7 @@ export function RightPanel({
 
     return (
         <Sheet open={open} onOpenChange={handleOpenChange} modal={false}>
-            <SheetContent className="top-16 h-[calc(100vh-4rem)] w-[500px] border-l shadow-xl outline-none p-0 sm:max-w-[500px] data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right">
+            <SheetContent className="top-16 h-[calc(100vh-4rem)] w-[700px] border-l shadow-xl outline-none p-0 sm:max-w-[700px] data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right">
                 <div className="flex h-full flex-col">
                     <div className="flex border-b">
                         <button

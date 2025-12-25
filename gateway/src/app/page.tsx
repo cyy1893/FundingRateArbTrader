@@ -11,6 +11,7 @@ import {
 import { PerpTable } from "@/components/perp-table";
 import { SettlementCountdown } from "@/components/settlement-countdown";
 import { SourceControls } from "@/components/source-controls";
+import { ErrorNotification } from "@/components/error-notification";
 import {
   ArbitrageSidebarProvider,
 } from "@/components/arbitrage-sidebar";
@@ -153,6 +154,7 @@ async function DashboardContent({
   return (
     <ArbitrageSidebarProvider>
       <FundingPredictionSidebarProvider>
+        <ErrorNotification message={truncatedErrorMessage} />
         <Card className="shadow-sm">
           <CardHeader className="space-y-6 pb-6">
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
