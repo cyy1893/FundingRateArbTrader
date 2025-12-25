@@ -562,7 +562,7 @@ function TradingPageContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="h-[calc(100vh-4rem)] bg-gray-50 flex flex-col overflow-hidden">
       {/* Top Status Bar */}
       <TradingStatusBar
         totalUsd={normalized.totalUsd}
@@ -572,9 +572,9 @@ function TradingPageContent() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left Panel - Quick Trade */}
-        <div className="w-72 border-r border-gray-200 p-4 bg-white">
+        <div className="w-72 border-r border-gray-200 p-3 bg-white">
           <QuickTradePanel
             onExecuteArbitrage={executeArbitrage}
             onConfigChange={setDraftSubscription}
@@ -593,7 +593,7 @@ function TradingPageContent() {
 
         {/* Center - Order Books */}
         <div className="flex-1 flex flex-col">
-          <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-2">
+          <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-1.5">
             <div className="text-xs text-gray-500">
               {arbMessage ? arbMessage : " "}
             </div>
@@ -605,7 +605,7 @@ function TradingPageContent() {
               {subscription ? "监控中..." : "开始监控"}
             </button>
           </div>
-          <div className="flex-1 flex">
+          <div className="flex-1 flex min-h-0">
             {subscription ? (
               <OrderBookDisplay
                 orderBook={orderBook}
@@ -661,7 +661,7 @@ function OrderBookDisplay({
     status === "error" ? "disconnected" : status;
 
   return (
-    <div className="flex-1 flex flex-col p-4 gap-3">
+    <div className="flex-1 flex flex-col p-3 gap-2">
       <div className="flex items-center justify-end">
         <button
           onClick={() => setDisplayMode((mode) => (mode === "usd" ? "base" : "usd"))}
@@ -670,7 +670,7 @@ function OrderBookDisplay({
           显示：{displayMode === "usd" ? "USD" : "原始数量"}
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-3">
         <TerminalOrderBook
           exchange="Lighter"
           bids={lighterBids}

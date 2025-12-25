@@ -23,7 +23,7 @@ export function TradingStatusBar({
   grvtBalance,
 }: TradingStatusBarProps) {
   return (
-    <div className="bg-white border-b border-gray-200 px-6 py-3 shadow-sm">
+    <div className="bg-white border-b border-gray-200 px-6 py-2 shadow-sm">
       <div className="flex items-center justify-between">
         {/* Left: Total Assets */}
         <div className="flex items-center gap-8">
@@ -31,7 +31,7 @@ export function TradingStatusBar({
             <p className="text-[10px] uppercase tracking-wider text-gray-500 font-medium">
               总资产
             </p>
-            <p className="text-2xl font-bold text-gray-900 font-mono">
+            <p className="text-xl font-bold text-gray-900 font-mono">
               {usdFormatter.format(totalUsd)}
             </p>
           </div>

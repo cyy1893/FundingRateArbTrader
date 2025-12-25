@@ -64,6 +64,8 @@ export function TerminalOrderBook({
   status,
   displayMode,
 }: TerminalOrderBookProps) {
+  const MAX_LEVELS = 12;
+  const MAX_TRADES = 12;
   const normalizeLevels = (levels: OrderBookEntry[]) => {
     if (displayMode === "base") {
       return levels;
@@ -80,8 +82,9 @@ export function TerminalOrderBook({
     });
   };
 
-  const bidsDisplay = normalizeLevels(bids);
-  const asksDisplay = normalizeLevels(asks);
+  const bidsDisplay = normalizeLevels(bids).slice(0, MAX_LEVELS);
+  const asksDisplay = normalizeLevels(asks).slice(0, MAX_LEVELS);
+  const displayTrades = trades.slice(0, MAX_TRADES);
 
   const maxTotal = Math.max(
     ...bidsDisplay.map((b) => b.total),
@@ -138,18 +141,18 @@ export function TerminalOrderBook({
       </div>
 
       {/* Main Content: Split into OrderBook (Left) and Trades (Right) */}
-      <div className="grid grid-cols-2 gap-3 text-base">
+      <div className="grid grid-cols-2 gap-3 text-sm">
         {/* Order Book Section */}
         <div className="flex flex-col">
             {/* Column Headers */}
-            <div className="grid grid-cols-3 gap-2 px-2 py-2.5 border-b border-gray-100 text-sm uppercase tracking-wider text-gray-500 font-semibold bg-gray-50/50 shrink-0">
+            <div className="grid grid-cols-3 gap-2 px-2 py-2 border-b border-gray-100 text-[11px] uppercase tracking-wider text-gray-500 font-semibold bg-gray-50/50 shrink-0">
               <div className="text-left">价格</div>
               <div className="text-right">{sizeHeader}</div>
               <div className="text-right">{totalHeader}</div>
             </div>
 
             {/* Asks (Sell Orders) */}
-            <div className="overflow-auto max-h-[22rem] scrollbar-thin scrollbar-thumb-gray-100">
+            <div className="overflow-hidden">
               {[...asksDisplay].reverse().map((ask, idx) => {
                 const widthPercent = (ask.total / maxTotal) * 100;
 
@@ -157,7 +160,7 @@ export function TerminalOrderBook({
                   <div
                     key={`ask-${ask.price}`}
                     className={cn(
-                      "relative grid grid-cols-3 gap-2 px-2 py-1.5 hover:bg-red-50/50 transition-colors"
+                      "relative grid grid-cols-3 gap-2 px-2 py-1 hover:bg-red-50/50 transition-colors"
                     )}
                   >
                     <div
@@ -179,8 +182,8 @@ export function TerminalOrderBook({
             </div>
 
             {/* Spread Display - Compact */}
-            <div className="px-2 py-2.5 border-y border-gray-100 bg-gray-50/80 shrink-0 backdrop-blur-sm">
-              <div className="flex items-center justify-between text-sm">
+            <div className="px-2 py-2 border-y border-gray-100 bg-gray-50/80 shrink-0 backdrop-blur-sm">
+              <div className="flex items-center justify-between text-xs">
                 <span className="text-gray-500 font-medium">
                   Spread {Number.isFinite(spread) ? formatSpread(spread as number) : "--"}
                 </span>
@@ -191,7 +194,7 @@ export function TerminalOrderBook({
             </div>
 
             {/* Bids (Buy Orders) */}
-            <div className="overflow-auto max-h-[22rem] scrollbar-thin scrollbar-thumb-gray-100">
+            <div className="overflow-hidden">
               {bidsDisplay.map((bid, idx) => {
                 const widthPercent = (bid.total / maxTotal) * 100;
 
@@ -199,7 +202,7 @@ export function TerminalOrderBook({
                   <div
                     key={`bid-${bid.price}`}
                     className={cn(
-                      "relative grid grid-cols-3 gap-2 px-2 py-1.5 hover:bg-green-50/50 transition-colors"
+                      "relative grid grid-cols-3 gap-2 px-2 py-1 hover:bg-green-50/50 transition-colors"
                     )}
                   >
                     <div
@@ -223,26 +226,26 @@ export function TerminalOrderBook({
 
         {/* Recent Trades Section */}
         <div className="flex flex-col bg-white border border-gray-100">
-          <div className="px-2 py-2.5 bg-gray-50/50 border-b border-gray-100 shrink-0">
-             <span className="text-sm font-semibold text-gray-500">逐笔成交</span>
+          <div className="px-2 py-2 bg-gray-50/50 border-b border-gray-100 shrink-0">
+             <span className="text-xs font-semibold text-gray-500">逐笔成交</span>
           </div>
-          <div className="overflow-auto p-0 scrollbar-thin scrollbar-thumb-gray-100 max-h-[30rem]">
-            <table className="w-full text-sm">
+          <div className="overflow-hidden p-0">
+            <table className="w-full text-xs">
               <tbody className="divide-y divide-gray-50">
-                {trades.slice(0, 30).map((trade, idx) => {
+                {displayTrades.map((trade, idx) => {
                   const time = timeFormatter.format(new Date(trade.timestamp * 1000));
                   return (
                     <tr key={`trade-${trade.timestamp}-${idx}`} className="hover:bg-gray-50/80 transition-colors">
                       <td className={cn(
-                        "px-2 py-1.5 font-semibold w-1/3",
+                        "px-2 py-1 font-semibold w-1/3",
                         trade.is_buy ? "text-green-700" : "text-red-600"
                       )}>
                         {formatPrice(trade.price)}
                       </td>
-                      <td className="px-2 py-1.5 text-right text-gray-700 w-1/3">
+                      <td className="px-2 py-1 text-right text-gray-700 w-1/3">
                         {formatSize(displayMode === "usd" ? trade.size * trade.price : trade.size)}
                       </td>
-                      <td className="px-2 py-1.5 text-right text-gray-400 w-1/3 font-mono">
+                      <td className="px-2 py-1 text-right text-gray-400 w-1/3 font-mono">
                         {time}
                       </td>
                     </tr>

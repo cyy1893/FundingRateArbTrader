@@ -114,10 +114,10 @@ export function BottomPanel({ venues }: BottomPanelProps) {
             <div
                 className={cn(
                     "overflow-hidden transition-all duration-300",
-                    isExpanded ? "max-h-96" : "max-h-0"
+                    isExpanded ? "max-h-72" : "max-h-0"
                 )}
             >
-                <div className="p-6 overflow-auto max-h-96 bg-white">
+                <div className="p-4 overflow-hidden max-h-72 bg-white">
                     {activeTab === "positions" ? (
                         <PositionsTable positions={allPositions} />
                     ) : (
