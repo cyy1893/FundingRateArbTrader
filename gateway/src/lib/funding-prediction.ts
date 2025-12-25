@@ -14,6 +14,8 @@ export type FundingPredictionEntry = {
   displayName: string;
   leftSymbol: string;
   rightSymbol: string;
+  leftVolume24h: number | null;
+  rightVolume24h: number | null;
   predictedLeft24h: number | null;
   predictedRight24h: number | null;
   predictedSpread24h: number;
@@ -74,6 +76,10 @@ export async function fetchFundingPredictionSnapshot(
       displayName: String(entry.display_name ?? entry.symbol ?? ""),
       leftSymbol: String(entry.left_symbol ?? ""),
       rightSymbol: String(entry.right_symbol ?? ""),
+      leftVolume24h:
+        entry.left_volume_24h != null ? Number(entry.left_volume_24h) : null,
+      rightVolume24h:
+        entry.right_volume_24h != null ? Number(entry.right_volume_24h) : null,
       predictedLeft24h:
         entry.predicted_left_24h != null
           ? Number(entry.predicted_left_24h)

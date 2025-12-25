@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { formatVolume } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 type SidebarRequest = {
@@ -239,8 +240,9 @@ function ArbitrageResults({ payload }: { payload: ArbitrageSidebarPayload }) {
           <TableRow className="text-[11px] uppercase tracking-wide text-muted-foreground">
             <TableHead>币种</TableHead>
             <TableHead>方向</TableHead>
+            <TableHead className="text-right">Lighter 24h 量</TableHead>
+            <TableHead className="text-right">GRVT 24h 量</TableHead>
             <TableHead className="text-right">24 小时收益</TableHead>
-            <TableHead className="text-right">平均每小时</TableHead>
             <TableHead className="text-right">预计年化</TableHead>
           </TableRow>
         </TableHeader>
@@ -253,11 +255,14 @@ function ArbitrageResults({ payload }: { payload: ArbitrageSidebarPayload }) {
               <TableCell className="text-xs">
                 {renderDirection(entry, payload.metadata)}
               </TableCell>
-              <TableCell className="text-right text-sm font-medium">
-                {formatDecimalPercent(entry.totalDecimal)}
+              <TableCell className="text-right text-xs text-muted-foreground">
+                {formatVolume(entry.leftVolume24h)}
               </TableCell>
               <TableCell className="text-right text-xs text-muted-foreground">
-                {formatDecimalPercent(entry.averageHourlyDecimal)}
+                {formatVolume(entry.rightVolume24h)}
+              </TableCell>
+              <TableCell className="text-right text-sm font-medium">
+                {formatDecimalPercent(entry.totalDecimal)}
               </TableCell>
               <TableCell className="text-right font-semibold text-primary">
                 {formatDecimalPercent(entry.annualizedDecimal)}

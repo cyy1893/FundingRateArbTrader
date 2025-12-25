@@ -290,6 +290,8 @@ class FundingPredictionEntry(BaseModel):
     display_name: str
     left_symbol: str
     right_symbol: str
+    left_volume_24h: float | None = None
+    right_volume_24h: float | None = None
     predicted_left_24h: float | None = None
     predicted_right_24h: float | None = None
     predicted_spread_24h: float
@@ -326,6 +328,8 @@ class ArbitrageAnnualizedEntry(BaseModel):
     display_name: str
     left_symbol: str
     right_symbol: str
+    left_volume_24h: float | None = None
+    right_volume_24h: float | None = None
     total_decimal: float
     average_hourly_decimal: float
     annualized_decimal: float

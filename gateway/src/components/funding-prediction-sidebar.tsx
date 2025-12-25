@@ -20,6 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatVolume } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 type SidebarRequest = {
@@ -235,12 +236,8 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
           <TableRow className="text-[11px] uppercase tracking-wide text-muted-foreground">
             <TableHead>币种</TableHead>
             <TableHead>方向</TableHead>
-            <TableHead className="text-right">
-              {payload.metadata.primarySourceLabel} 24h
-            </TableHead>
-            <TableHead className="text-right">
-              {payload.metadata.secondarySourceLabel} 24h
-            </TableHead>
+            <TableHead className="text-right">Lighter 24h 量</TableHead>
+            <TableHead className="text-right">GRVT 24h 量</TableHead>
             <TableHead className="text-right">预测 24 小时收益</TableHead>
             <TableHead className="text-right">预测年化 APR</TableHead>
           </TableRow>
@@ -255,10 +252,10 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
                 {renderDirection(entry, payload.metadata)}
               </TableCell>
               <TableCell className="text-right text-xs text-muted-foreground">
-                {formatPercent(entry.predictedLeft24h)}
+                {formatVolume(entry.leftVolume24h)}
               </TableCell>
               <TableCell className="text-right text-xs text-muted-foreground">
-                {formatPercent(entry.predictedRight24h)}
+                {formatVolume(entry.rightVolume24h)}
               </TableCell>
               <TableCell className="text-right text-sm font-medium">
                 {formatDecimalPercent(entry.totalDecimal)}
@@ -315,16 +312,6 @@ function renderDirection(
     );
   }
   return <p className="text-xs text-muted-foreground">方向不明</p>;
-}
-
-function formatPercent(value: number | null): string {
-  if (value == null || !Number.isFinite(value)) {
-    return "—";
-  }
-  if (Math.abs(value) >= 0.01) {
-    return `${value.toFixed(2)}%`;
-  }
-  return `${value.toFixed(4)}%`;
 }
 
 function formatDecimalPercent(value: number): string {

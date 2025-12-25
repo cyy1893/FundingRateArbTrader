@@ -14,6 +14,8 @@ export type ArbitrageAnnualizedEntry = {
   displayName: string;
   leftSymbol: string;
   rightSymbol: string;
+  leftVolume24h: number | null;
+  rightVolume24h: number | null;
   totalDecimal: number;
   averageHourlyDecimal: number;
   annualizedDecimal: number;
@@ -69,6 +71,10 @@ export async function fetchArbitrageSnapshot(
       displayName: String(entry.display_name ?? entry.symbol ?? ""),
       leftSymbol: String(entry.left_symbol ?? ""),
       rightSymbol: String(entry.right_symbol ?? ""),
+      leftVolume24h:
+        entry.left_volume_24h != null ? Number(entry.left_volume_24h) : null,
+      rightVolume24h:
+        entry.right_volume_24h != null ? Number(entry.right_volume_24h) : null,
       totalDecimal: Number(entry.total_decimal ?? 0),
       averageHourlyDecimal: Number(entry.average_hourly_decimal ?? 0),
       annualizedDecimal: Number(entry.annualized_decimal ?? 0),
