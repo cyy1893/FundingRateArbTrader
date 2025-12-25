@@ -20,6 +20,7 @@ import { readComparisonSelection, type ResolvedComparisonSelection } from "@/lib
 import { DEFAULT_LEFT_SOURCE, DEFAULT_RIGHT_SOURCE, normalizeSource } from "@/lib/external";
 import { DEFAULT_VOLUME_THRESHOLD } from "@/lib/volume-filter";
 import { getPerpetualSnapshot } from "@/lib/perp-snapshot";
+import { getAvailableSymbols } from "@/lib/available-symbols";
 
 type ErrorPayload = { detail?: string; error?: string };
 
@@ -297,7 +298,7 @@ function TradingPageContent() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadLeverageCaps = async () => {
+    const loadSymbols = async () => {
       try {
         if (typeof window !== "undefined") {
           try {
@@ -306,11 +307,9 @@ function TradingPageContent() {
               const cached = JSON.parse(cachedRaw) as {
                 ts: number;
                 symbols: Array<{ symbol: string; displayName: string }>;
-                caps: Record<string, { lighter?: number; grvt?: number }>;
               };
               if (cached.ts && Date.now() - cached.ts < SYMBOLS_CACHE_TTL_MS) {
                 setAvailableSymbols(cached.symbols ?? []);
-                setMaxLeverageBySymbol(cached.caps ?? {});
                 return;
               }
             }
@@ -319,6 +318,44 @@ function TradingPageContent() {
           }
         }
 
+        const snapshot = await getAvailableSymbols(
+          comparisonSelection.primarySource,
+          comparisonSelection.secondarySource,
+        );
+        if (cancelled) {
+          return;
+        }
+        setAvailableSymbols(snapshot.symbols);
+        if (typeof window !== "undefined") {
+          try {
+            window.sessionStorage.setItem(
+              symbolsCacheKey,
+              JSON.stringify({ ts: Date.now(), symbols: snapshot.symbols }),
+            );
+          } catch {
+            // ignore cache write errors
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const msg = error instanceof Error ? error.message : "获取币种数据失败";
+          toast.error(msg, { className: "bg-destructive text-destructive-foreground" });
+          setAvailableSymbols([]);
+        }
+      }
+    };
+
+    loadSymbols();
+    return () => {
+      cancelled = true;
+    };
+  }, [comparisonSelection.primarySource, comparisonSelection.secondarySource, symbolsCacheKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLeverageCaps = async () => {
+      try {
         const snapshot = await getPerpetualSnapshot(
           comparisonSelection.primarySource,
           comparisonSelection.secondarySource,
@@ -327,19 +364,10 @@ function TradingPageContent() {
           return;
         }
         const caps: Record<string, { lighter?: number; grvt?: number }> = {};
-        const symbols: Array<{ symbol: string; displayName: string }> = [];
-        const seenSymbols = new Set<string>();
         for (const row of snapshot.rows) {
           const symbol = row.symbol?.toUpperCase();
-          if (!symbol || !row.right?.symbol) {
+          if (!symbol) {
             continue;
-          }
-          if (!seenSymbols.has(symbol)) {
-            seenSymbols.add(symbol);
-            symbols.push({
-              symbol,
-              displayName: row.displayName ?? symbol,
-            });
           }
           const entry = caps[symbol] ?? {};
           if (row.leftProvider === "lighter" && Number.isFinite(row.maxLeverage)) {
@@ -355,23 +383,11 @@ function TradingPageContent() {
           caps[symbol] = entry;
         }
         setMaxLeverageBySymbol(caps);
-        setAvailableSymbols(symbols);
-        if (typeof window !== "undefined") {
-          try {
-            window.sessionStorage.setItem(
-              symbolsCacheKey,
-              JSON.stringify({ ts: Date.now(), symbols, caps }),
-            );
-          } catch {
-            // ignore cache write errors
-          }
-        }
       } catch (error) {
         if (!cancelled) {
-          const msg = error instanceof Error ? error.message : "获取交易对数据失败";
+          const msg = error instanceof Error ? error.message : "获取杠杆数据失败";
           toast.error(msg, { className: "bg-destructive text-destructive-foreground" });
           setMaxLeverageBySymbol({});
-          setAvailableSymbols([]);
         }
       }
     };
@@ -380,7 +396,7 @@ function TradingPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [comparisonSelection.primarySource, comparisonSelection.secondarySource, symbolsCacheKey]);
+  }, [comparisonSelection.primarySource, comparisonSelection.secondarySource]);
 
   const handleStartMonitoring = useCallback(() => {
     if (draftSubscription) {
@@ -588,6 +604,8 @@ function TradingPageContent() {
             defaultSymbol={searchParams.get("symbol") ?? undefined}
             defaultLighterDirection={(searchParams.get("lighterDir") as "long" | "short" | null) ?? undefined}
             defaultGrvtDirection={(searchParams.get("grvtDir") as "long" | "short" | null) ?? undefined}
+            lockSymbol={Boolean(searchParams.get("symbol"))}
+            lockDirections={Boolean(searchParams.get("lighterDir")) && Boolean(searchParams.get("grvtDir"))}
           />
         </div>
 

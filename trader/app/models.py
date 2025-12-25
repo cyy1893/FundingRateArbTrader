@@ -285,6 +285,21 @@ class FundingHistoryResponse(BaseModel):
     dataset: list[FundingHistoryPoint]
 
 
+class AvailableSymbolEntry(BaseModel):
+    symbol: str
+    display_name: str
+
+
+class AvailableSymbolsRequest(BaseModel):
+    primary_source: str
+    secondary_source: str
+
+
+class AvailableSymbolsResponse(BaseModel):
+    symbols: list[AvailableSymbolEntry]
+    fetched_at: datetime | None = None
+
+
 class FundingPredictionEntry(BaseModel):
     symbol: str
     display_name: str

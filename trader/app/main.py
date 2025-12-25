@@ -17,6 +17,8 @@ from app.models import (
     ArbitrageSnapshotRequest,
     ArbitrageSnapshotResponse,
     BalancesResponse,
+    AvailableSymbolsRequest,
+    AvailableSymbolsResponse,
     FundingHistoryRequest,
     FundingHistoryResponse,
     FundingPredictionRequest,
@@ -236,6 +238,21 @@ async def perp_snapshot(
         return await service.get_perp_snapshot(payload.primary_source, payload.secondary_source)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@app.post("/available-symbols", response_model=AvailableSymbolsResponse)
+async def available_symbols(
+    payload: AvailableSymbolsRequest,
+    service: MarketDataService = Depends(get_market_data_service),
+) -> AvailableSymbolsResponse:
+    try:
+        symbols, fetched_at = await service.get_available_symbols(
+            primary=payload.primary_source,
+            secondary=payload.secondary_source,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return AvailableSymbolsResponse(symbols=symbols, fetched_at=fetched_at)
 
 
 @app.post("/funding-history", response_model=FundingHistoryResponse)

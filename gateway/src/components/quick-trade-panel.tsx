@@ -2,7 +2,7 @@ import { useRef, useState, useEffect, useMemo } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, ArrowUpRight, ArrowDownRight, Info, Search } from "lucide-react";
+import { TrendingUp, ArrowUpRight, ArrowDownRight, Info, Search, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { OrderBookSubscription } from "@/hooks/use-order-book-websocket";
 import {
@@ -27,6 +27,8 @@ type QuickTradePanelProps = {
   defaultSymbol?: string;
   defaultLighterDirection?: "long" | "short";
   defaultGrvtDirection?: "long" | "short";
+  lockSymbol?: boolean;
+  lockDirections?: boolean;
 };
 
 const LEVERAGE_MIN = 1;
@@ -212,6 +214,8 @@ export function QuickTradePanel({
   defaultSymbol,
   defaultLighterDirection,
   defaultGrvtDirection,
+  lockSymbol = false,
+  lockDirections = false,
 }: QuickTradePanelProps) {
   const [symbol, setSymbol] = useState(defaultSymbol ?? "");
   const [symbolQuery, setSymbolQuery] = useState("");
@@ -396,19 +400,23 @@ export function QuickTradePanel({
           <div className="space-y-1.5">
             <Label htmlFor="symbol" className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
               <Search className="h-3 w-3" />
-              选择交易对
+              币种
             </Label>
             <div className="relative">
-              <Input
-                id="symbol"
-                name="symbol-search"
-                value={symbolQuery}
-                disabled={!hasSymbols}
-                placeholder="搜索币种 (如 BTC, ETH)"
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
-                onChange={(event) => {
+              <div className="relative">
+                <Input
+                  id="symbol"
+                  name="symbol-search"
+                  value={symbolQuery}
+                  disabled={!hasSymbols}
+                  placeholder="搜索币种 (如 BTC, ETH)"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(event) => {
+                    if (lockSymbol) {
+                      return;
+                    }
                   if (symbolBlurTimeout.current) {
                     clearTimeout(symbolBlurTimeout.current);
                   }
@@ -426,7 +434,11 @@ export function QuickTradePanel({
                     setSymbol("");
                   }
                 }}
-                onFocus={() => setIsSymbolMenuOpen(true)}
+                onFocus={() => {
+                  if (!lockSymbol) {
+                    setIsSymbolMenuOpen(true);
+                  }
+                }}
                 onBlur={() => {
                   symbolBlurTimeout.current = setTimeout(() => {
                     setIsSymbolMenuOpen(false);
@@ -438,9 +450,18 @@ export function QuickTradePanel({
                     handleSymbolSelect(suggestedSymbols[0]);
                   }
                 }}
-                className="h-9 border-slate-200 bg-slate-50/50 text-slate-900 font-bold focus:bg-white focus:ring-primary/20 transition-all placeholder:font-normal placeholder:text-slate-400"
-              />
-              {isSymbolMenuOpen && hasSymbols ? (
+                  className={cn(
+                    "h-9 border-slate-200 bg-slate-50/50 text-slate-900 font-bold focus:bg-white focus:ring-primary/20 transition-all placeholder:font-normal placeholder:text-slate-400",
+                    lockSymbol && "pr-9"
+                  )}
+                />
+                {lockSymbol ? (
+                  <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                    <Lock className="h-3.5 w-3.5" />
+                  </div>
+                ) : null}
+              </div>
+              {isSymbolMenuOpen && hasSymbols && !lockSymbol ? (
                 <div className="absolute left-0 right-0 top-full z-30 mt-2 max-h-64 overflow-y-auto rounded-md border border-gray-200 bg-white text-gray-900 shadow-xl">
                   {suggestedSymbols.length > 0 ? (
                     <div className="py-1">
@@ -496,9 +517,13 @@ export function QuickTradePanel({
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => {
+                      if (lockDirections) {
+                        return;
+                      }
                       setLighterDirection("long");
                       setGrvtDirection("short");
                     }}
+                    disabled={lockDirections}
                     className={cn(
                       "relative overflow-hidden h-11 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
                       lighterDirection === "long"
@@ -506,7 +531,11 @@ export function QuickTradePanel({
                         : "bg-white text-slate-600 border-slate-200 hover:border-green-200 hover:bg-green-50/30"
                     )}
                   >
+                    {lockDirections ? (
+                      <Lock className="h-3 w-3 text-slate-400" />
+                    ) : (
                     <ArrowUpRight className={cn("h-4 w-4", lighterDirection === "long" ? "text-white" : "text-green-500")} />
+                    )}
                     做多
                     {lighterDirection === "long" && (
                       <div className="absolute right-[-4px] top-[-4px] h-4 w-4 bg-white/20 rotate-45" />
@@ -514,9 +543,13 @@ export function QuickTradePanel({
                   </button>
                   <button
                     onClick={() => {
+                      if (lockDirections) {
+                        return;
+                      }
                       setLighterDirection("short");
                       setGrvtDirection("long");
                     }}
+                    disabled={lockDirections}
                     className={cn(
                       "relative overflow-hidden h-11 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
                       lighterDirection === "short"
@@ -524,7 +557,11 @@ export function QuickTradePanel({
                         : "bg-white text-slate-600 border-slate-200 hover:border-red-200 hover:bg-red-50/30"
                     )}
                   >
+                    {lockDirections ? (
+                      <Lock className="h-3 w-3 text-slate-400" />
+                    ) : (
                     <ArrowDownRight className={cn("h-4 w-4", lighterDirection === "short" ? "text-white" : "text-red-500")} />
+                    )}
                     做空
                     {lighterDirection === "short" && (
                       <div className="absolute right-[-4px] top-[-4px] h-4 w-4 bg-white/20 rotate-45" />
@@ -559,9 +596,13 @@ export function QuickTradePanel({
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => {
+                      if (lockDirections) {
+                        return;
+                      }
                       setGrvtDirection("long");
                       setLighterDirection("short");
                     }}
+                    disabled={lockDirections}
                     className={cn(
                       "relative overflow-hidden h-11 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
                       grvtDirection === "long"
@@ -569,7 +610,11 @@ export function QuickTradePanel({
                         : "bg-white text-slate-600 border-slate-200 hover:border-emerald-200 hover:bg-emerald-50/30"
                     )}
                   >
+                    {lockDirections ? (
+                      <Lock className="h-3 w-3 text-slate-400" />
+                    ) : (
                     <ArrowUpRight className={cn("h-4 w-4", grvtDirection === "long" ? "text-white" : "text-emerald-500")} />
+                    )}
                     做多
                     {grvtDirection === "long" && (
                       <div className="absolute right-[-4px] top-[-4px] h-4 w-4 bg-white/20 rotate-45" />
@@ -577,9 +622,13 @@ export function QuickTradePanel({
                   </button>
                   <button
                     onClick={() => {
+                      if (lockDirections) {
+                        return;
+                      }
                       setGrvtDirection("short");
                       setLighterDirection("long");
                     }}
+                    disabled={lockDirections}
                     className={cn(
                       "relative overflow-hidden h-11 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
                       grvtDirection === "short"
@@ -587,7 +636,11 @@ export function QuickTradePanel({
                         : "bg-white text-slate-600 border-slate-200 hover:border-rose-200 hover:bg-rose-50/30"
                     )}
                   >
+                    {lockDirections ? (
+                      <Lock className="h-3 w-3 text-slate-400" />
+                    ) : (
                     <ArrowDownRight className={cn("h-4 w-4", grvtDirection === "short" ? "text-white" : "text-rose-500")} />
+                    )}
                     做空
                     {grvtDirection === "short" && (
                       <div className="absolute right-[-4px] top-[-4px] h-4 w-4 bg-white/20 rotate-45" />
@@ -615,42 +668,41 @@ export function QuickTradePanel({
               />
               <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">USD</div>
             </div>
-
-            <div className="grid grid-cols-2 gap-2.5 mt-3">
-              <div className="group relative flex flex-col items-center justify-center py-2.5 rounded-xl border border-blue-100 bg-blue-50/20 transition-all hover:bg-blue-50 hover:shadow-sm">
-                <span className="text-[9px] uppercase tracking-[0.15em] font-black text-blue-500/60 mb-1">
-                  Lighter 保证金
-                </span>
-                <span className="font-mono text-sm font-black text-blue-700">
-                  {lighterMargin != null
-                    ? `${lighterMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : "--"}
-                </span>
-                <div className="absolute left-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-blue-400/30" />
-              </div>
-
-              <div className="group relative flex flex-col items-center justify-center py-2.5 rounded-xl border border-indigo-100 bg-indigo-50/20 transition-all hover:bg-indigo-50 hover:shadow-sm">
-                <span className="text-[9px] uppercase tracking-[0.15em] font-black text-indigo-500/60 mb-1">
-                  GRVT 保证金
-                </span>
-                <span className="font-mono text-sm font-black text-indigo-700">
-                  {grvtMargin != null
-                    ? `${grvtMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : "--"}
-                </span>
-                <div className="absolute left-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-indigo-400/30" />
-              </div>
-            </div>
           </div>
         </div>
       </div>
 
       {/* Action Button */}
-      <div className="p-4 bg-slate-50/50 border-t border-slate-100">
+      <div className="p-3 bg-slate-50/50 border-t border-slate-100 space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="relative flex flex-col items-center justify-center py-2 rounded-lg border border-blue-100 bg-blue-50/30">
+            <span className="text-[9px] uppercase tracking-[0.15em] font-black text-blue-500/60 mb-0.5">
+              Lighter 保证金
+            </span>
+            <span className="font-mono text-xs font-black text-blue-700">
+              {lighterMargin != null
+                ? `${lighterMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : "--"}
+            </span>
+            <div className="absolute left-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-blue-400/30" />
+          </div>
+
+          <div className="relative flex flex-col items-center justify-center py-2 rounded-lg border border-indigo-100 bg-indigo-50/30">
+            <span className="text-[9px] uppercase tracking-[0.15em] font-black text-indigo-500/60 mb-0.5">
+              GRVT 保证金
+            </span>
+            <span className="font-mono text-xs font-black text-indigo-700">
+              {grvtMargin != null
+                ? `${grvtMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : "--"}
+            </span>
+            <div className="absolute left-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-indigo-400/30" />
+          </div>
+        </div>
         <Button
           onClick={onExecuteArbitrage}
           disabled={!hasSymbols || executeDisabled}
-          className="w-full h-12 bg-primary hover:bg-primary/90 text-white font-black text-sm uppercase tracking-[0.15em] transition-all transform active:scale-[0.98] shadow-md shadow-primary/20 disabled:opacity-50 disabled:grayscale"
+          className="w-full h-11 bg-primary hover:bg-primary/90 text-white font-black text-sm uppercase tracking-[0.15em] transition-all transform active:scale-[0.98] shadow-md shadow-primary/20 disabled:opacity-50 disabled:grayscale"
         >
           <TrendingUp className="h-4 w-4 mr-2" />
           {executeLabel}

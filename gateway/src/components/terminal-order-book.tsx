@@ -65,7 +65,7 @@ export function TerminalOrderBook({
   displayMode,
 }: TerminalOrderBookProps) {
   const MAX_LEVELS = 12;
-  const MAX_TRADES = 12;
+  const MAX_TRADES = 30;
   const normalizeLevels = (levels: OrderBookEntry[]) => {
     if (displayMode === "base") {
       return levels;
@@ -141,7 +141,7 @@ export function TerminalOrderBook({
       </div>
 
       {/* Main Content: Split into OrderBook (Left) and Trades (Right) */}
-      <div className="grid grid-cols-2 gap-3 text-sm">
+      <div className="grid grid-cols-2 gap-3 text-sm h-full">
         {/* Order Book Section */}
         <div className="flex flex-col">
             {/* Column Headers */}
@@ -229,7 +229,7 @@ export function TerminalOrderBook({
           <div className="px-2 py-2 bg-gray-50/50 border-b border-gray-100 shrink-0">
              <span className="text-xs font-semibold text-gray-500">逐笔成交</span>
           </div>
-          <div className="overflow-hidden p-0">
+          <div className="flex-1 overflow-auto p-0 scrollbar-thin scrollbar-thumb-gray-100">
             <table className="w-full text-xs">
               <tbody className="divide-y divide-gray-50">
                 {displayTrades.map((trade, idx) => {

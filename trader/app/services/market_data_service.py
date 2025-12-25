@@ -13,6 +13,7 @@ from app.config import Settings
 from app.models import (
     ArbitrageSnapshotResponse,
     ApiError,
+    AvailableSymbolEntry,
     ExchangeMarketMetrics,
     ExchangeSnapshot,
     FundingHistoryPoint,
@@ -38,6 +39,7 @@ PREDICTION_HOURS_PER_YEAR = 24 * 365
 MAX_PREDICTION_WORKERS = 5
 PREDICTION_HALF_LIFE_HOURS = 16.0
 CACHE_TTL_SECONDS = 10 * 60
+AVAILABLE_SYMBOLS_CACHE_TTL_SECONDS = 60 * 60
 SYMBOL_RENAMES: dict[str, str] = {
     "1000PEPE": "kPEPE",
     "1000SHIB": "kSHIB",
@@ -53,6 +55,7 @@ class MarketDataService:
         self._grvt_market_data_base, _ = self._build_grvt_endpoints(settings.grvt_env)
         self._arbitrage_cache: dict[tuple[str, str, float], tuple[float, ArbitrageSnapshotResponse]] = {}
         self._prediction_cache: dict[tuple[str, str, float], tuple[float, FundingPredictionResponse]] = {}
+        self._available_symbols_cache: dict[tuple[str, str], tuple[float, list[AvailableSymbolEntry], datetime]] = {}
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -494,6 +497,36 @@ class MarketDataService:
             raise ValueError("暂无可用的资金费率历史数据")
 
         return self._merge_funding_history_series(left_history, right_history)
+
+    async def get_available_symbols(
+        self,
+        primary: str,
+        secondary: str,
+    ) -> tuple[list[AvailableSymbolEntry], datetime]:
+        cache_key = (primary, secondary)
+        cached = self._available_symbols_cache.get(cache_key)
+        if cached and time() - cached[0] < AVAILABLE_SYMBOLS_CACHE_TTL_SECONDS:
+            return cached[1], cached[2]
+
+        snapshot = await self.get_perp_snapshot(primary, secondary)
+        symbols: list[AvailableSymbolEntry] = []
+        seen: set[str] = set()
+        for row in snapshot.rows:
+            symbol = (row.symbol or "").upper()
+            if not symbol or not (row.right and row.right.get("symbol")):
+                continue
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            symbols.append(
+                AvailableSymbolEntry(
+                    symbol=symbol,
+                    display_name=row.display_name or symbol,
+                )
+            )
+        symbols.sort(key=lambda entry: entry.display_name)
+        self._available_symbols_cache[cache_key] = (time(), symbols, snapshot.fetched_at)
+        return symbols, snapshot.fetched_at
 
     async def get_funding_prediction_snapshot(
         self,
