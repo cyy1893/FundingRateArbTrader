@@ -409,24 +409,16 @@ function TradingPageContent() {
   const connectionStatus: "connected" | "connecting" | "disconnected" =
     status === "error" ? "disconnected" : status;
 
-  const getTickSize = (levels: Array<{ price: number }> = []): number | null => {
-    const prices = levels
-      .map((level) => Number(level.price))
-      .filter((price) => Number.isFinite(price) && price > 0);
-    const unique = Array.from(new Set(prices)).sort((a, b) => a - b);
-    let minDiff: number | null = null;
-    for (let i = 1; i < unique.length; i += 1) {
-      const diff = unique[i] - unique[i - 1];
-      if (diff > 0 && (minDiff === null || diff < minDiff)) {
-        minDiff = diff;
-      }
-    }
-    return minDiff;
-  };
-
-  const getMakerPrice = (venue: "lighter" | "grvt", side: "buy" | "sell") => {
+  const getMakerPrice = (
+    venue: "lighter" | "grvt",
+    side: "buy" | "sell",
+    expectedSymbol: string,
+  ) => {
     const book = venue === "lighter" ? orderBook?.lighter : orderBook?.grvt;
     if (!book) return null;
+    if (book.symbol?.toUpperCase() !== expectedSymbol.toUpperCase()) {
+      return null;
+    }
     const bids = book.bids?.levels ?? [];
     const asks = book.asks?.levels ?? [];
     const bestBid = bids[0]?.price ?? null;
@@ -434,16 +426,7 @@ function TradingPageContent() {
     if (!bestBid || !bestAsk) {
       return null;
     }
-    const tick = getTickSize([...bids.slice(0, 20), ...asks.slice(0, 20)]);
-    if (!tick || bestAsk - bestBid <= tick) {
-      return side === "buy" ? bestBid : bestAsk;
-    }
-    if (side === "buy") {
-      const price = bestAsk - tick;
-      return price > bestBid ? price : bestBid;
-    }
-    const price = bestBid + tick;
-    return price < bestAsk ? price : bestAsk;
+    return side === "buy" ? bestBid : bestAsk;
   };
 
   const placeOrder = async (
@@ -471,6 +454,28 @@ function TradingPageContent() {
     return { ok: true, data, error: null };
   };
 
+  const updateLighterLeverage = async (payload: Record<string, unknown>) => {
+    const response = await fetch("/api/orders/lighter/leverage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    const contentType = response.headers.get("content-type") ?? ""
+    const data = contentType.includes("application/json") ? await response.json() : await response.text()
+    if (!response.ok) {
+      const detail =
+        typeof data === "string"
+          ? data
+          : typeof data?.detail === "string"
+            ? data.detail
+            : typeof data?.error === "string"
+              ? data.error
+              : `HTTP ${response.status}`
+      return { ok: false, data, error: detail }
+    }
+    return { ok: true, data, error: null }
+  }
+
   const executeArbitrage = async () => {
     if (!subscription || arbStatus === "placing") {
       return;
@@ -478,12 +483,29 @@ function TradingPageContent() {
     setArbStatus("placing");
     setArbMessage(null);
 
-    const lighterSide = subscription.lighter_direction === "long" ? "buy" : "sell";
-    const grvtDirection = subscription.grvt_direction ?? (subscription.lighter_direction === "long" ? "short" : "long");
+    const activeSubscription =
+      draftSubscription && draftSubscription.symbol === subscription.symbol
+        ? draftSubscription
+        : subscription;
+
+    const lighterSide = activeSubscription.lighter_direction === "long" ? "buy" : "sell";
+    const grvtDirection =
+      activeSubscription.grvt_direction ?? (activeSubscription.lighter_direction === "long" ? "short" : "long");
     const grvtSide = grvtDirection === "long" ? "buy" : "sell";
 
-    const lighterPrice = getMakerPrice("lighter", lighterSide);
-    const grvtPrice = getMakerPrice("grvt", grvtSide);
+    const leverageResult = await updateLighterLeverage({
+      symbol: activeSubscription.symbol,
+      leverage: activeSubscription.lighter_leverage,
+      margin_mode: "cross",
+    })
+    if (!leverageResult.ok) {
+      setArbStatus("error")
+      setArbMessage(`设置 Lighter 杠杆失败：${leverageResult.error}`)
+      return
+    }
+
+    const lighterPrice = getMakerPrice("lighter", lighterSide, activeSubscription.symbol);
+    const grvtPrice = getMakerPrice("grvt", grvtSide, activeSubscription.symbol);
     if (!lighterPrice || !grvtPrice) {
       setArbStatus("error");
       setArbMessage("订单簿数据不足，无法下单。");
@@ -498,7 +520,7 @@ function TradingPageContent() {
       return;
     }
 
-    const notional = subscription.notional_value;
+    const notional = activeSubscription.notional_value;
     const lighterSize = Number((notional / lighterPrice).toFixed(6));
     const grvtSize = Number((notional / grvtPrice).toFixed(6));
     if (lighterSize <= 0 || grvtSize <= 0) {
@@ -511,17 +533,16 @@ function TradingPageContent() {
     const clientBase = Date.now() % 2_147_483_647;
 
     const lighterPayload = {
-      symbol: subscription.symbol,
+      symbol: activeSubscription.symbol,
       client_order_index: clientBase,
       side: lighterSide,
       base_amount: lighterSize,
       price: lighterPrice,
       reduce_only: false,
       time_in_force: "post_only",
-      order_expiry_secs: nowSec + 10,
     };
     const grvtPayload = {
-      symbol: subscription.symbol,
+      symbol: activeSubscription.symbol,
       side: grvtSide,
       amount: grvtSize,
       price: grvtPrice,
@@ -545,7 +566,7 @@ function TradingPageContent() {
     if (lighterResult.ok !== grvtResult.ok) {
       const retryVenue = lighterResult.ok ? "grvt" : "lighter";
       const retrySide = retryVenue === "lighter" ? lighterSide : grvtSide;
-      const retryPrice = getMakerPrice(retryVenue, retrySide);
+      const retryPrice = getMakerPrice(retryVenue, retrySide, activeSubscription.symbol);
       const otherPrice = retryVenue === "lighter" ? grvtPrice : lighterPrice;
       if (retryPrice) {
         const retryLongPrice = retrySide === "buy" ? retryPrice : otherPrice;

@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from typing import Any, Optional
 
 import websockets
@@ -269,6 +269,9 @@ class GrvtService:
     async def place_order(self, request: GrvtOrderRequest) -> GrvtOrderResponse:
         client = await self._ensure_client()
         instrument = await self._get_instrument(request.symbol)
+        market = (client.markets or {}).get(instrument, {})
+        amount = self._normalize_amount(request.amount, market)
+        price = self._normalize_price(request.price, market)
         params: dict[str, Any] = {
             "post_only": request.post_only,
             "reduce_only": request.reduce_only,
@@ -282,8 +285,8 @@ class GrvtService:
             instrument,
             "limit",
             request.side,
-            request.amount,
-            request.price,
+            amount,
+            price,
             params,
         )
         return GrvtOrderResponse(payload=response or {})
@@ -317,6 +320,7 @@ class GrvtService:
                 "api_key": self._settings.grvt_api_key,
             }
             self._client = GrvtCcxtPro(env=env, parameters=parameters)
+            await self._client.load_markets()
 
         return self._client
 
@@ -362,6 +366,50 @@ class GrvtService:
             return float(Decimal(str(value)))
         except (InvalidOperation, TypeError, ValueError):
             return 0.0
+
+    @staticmethod
+    def _parse_decimal(value: Any) -> Decimal:
+        if value is None:
+            return Decimal(0)
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal(0)
+
+    @staticmethod
+    def _quantize_to_step(value: Decimal, step: Decimal) -> Decimal:
+        if step <= 0:
+            return value
+        return (value / step).to_integral_value(rounding=ROUND_DOWN) * step
+
+    def _normalize_amount(self, raw_amount: float, market: dict[str, Any]) -> float:
+        amount = self._parse_decimal(raw_amount)
+        min_size = self._parse_decimal(market.get("min_size"))
+        base_decimals = market.get("base_decimals")
+        step = min_size if min_size > 0 else Decimal(0)
+        if step <= 0:
+            try:
+                decimals = int(base_decimals)
+            except (TypeError, ValueError):
+                decimals = 0
+            if decimals > 0:
+                step = Decimal(1).scaleb(-decimals)
+        if step > 0:
+            amount = self._quantize_to_step(amount, step)
+            if amount < step:
+                raise ValueError(f"GRVT order amount below minimum step ({amount} < {step})")
+        if amount <= 0:
+            raise ValueError("Invalid GRVT order amount")
+        return float(amount)
+
+    def _normalize_price(self, raw_price: float, market: dict[str, Any]) -> float:
+        price = self._parse_decimal(raw_price)
+        tick_size = self._parse_decimal(market.get("tick_size"))
+        if tick_size > 0:
+            price = self._quantize_to_step(price, tick_size)
+        if price <= 0:
+            raise ValueError("Invalid GRVT order price")
+        return float(price)
 
     @classmethod
     def _build_side(cls, levels: list[dict[str, Any]], descending: bool = False) -> OrderBookSide:

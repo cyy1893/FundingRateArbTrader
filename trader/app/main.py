@@ -26,6 +26,8 @@ from app.models import (
     GrvtOrderRequest,
     GrvtOrderResponse,
     TradesSnapshot,
+    LighterLeverageRequest,
+    LighterLeverageResponse,
     LighterOrderRequest,
     LighterOrderResponse,
     LighterSymbolOrderRequest,
@@ -205,6 +207,18 @@ async def create_lighter_order_by_symbol(
         ).model_dump()
     )
     return response
+
+
+@app.post("/orders/lighter/leverage", response_model=LighterLeverageResponse)
+async def update_lighter_leverage(
+    request: LighterLeverageRequest,
+    service: LighterService = Depends(get_lighter_service),
+    _: str = Depends(get_current_user),
+):
+    try:
+        return await service.update_leverage_by_symbol(request)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 @app.post("/orders/grvt", response_model=GrvtOrderResponse)

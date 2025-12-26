@@ -325,8 +325,5 @@ function formatDecimalPercent(value: number): string {
     return "—";
   }
   const percent = value * 100;
-  if (Math.abs(percent) >= 0.01) {
-    return `${percent.toFixed(2)}%`;
-  }
   return `${percent.toFixed(4)}%`;
 }

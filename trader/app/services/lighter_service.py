@@ -5,7 +5,8 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator
-from decimal import Decimal, InvalidOperation
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_UP
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -20,6 +21,8 @@ from app.models import (
     LighterBalanceSnapshot,
     LighterOrderRequest,
     LighterOrderResponse,
+    LighterLeverageRequest,
+    LighterLeverageResponse,
     LighterPositionBalance,
     LighterSymbolOrderRequest,
     OrderBookLevel,
@@ -27,6 +30,14 @@ from app.models import (
     TradeEntry,
     VenueOrderBook,
 )
+
+
+@dataclass(frozen=True)
+class LighterMarketMeta:
+    min_base_amount: Decimal
+    min_quote_amount: Decimal
+    size_decimals: int
+    price_decimals: int
 
 
 class LighterService:
@@ -40,6 +51,7 @@ class LighterService:
         self._lock = asyncio.Lock()
         self._http_client: Optional[httpx.AsyncClient] = None
         self._market_cache: dict[str, int] = {}
+        self._market_meta_cache: dict[str, LighterMarketMeta] = {}
         self._market_cache_lock = asyncio.Lock()
         self._ws_endpoint = self._build_ws_endpoint(settings.lighter_base_url)
 
@@ -129,8 +141,29 @@ class LighterService:
 
     async def place_order_by_symbol(self, request: LighterSymbolOrderRequest) -> LighterOrderResponse:
         market_index = await self._get_market_id(request.symbol)
-        base_amount = int(round(request.base_amount * 10_000))
-        price = int(round(request.price * 100))
+        meta = await self._get_market_meta(request.symbol)
+
+        base_amount_value = self._quantize_amount(Decimal(str(request.base_amount)), meta.size_decimals, ROUND_DOWN)
+        price_rounding = ROUND_DOWN if request.side == "buy" else ROUND_UP
+        price_value = self._quantize_amount(Decimal(str(request.price)), meta.price_decimals, price_rounding)
+
+        if base_amount_value <= 0 or price_value <= 0:
+            raise ValueError("Invalid base amount or price for Lighter order")
+
+        if meta.min_base_amount > 0 and base_amount_value < meta.min_base_amount:
+            raise ValueError(
+                f"Lighter base amount below minimum ({base_amount_value} < {meta.min_base_amount})"
+            )
+
+        quote_amount = base_amount_value * price_value
+        if meta.min_quote_amount > 0 and quote_amount < meta.min_quote_amount:
+            raise ValueError(
+                f"Lighter quote amount below minimum ({quote_amount} < {meta.min_quote_amount})"
+            )
+
+        base_amount = int((base_amount_value * Decimal("10000")).to_integral_value(rounding=ROUND_DOWN))
+        price_multiplier = Decimal(10).scaleb(meta.price_decimals)
+        price = int((price_value * price_multiplier).to_integral_value(rounding=price_rounding))
         if base_amount <= 0 or price <= 0:
             raise ValueError("Invalid base amount or price for Lighter order")
 
@@ -147,6 +180,50 @@ class LighterService:
             api_key_index=request.api_key_index,
         )
         return await self.place_order(normalized)
+
+    async def update_leverage_by_symbol(self, request: LighterLeverageRequest) -> LighterLeverageResponse:
+        if request.leverage <= 0:
+            raise ValueError("Invalid leverage for Lighter")
+
+        client = await self._ensure_client()
+        market_index = await self._get_market_id(request.symbol)
+        margin_mode = (
+            SignerClient.CROSS_MARGIN_MODE
+            if request.margin_mode == "cross"
+            else SignerClient.ISOLATED_MARGIN_MODE
+        )
+
+        payload, response, err = await client.update_leverage(
+            market_index=market_index,
+            margin_mode=margin_mode,
+            leverage=request.leverage,
+            nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
+            api_key_index=request.api_key_index if request.api_key_index is not None else SignerClient.DEFAULT_API_KEY_INDEX,
+        )
+        if err is not None:
+            raise RuntimeError(f"Lighter update leverage failed: {err}")
+
+        payload_dict: dict[str, Any]
+        if isinstance(payload, str):
+            try:
+                payload_dict = json.loads(payload)
+            except json.JSONDecodeError:
+                payload_dict = {"payload": payload}
+        else:
+            payload_dict = payload.to_json() if payload is not None else {}
+            if isinstance(payload_dict, str):
+                try:
+                    payload_dict = json.loads(payload_dict)
+                except json.JSONDecodeError:
+                    payload_dict = {"payload": payload_dict}
+
+        response_dict: dict[str, Any]
+        if isinstance(response, dict):
+            response_dict = response
+        else:
+            response_dict = {"response": str(response)} if response is not None else {}
+
+        return LighterLeverageResponse(payload=payload_dict, response=response_dict)
 
     async def get_balances(self) -> LighterBalanceSnapshot:
         client = await self._ensure_client()
@@ -414,6 +491,17 @@ class LighterService:
                 raise ValueError(f"Lighter market not found for symbol {normalized}")
             return self._market_cache[normalized]
 
+    async def _get_market_meta(self, symbol: str) -> "LighterMarketMeta":
+        normalized = symbol.strip().upper()
+        async with self._market_cache_lock:
+            if normalized in self._market_meta_cache:
+                return self._market_meta_cache[normalized]
+
+            await self._refresh_market_cache()
+            if normalized not in self._market_meta_cache:
+                raise ValueError(f"Lighter market metadata not found for symbol {normalized}")
+            return self._market_meta_cache[normalized]
+
     async def _refresh_market_cache(self) -> None:
         http_client = await self._get_http_client()
         response = await http_client.get(f"{self._settings.lighter_base_url.rstrip('/')}/api/v1/orderBooks")
@@ -429,6 +517,12 @@ class LighterService:
                 self._market_cache[symbol] = int(market_id)
             except (TypeError, ValueError):
                 continue
+            self._market_meta_cache[symbol] = LighterMarketMeta(
+                min_base_amount=self._parse_decimal(entry.get("min_base_amount")),
+                min_quote_amount=self._parse_decimal(entry.get("min_quote_amount")),
+                size_decimals=self._parse_int(entry.get("supported_size_decimals")),
+                price_decimals=self._parse_int(entry.get("supported_price_decimals")),
+            )
 
     async def _get_http_client(self) -> httpx.AsyncClient:
         if self._http_client is None:
@@ -450,6 +544,20 @@ class LighterService:
             return Decimal(str(value))
         except (InvalidOperation, ValueError):
             return Decimal(0)
+
+    @staticmethod
+    def _parse_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _quantize_amount(value: Decimal, decimals: int, rounding: str) -> Decimal:
+        if decimals <= 0:
+            return value.to_integral_value(rounding=rounding)
+        quant = Decimal(1).scaleb(-decimals)
+        return value.quantize(quant, rounding=rounding)
 
     def _parse_trade_entry(self, entry: dict[str, Any], symbol: str) -> TradeEntry | None:
         try:

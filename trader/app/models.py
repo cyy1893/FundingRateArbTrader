@@ -14,7 +14,7 @@ class LighterOrderRequest(BaseModel):
     is_ask: bool = Field(..., description="True for sell orders, False for buy orders")
     order_type: Literal["market", "limit"] = "limit"
     price: Optional[int] = Field(
-        None, description="Price in quote precision (1e2). Required for limit orders."
+        None, description="Price in quote precision (see Lighter price decimals). Required for limit orders."
     )
     avg_execution_price: Optional[int] = Field(
         None, description="Worst acceptable execution price for market orders"
@@ -60,6 +60,19 @@ class LighterSymbolOrderRequest(BaseModel):
 class LighterOrderResponse(BaseModel):
     tx_hash: str
     payload: dict
+
+
+class LighterLeverageRequest(BaseModel):
+    symbol: str
+    leverage: float = Field(..., gt=0)
+    margin_mode: Literal["cross", "isolated"] = "cross"
+    nonce: Optional[int] = None
+    api_key_index: Optional[int] = None
+
+
+class LighterLeverageResponse(BaseModel):
+    payload: dict
+    response: dict
 
 
 class OrderEvent(BaseModel):

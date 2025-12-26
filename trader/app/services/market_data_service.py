@@ -35,6 +35,7 @@ ARBITRAGE_HOURS_PER_YEAR = 24 * 365
 MAX_ARBITRAGE_WORKERS = 5
 PREDICTION_LOOKBACK_DAYS = 3
 PREDICTION_LOOKBACK_HOURS = 72
+PREDICTION_FORECAST_HOURS = 24
 PREDICTION_HOURS_PER_YEAR = 24 * 365
 MAX_PREDICTION_WORKERS = 5
 PREDICTION_HALF_LIFE_HOURS = 16.0
@@ -645,16 +646,16 @@ class MarketDataService:
                 average_right_hourly = right_ewma if right_count else None
                 average_spread_hourly = spread_ewma or 0.0
                 predicted_left_24h = (
-                    average_left_hourly * PREDICTION_LOOKBACK_HOURS
+                    average_left_hourly * PREDICTION_FORECAST_HOURS
                     if average_left_hourly is not None
                     else None
                 )
                 predicted_right_24h = (
-                    average_right_hourly * PREDICTION_LOOKBACK_HOURS
+                    average_right_hourly * PREDICTION_FORECAST_HOURS
                     if average_right_hourly is not None
                     else None
                 )
-                predicted_spread_24h = average_spread_hourly * PREDICTION_LOOKBACK_HOURS
+                predicted_spread_24h = average_spread_hourly * PREDICTION_FORECAST_HOURS
                 total_decimal = abs(predicted_spread_24h) / 100.0
                 annualized_decimal = abs(average_spread_hourly) / 100.0 * PREDICTION_HOURS_PER_YEAR
 
