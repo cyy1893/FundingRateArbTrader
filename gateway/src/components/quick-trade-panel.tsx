@@ -368,12 +368,12 @@ export function QuickTradePanel({
   return (
     <div className="bg-white border-x border-slate-200 h-full flex flex-col shadow-sm">
       {/* Header */}
-      <div className="p-4 pb-3 border-b border-slate-100 flex items-center justify-between">
+      <div className="p-3 pb-2 border-b border-slate-100 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+          <h3 className="text-[13px] font-bold text-slate-900 tracking-tight">
             套利交易配置
           </h3>
-          <p className="text-[10px] font-medium text-slate-500 uppercase flex items-center gap-1 mt-0.5">
+          <p className="text-[9px] font-medium text-slate-500 uppercase flex items-center gap-1 mt-0.5">
             <span className="text-primary font-bold">{primaryLabel}</span>
             <span className="text-slate-300">/</span>
             <span className="text-indigo-600 font-bold">{secondaryLabel}</span>
@@ -451,7 +451,7 @@ export function QuickTradePanel({
                   }
                 }}
                   className={cn(
-                    "h-9 border-slate-200 bg-slate-50/50 text-slate-900 font-bold focus:bg-white focus:ring-primary/20 transition-all placeholder:font-normal placeholder:text-slate-400",
+                    "h-8 border-slate-200 bg-slate-50/50 text-slate-900 font-bold focus:bg-white focus:ring-primary/20 transition-all placeholder:font-normal placeholder:text-slate-400",
                     lockSymbol && "pr-9"
                   )}
                 />
@@ -497,13 +497,13 @@ export function QuickTradePanel({
           <div className="pt-1">
             <div className="flex items-center gap-2 mb-4">
               <div className="h-[1px] flex-1 bg-slate-100" />
-              <span className="text-[10px] font-bold text-primary/60 uppercase tracking-[0.2em]">Lighter 配置</span>
+              <span className="text-[9px] font-bold text-primary/60 uppercase tracking-[0.2em]">Lighter 配置</span>
               <div className="h-[1px] flex-1 bg-slate-100" />
             </div>
 
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <Label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">杠杆倍数</Label>
+                <Label className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">杠杆倍数</Label>
                 <LeverageSlider
                   value={lighterLeverage}
                   onChange={handleLeverageChange}
@@ -513,7 +513,7 @@ export function QuickTradePanel({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">变动方向</Label>
+                <Label className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">变动方向</Label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => {
@@ -525,7 +525,7 @@ export function QuickTradePanel({
                     }}
                     disabled={lockDirections}
                     className={cn(
-                      "relative overflow-hidden h-11 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
+                      "relative overflow-hidden h-9 px-3 text-[11px] font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
                       lighterDirection === "long"
                         ? "bg-green-500 text-white border-green-600 shadow-sm"
                         : "bg-white text-slate-600 border-slate-200 hover:border-green-200 hover:bg-green-50/30"
@@ -534,7 +534,7 @@ export function QuickTradePanel({
                     {lockDirections ? (
                       <Lock className="h-3 w-3 text-slate-400" />
                     ) : (
-                    <ArrowUpRight className={cn("h-4 w-4", lighterDirection === "long" ? "text-white" : "text-green-500")} />
+                    <ArrowUpRight className={cn("h-3.5 w-3.5", lighterDirection === "long" ? "text-white" : "text-green-500")} />
                     )}
                     做多
                     {lighterDirection === "long" && (
@@ -551,7 +551,7 @@ export function QuickTradePanel({
                     }}
                     disabled={lockDirections}
                     className={cn(
-                      "relative overflow-hidden h-11 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
+                      "relative overflow-hidden h-9 px-3 text-[11px] font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
                       lighterDirection === "short"
                         ? "bg-red-500 text-white border-red-600 shadow-sm"
                         : "bg-white text-slate-600 border-slate-200 hover:border-red-200 hover:bg-red-50/30"
@@ -560,7 +560,7 @@ export function QuickTradePanel({
                     {lockDirections ? (
                       <Lock className="h-3 w-3 text-slate-400" />
                     ) : (
-                    <ArrowDownRight className={cn("h-4 w-4", lighterDirection === "short" ? "text-white" : "text-red-500")} />
+                    <ArrowDownRight className={cn("h-3.5 w-3.5", lighterDirection === "short" ? "text-white" : "text-red-500")} />
                     )}
                     做空
                     {lighterDirection === "short" && (
@@ -573,16 +573,16 @@ export function QuickTradePanel({
           </div>
 
           {/* GRVT Section */}
-          <div className="pt-3">
+          <div className="pt-2.5">
             <div className="flex items-center gap-2 mb-4">
               <div className="h-[1px] flex-1 bg-slate-100" />
-              <span className="text-[10px] font-bold text-indigo-500/60 uppercase tracking-[0.2em]">GRVT 配置</span>
+              <span className="text-[9px] font-bold text-indigo-500/60 uppercase tracking-[0.2em]">GRVT 配置</span>
               <div className="h-[1px] flex-1 bg-slate-100" />
             </div>
 
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <Label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">杠杆倍数</Label>
+                <Label className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">杠杆倍数</Label>
                 <LeverageSlider
                   value={grvtLeverage}
                   onChange={handleLeverageChange}
@@ -592,7 +592,7 @@ export function QuickTradePanel({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">变动方向</Label>
+                <Label className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">变动方向</Label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => {
@@ -604,7 +604,7 @@ export function QuickTradePanel({
                     }}
                     disabled={lockDirections}
                     className={cn(
-                      "relative overflow-hidden h-11 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
+                      "relative overflow-hidden h-9 px-3 text-[11px] font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
                       grvtDirection === "long"
                         ? "bg-emerald-500 text-white border-emerald-600 shadow-sm"
                         : "bg-white text-slate-600 border-slate-200 hover:border-emerald-200 hover:bg-emerald-50/30"
@@ -613,7 +613,7 @@ export function QuickTradePanel({
                     {lockDirections ? (
                       <Lock className="h-3 w-3 text-slate-400" />
                     ) : (
-                    <ArrowUpRight className={cn("h-4 w-4", grvtDirection === "long" ? "text-white" : "text-emerald-500")} />
+                    <ArrowUpRight className={cn("h-3.5 w-3.5", grvtDirection === "long" ? "text-white" : "text-emerald-500")} />
                     )}
                     做多
                     {grvtDirection === "long" && (
@@ -630,7 +630,7 @@ export function QuickTradePanel({
                     }}
                     disabled={lockDirections}
                     className={cn(
-                      "relative overflow-hidden h-11 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
+                      "relative overflow-hidden h-9 px-3 text-[11px] font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
                       grvtDirection === "short"
                         ? "bg-rose-500 text-white border-rose-600 shadow-sm"
                         : "bg-white text-slate-600 border-slate-200 hover:border-rose-200 hover:bg-rose-50/30"
@@ -639,7 +639,7 @@ export function QuickTradePanel({
                     {lockDirections ? (
                       <Lock className="h-3 w-3 text-slate-400" />
                     ) : (
-                    <ArrowDownRight className={cn("h-4 w-4", grvtDirection === "short" ? "text-white" : "text-rose-500")} />
+                    <ArrowDownRight className={cn("h-3.5 w-3.5", grvtDirection === "short" ? "text-white" : "text-rose-500")} />
                     )}
                     做空
                     {grvtDirection === "short" && (
@@ -652,8 +652,8 @@ export function QuickTradePanel({
           </div>
 
           {/* Notional Value Section */}
-          <div className="space-y-2.5 pt-3 border-t border-slate-100">
-            <Label htmlFor="notional" className="text-[11px] font-bold text-slate-700 uppercase tracking-wide">
+          <div className="space-y-2 pt-3 border-t border-slate-100 pb-2">
+            <Label htmlFor="notional" className="text-[10px] font-bold text-slate-700 uppercase tracking-wide">
               合约名义价值 (USD)
             </Label>
             <div className="relative">
@@ -663,10 +663,10 @@ export function QuickTradePanel({
                 min="1"
                 value={notionalValue}
                 onChange={(e) => setNotionalValue(e.target.value)}
-                className="h-10 bg-slate-50/50 border-slate-200 text-slate-900 font-bold focus:bg-white focus:ring-primary/20 transition-all pr-12"
+                className="h-9 bg-slate-50/50 border-slate-200 text-slate-900 font-bold focus:bg-white focus:ring-primary/20 transition-all pr-12"
                 placeholder="0.00"
               />
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">USD</div>
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-bold text-slate-400">USD</div>
             </div>
           </div>
         </div>
@@ -675,11 +675,11 @@ export function QuickTradePanel({
       {/* Action Button */}
       <div className="p-3 bg-slate-50/50 border-t border-slate-100 space-y-2">
         <div className="grid grid-cols-2 gap-2">
-          <div className="relative flex flex-col items-center justify-center py-2 rounded-lg border border-blue-100 bg-blue-50/30">
-            <span className="text-[9px] uppercase tracking-[0.15em] font-black text-blue-500/60 mb-0.5">
+          <div className="relative flex flex-col items-center justify-center py-1.5 rounded-lg border border-blue-100 bg-blue-50/30">
+            <span className="text-[8px] uppercase tracking-[0.15em] font-black text-blue-500/60 mb-0.5">
               Lighter 保证金
             </span>
-            <span className="font-mono text-xs font-black text-blue-700">
+            <span className="font-mono text-[11px] font-black text-blue-700">
               {lighterMargin != null
                 ? `${lighterMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                 : "--"}
@@ -687,11 +687,11 @@ export function QuickTradePanel({
             <div className="absolute left-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-blue-400/30" />
           </div>
 
-          <div className="relative flex flex-col items-center justify-center py-2 rounded-lg border border-indigo-100 bg-indigo-50/30">
-            <span className="text-[9px] uppercase tracking-[0.15em] font-black text-indigo-500/60 mb-0.5">
+          <div className="relative flex flex-col items-center justify-center py-1.5 rounded-lg border border-indigo-100 bg-indigo-50/30">
+            <span className="text-[8px] uppercase tracking-[0.15em] font-black text-indigo-500/60 mb-0.5">
               GRVT 保证金
             </span>
-            <span className="font-mono text-xs font-black text-indigo-700">
+            <span className="font-mono text-[11px] font-black text-indigo-700">
               {grvtMargin != null
                 ? `${grvtMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                 : "--"}
@@ -702,7 +702,7 @@ export function QuickTradePanel({
         <Button
           onClick={onExecuteArbitrage}
           disabled={!hasSymbols || executeDisabled}
-          className="w-full h-11 bg-primary hover:bg-primary/90 text-white font-black text-sm uppercase tracking-[0.15em] transition-all transform active:scale-[0.98] shadow-md shadow-primary/20 disabled:opacity-50 disabled:grayscale"
+          className="w-full h-10 bg-primary hover:bg-primary/90 text-white font-black text-sm uppercase tracking-[0.15em] transition-all transform active:scale-[0.98] shadow-md shadow-primary/20 disabled:opacity-50 disabled:grayscale"
         >
           <TrendingUp className="h-4 w-4 mr-2" />
           {executeLabel}

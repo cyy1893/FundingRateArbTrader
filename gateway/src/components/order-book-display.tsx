@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ArrowUpRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { OrderBookSnapshot, VenueOrderBook, OrderBookLevel, WebSocketStatus, TradesSnapshot, TradeEntry } from "@/hooks/use-order-book-websocket";
 
@@ -13,20 +14,11 @@ type Props = {
   hasGrvt: boolean;
 };
 
-const formatPrice = (price: number) => {
+const formatPrice = (price: number, referenceDecimals: number) => {
   if (!Number.isFinite(price)) {
     return "—";
   }
-  if (price >= 1000) {
-    return price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  if (price >= 1) {
-    return price.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-  }
-  if (price >= 0.01) {
-    return price.toLocaleString("en-US", { minimumFractionDigits: 5, maximumFractionDigits: 5 });
-  }
-  return price.toLocaleString("en-US", { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+  return price.toFixed(referenceDecimals);
 };
 const formatShort = (val: number) => {
   if (Math.abs(val) >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M`;
@@ -35,17 +27,51 @@ const formatShort = (val: number) => {
 };
 
 const formatSpread = (value: number) => {
-  const abs = Math.abs(value);
-  if (abs >= 1000) {
-    return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (!Number.isFinite(value)) {
+    return "—";
   }
+  const abs = Math.abs(value);
   if (abs >= 1) {
-    return value.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+    return value.toFixed(3);
   }
   if (abs >= 0.01) {
-    return value.toLocaleString("en-US", { minimumFractionDigits: 5, maximumFractionDigits: 5 });
+    return value.toFixed(5);
   }
-  return value.toLocaleString("en-US", { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+  return value.toFixed(6);
+};
+
+const inferDecimals = (values: Array<number | undefined>) => {
+  let maxDecimals = 0;
+  for (const value of values) {
+    if (value == null) {
+      continue;
+    }
+    const raw = String(value);
+    if (!raw.includes(".")) {
+      continue;
+    }
+    const decimals = raw.split(".")[1]?.length ?? 0;
+    maxDecimals = Math.max(maxDecimals, decimals);
+  }
+  return Math.min(Math.max(maxDecimals, 2), 10);
+};
+const buildMarketUrl = (provider: "lighter" | "grvt", symbol?: string | null): string | null => {
+  if (!symbol) {
+    return null;
+  }
+  if (provider === "lighter") {
+    return `https://app.lighter.xyz/trade/${encodeURIComponent(symbol)}`;
+  }
+  const base = symbol
+    .replace(/[-_/]?PERP$/i, "")
+    .replace(/[_/]/g, "-")
+    .trim()
+    .toUpperCase();
+  if (!base) {
+    return null;
+  }
+  const pair = base.includes("-") ? base : `${base}-USDT`;
+  return `https://grvt.io/exchange/perpetual/${encodeURIComponent(pair)}`;
 };
 type DisplayMode = "base" | "usd";
 const formatValue = (val: number, mode: DisplayMode) => {
@@ -81,12 +107,14 @@ function DepthRow({
   maxSize,
   tone,
   displayMode,
+  priceDecimals,
 }: {
   level: OrderBookLevel;
   maxTotal: number;
   maxSize: number;
   tone: "ask" | "bid";
   displayMode: DisplayMode;
+  priceDecimals: number;
 }) {
   const safeVal = (val: unknown) => {
     const num = Number(val);
@@ -117,7 +145,7 @@ function DepthRow({
       />
       <div className="relative z-10 flex items-center gap-3 px-2 py-1 text-[12px] font-semibold leading-tight">
         <span className={`${palette.text} min-w-[68px] text-right font-semibold`}>
-          {formatPrice(level.price)}
+          {formatPrice(level.price, priceDecimals)}
         </span>
         <span className="text-foreground/80 min-w-[70px] text-right font-semibold">
           {formatValue(level.size, displayMode)}
@@ -206,6 +234,11 @@ function VenueOrderBookTable({
   const sizeHeader = displayMode === "usd" ? "数量 (USD)" : "数量";
   const totalHeader = displayMode === "usd" ? "总计 (USD)" : "总计";
 
+  const priceDecimals = inferDecimals([
+    ...asksBase.map((level) => level.price),
+    ...bidLevels.map((level) => level.price),
+  ]);
+
   return (
     <div className="border border-slate-200 bg-white shadow-sm rounded-none">
       <div className="border-b border-slate-200 px-3 py-2">
@@ -237,6 +270,7 @@ function VenueOrderBookTable({
                   maxSize={crossMaxSize}
                   tone="ask"
                   displayMode={displayMode}
+                  priceDecimals={priceDecimals}
                 />
               ))}
             </div>
@@ -265,6 +299,7 @@ function VenueOrderBookTable({
                   maxSize={crossMaxSize}
                   tone="bid"
                   displayMode={displayMode}
+                  priceDecimals={priceDecimals}
                 />
               ))}
             </div>
@@ -278,6 +313,10 @@ function VenueOrderBookTable({
 export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLighter, hasGrvt }: Props) {
   const [displayMode, setDisplayMode] = useState<DisplayMode>("usd");
   const toggleMode = () => setDisplayMode((m) => (m === "usd" ? "base" : "usd"));
+  const lighterSymbol = orderBook?.lighter?.symbol ?? trades?.lighter?.[0]?.symbol ?? null;
+  const grvtSymbol = orderBook?.grvt?.symbol ?? trades?.grvt?.[0]?.symbol ?? null;
+  const lighterUrl = buildMarketUrl("lighter", lighterSymbol);
+  const grvtUrl = buildMarketUrl("grvt", grvtSymbol);
 
   const timeFormatter = useState(
     () =>
@@ -294,6 +333,7 @@ export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLi
     if (!entries || entries.length === 0) {
       return <div className="text-xs text-muted-foreground py-3">暂无成交</div>;
     }
+    const tradePriceDecimals = inferDecimals(entries.map((trade) => trade.price));
     return (
       <div className="max-h-64 overflow-y-auto text-xs">
         <div className="grid grid-cols-3 px-2 py-1 text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -309,7 +349,7 @@ export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLi
             return (
               <div key={`${t.timestamp}-${idx}`} className="grid grid-cols-3 px-2 py-1 text-xs">
                 <span className={color}>
-                  {formatPrice(t.price)}
+                  {formatPrice(t.price, tradePriceDecimals)}
                 </span>
                 <span className="text-center">
                   {displayMode === "usd" ? `$${sizeValue.toFixed(2)}` : sizeValue.toFixed(3)}
@@ -336,7 +376,20 @@ export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLi
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="border-none shadow-none bg-transparent rounded-none">
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg text-[#2f2a5a]">Lighter 订单簿</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-lg text-[#2f2a5a]">Lighter 订单簿</CardTitle>
+              {lighterUrl ? (
+                <a
+                  href={lighterUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-100"
+                  aria-label="在新页面打开 Lighter 交易页面"
+                >
+                  <ArrowUpRight className="h-3.5 w-3.5" />
+                </a>
+              ) : null}
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <VenueOrderBookTable
@@ -355,7 +408,20 @@ export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLi
 
         <Card className="border-none shadow-none bg-transparent rounded-none">
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg text-[#2f2a5a]">GRVT 订单簿</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-lg text-[#2f2a5a]">GRVT 订单簿</CardTitle>
+              {grvtUrl ? (
+                <a
+                  href={grvtUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-100"
+                  aria-label="在新页面打开 GRVT 交易页面"
+                >
+                  <ArrowUpRight className="h-3.5 w-3.5" />
+                </a>
+              ) : null}
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <VenueOrderBookTable

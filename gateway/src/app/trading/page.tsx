@@ -702,6 +702,8 @@ function OrderBookDisplay({
 
   const lighterTrades = trades?.lighter || [];
   const grvtTrades = trades?.grvt || [];
+  const lighterSymbol = orderBook?.lighter?.symbol ?? lighterTrades[0]?.symbol ?? null;
+  const grvtSymbol = orderBook?.grvt?.symbol ?? grvtTrades[0]?.symbol ?? null;
 
   const mappedStatus: "connected" | "connecting" | "disconnected" =
     status === "error" ? "disconnected" : status;
@@ -719,6 +721,7 @@ function OrderBookDisplay({
       <div className="grid grid-cols-2 gap-3">
         <TerminalOrderBook
           exchange="Lighter"
+          symbol={lighterSymbol}
           bids={lighterBids}
           asks={lighterAsks}
           trades={lighterTrades}
@@ -727,6 +730,7 @@ function OrderBookDisplay({
         />
         <TerminalOrderBook
           exchange="GRVT"
+          symbol={grvtSymbol}
           bids={grvtBids}
           asks={grvtAsks}
           trades={grvtTrades}

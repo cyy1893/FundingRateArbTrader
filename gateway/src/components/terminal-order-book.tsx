@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TradeEntry } from "@/hooks/use-order-book-websocket";
 
@@ -11,6 +12,7 @@ type OrderBookEntry = {
 
 type TerminalOrderBookProps = {
   exchange: "Lighter" | "GRVT";
+  symbol?: string | null;
   bids: OrderBookEntry[];
   asks: OrderBookEntry[];
   trades?: TradeEntry[];
@@ -20,20 +22,11 @@ type TerminalOrderBookProps = {
   displayMode: "base" | "usd";
 };
 
-const formatPrice = (price: number) => {
+const formatPrice = (price: number, referenceDecimals: number) => {
   if (!Number.isFinite(price)) {
     return "—";
   }
-  if (price >= 1000) {
-    return price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  if (price >= 1) {
-    return price.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-  }
-  if (price >= 0.01) {
-    return price.toLocaleString("en-US", { minimumFractionDigits: 5, maximumFractionDigits: 5 });
-  }
-  return price.toLocaleString("en-US", { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+  return price.toFixed(referenceDecimals);
 };
 
 const sizeFormatter = new Intl.NumberFormat("en-US", {
@@ -53,9 +46,28 @@ const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
   second: "2-digit",
   fractionalSecondDigits: 3,
 });
+const buildMarketUrl = (exchange: "Lighter" | "GRVT", symbol?: string | null): string | null => {
+  if (!symbol) {
+    return null;
+  }
+  if (exchange === "Lighter") {
+    return `https://app.lighter.xyz/trade/${encodeURIComponent(symbol)}`;
+  }
+  const base = symbol
+    .replace(/[-_/]?PERP$/i, "")
+    .replace(/[_/]/g, "-")
+    .trim()
+    .toUpperCase();
+  if (!base) {
+    return null;
+  }
+  const pair = base.includes("-") ? base : `${base}-USDT`;
+  return `https://grvt.io/exchange/perpetual/${encodeURIComponent(pair)}`;
+};
 
 export function TerminalOrderBook({
   exchange,
+  symbol,
   bids,
   asks,
   trades = [],
@@ -108,27 +120,63 @@ export function TerminalOrderBook({
   const sizeHeader = displayMode === "usd" ? "数量 (USD)" : "数量";
   const totalHeader = displayMode === "usd" ? "累计 (USD)" : "累计";
   const formatSpread = (value: number) => {
-    const abs = Math.abs(value);
-    if (abs >= 1000) {
-      return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (!Number.isFinite(value)) {
+      return "—";
     }
+    const abs = Math.abs(value);
     if (abs >= 1) {
-      return value.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+      return value.toFixed(3);
     }
     if (abs >= 0.01) {
-      return value.toLocaleString("en-US", { minimumFractionDigits: 5, maximumFractionDigits: 5 });
+      return value.toFixed(5);
     }
-    return value.toLocaleString("en-US", { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+    return value.toFixed(6);
   };
+
+  const inferDecimals = (values: Array<number | undefined>) => {
+    let maxDecimals = 0;
+    for (const value of values) {
+      if (value == null) {
+        continue;
+      }
+      const raw = String(value);
+      if (!raw.includes(".")) {
+        continue;
+      }
+      const decimals = raw.split(".")[1]?.length ?? 0;
+      maxDecimals = Math.max(maxDecimals, decimals);
+    }
+    return Math.min(Math.max(maxDecimals, 2), 10);
+  };
+
+  const priceDecimals = inferDecimals([
+    ...asksDisplay.map((level) => level.price),
+    ...bidsDisplay.map((level) => level.price),
+    ...displayTrades.map((trade) => trade.price),
+  ]);
+  const marketUrl = buildMarketUrl(exchange, symbol);
 
   return (
     <div className="bg-white border border-gray-200 rounded-none flex flex-col shadow-sm overflow-hidden">
       {/* Header */}
       <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 shrink-0">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
-            {exchange}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">
+              {exchange}
+            </h3>
+            {marketUrl ? (
+              <a
+                href={marketUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-gray-200 text-gray-600 hover:bg-gray-100"
+                aria-label={`在新页面打开 ${exchange} 交易页面`}
+              >
+                <ArrowUpRight className="h-3 w-3" />
+              </a>
+            ) : null}
+          </div>
           <div
             className={cn(
               "h-1.5 w-1.5 rounded-full",
@@ -168,7 +216,7 @@ export function TerminalOrderBook({
                       style={{ width: `${widthPercent}%` }}
                     />
                     <div className="relative text-red-600 font-semibold">
-                      {formatPrice(ask.price)}
+                      {formatPrice(ask.price, priceDecimals)}
                     </div>
                     <div className="relative text-right text-gray-700">
                       {formatSize(ask.size)}
@@ -210,7 +258,7 @@ export function TerminalOrderBook({
                       style={{ width: `${widthPercent}%` }}
                     />
                     <div className="relative text-green-700 font-semibold">
-                      {formatPrice(bid.price)}
+                      {formatPrice(bid.price, priceDecimals)}
                     </div>
                     <div className="relative text-right text-gray-700">
                       {formatSize(bid.size)}
@@ -240,7 +288,7 @@ export function TerminalOrderBook({
                         "px-2 py-1 font-semibold w-1/3",
                         trade.is_buy ? "text-green-700" : "text-red-600"
                       )}>
-                        {formatPrice(trade.price)}
+                        {formatPrice(trade.price, priceDecimals)}
                       </td>
                       <td className="px-2 py-1 text-right text-gray-700 w-1/3">
                         {formatSize(displayMode === "usd" ? trade.size * trade.price : trade.size)}
