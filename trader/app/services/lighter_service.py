@@ -54,6 +54,7 @@ class LighterService:
         self._market_meta_cache: dict[str, LighterMarketMeta] = {}
         self._market_cache_lock = asyncio.Lock()
         self._ws_endpoint = self._build_ws_endpoint(settings.lighter_base_url)
+        self._logger = logging.getLogger(__name__)
 
     async def start(self) -> None:
         await self._ensure_client()
@@ -161,11 +162,28 @@ class LighterService:
                 f"Lighter quote amount below minimum ({quote_amount} < {meta.min_quote_amount})"
             )
 
-        base_amount = int((base_amount_value * Decimal("10000")).to_integral_value(rounding=ROUND_DOWN))
-        price_multiplier = Decimal(10).scaleb(meta.price_decimals)
+        base_multiplier = Decimal(1).scaleb(meta.size_decimals)
+        base_amount = int((base_amount_value * base_multiplier).to_integral_value(rounding=ROUND_DOWN))
+        price_multiplier = Decimal(1).scaleb(meta.price_decimals)
         price = int((price_value * price_multiplier).to_integral_value(rounding=price_rounding))
         if base_amount <= 0 or price <= 0:
             raise ValueError("Invalid base amount or price for Lighter order")
+
+        self._logger.info(
+            "lighter order sizing symbol=%s market_index=%s base=%s price=%s size_decimals=%s price_decimals=%s "
+            "base_value=%s price_value=%s base_amount_int=%s price_int=%s quote_value=%s",
+            request.symbol,
+            market_index,
+            request.base_amount,
+            request.price,
+            meta.size_decimals,
+            meta.price_decimals,
+            base_amount_value,
+            price_value,
+            base_amount,
+            price,
+            quote_amount,
+        )
 
         normalized = LighterOrderRequest(
             market_index=market_index,

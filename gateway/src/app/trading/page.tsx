@@ -177,6 +177,7 @@ function summarizeGrvt(grvt: GrvtBalanceSnapshot): UnifiedVenue {
 function TradingPageContent() {
   const searchParams = useSearchParams();
   const didShowToastRef = useRef(false);
+  const lastLeverageCommitRef = useRef<{ symbol: string; leverage: number } | null>(null);
 
   useEffect(() => {
     const symbol = searchParams.get("symbol");
@@ -476,6 +477,30 @@ function TradingPageContent() {
     return { ok: true, data, error: null }
   }
 
+  const handleLeverageCommit = async (payload: { symbol: string; leverage: number }) => {
+    const symbol = payload.symbol.trim();
+    if (!symbol) {
+      return;
+    }
+    const leverage = Math.max(1, Math.round(payload.leverage));
+    const lastCommit = lastLeverageCommitRef.current;
+    if (lastCommit && lastCommit.symbol === symbol && lastCommit.leverage === leverage) {
+      return;
+    }
+    lastLeverageCommitRef.current = { symbol, leverage };
+
+    const result = await updateLighterLeverage({
+      symbol,
+      leverage,
+      margin_mode: "cross",
+    });
+    if (!result.ok) {
+      toast.error(`设置 Lighter 杠杆失败：${result.error}`, {
+        className: "bg-destructive text-destructive-foreground",
+      });
+    }
+  };
+
   const executeArbitrage = async () => {
     if (!subscription || arbStatus === "placing") {
       return;
@@ -492,17 +517,6 @@ function TradingPageContent() {
     const grvtDirection =
       activeSubscription.grvt_direction ?? (activeSubscription.lighter_direction === "long" ? "short" : "long");
     const grvtSide = grvtDirection === "long" ? "buy" : "sell";
-
-    const leverageResult = await updateLighterLeverage({
-      symbol: activeSubscription.symbol,
-      leverage: activeSubscription.lighter_leverage,
-      margin_mode: "cross",
-    })
-    if (!leverageResult.ok) {
-      setArbStatus("error")
-      setArbMessage(`设置 Lighter 杠杆失败：${leverageResult.error}`)
-      return
-    }
 
     const lighterPrice = getMakerPrice("lighter", lighterSide, activeSubscription.symbol);
     const grvtPrice = getMakerPrice("grvt", grvtSide, activeSubscription.symbol);
@@ -644,6 +658,9 @@ function TradingPageContent() {
             onExecuteArbitrage={executeArbitrage}
             onConfigChange={setDraftSubscription}
             onNotionalReady={setNotionalReady}
+            onLeverageCommit={(payload) =>
+              handleLeverageCommit({ symbol: payload.symbol, leverage: payload.lighterLeverage })
+            }
             executeDisabled={!canExecute}
             executeLabel={arbStatus === "placing" ? "下单中..." : "执行套利/下单"}
             availableSymbols={quickTradeSymbols}

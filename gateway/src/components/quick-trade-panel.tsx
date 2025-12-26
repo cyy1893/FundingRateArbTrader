@@ -18,6 +18,7 @@ type QuickTradePanelProps = {
   onExecuteArbitrage: () => void;
   onConfigChange: (subscription: OrderBookSubscription | null) => void;
   onNotionalReady: (ready: boolean) => void;
+  onLeverageCommit?: (payload: { symbol: string; lighterLeverage: number; grvtLeverage: number }) => void;
   executeDisabled: boolean;
   executeLabel: string;
   availableSymbols: SymbolOption[];
@@ -58,11 +59,13 @@ const buildLeverageTicks = (max: number) => {
 function LeverageSlider({
   value,
   onChange,
+  onCommit,
   max,
   accentColor,
 }: {
   value: number;
   onChange: (val: number) => void;
+  onCommit?: (val: number) => void;
   max: number;
   accentColor: string;
 }) {
@@ -85,6 +88,7 @@ function LeverageSlider({
     }
     const clamped = Math.min(max, Math.max(LEVERAGE_MIN, Math.round(parsed)));
     onChange(clamped);
+    onCommit?.(clamped);
     setDraftValue(String(clamped));
     setIsEditing(false);
   };
@@ -145,6 +149,8 @@ function LeverageSlider({
           step={1}
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
+          onMouseUp={() => onCommit?.(value)}
+          onTouchEnd={() => onCommit?.(value)}
           style={{ ["--thumb-color" as never]: accentColor }}
           className={cn(
             "relative w-full cursor-pointer appearance-none bg-transparent block",
@@ -170,7 +176,10 @@ function LeverageSlider({
               <button
                 key={tick}
                 type="button"
-                onClick={() => onChange(tick)}
+                onClick={() => {
+                  onChange(tick);
+                  onCommit?.(tick);
+                }}
                 className="flex flex-col items-center group transition-colors"
                 style={{
                   position: 'absolute',
@@ -205,6 +214,7 @@ export function QuickTradePanel({
   onExecuteArbitrage,
   onConfigChange,
   onNotionalReady,
+  onLeverageCommit,
   executeDisabled,
   executeLabel,
   availableSymbols,
@@ -300,6 +310,13 @@ export function QuickTradePanel({
     const clamped = Math.min(sharedMax, Math.max(LEVERAGE_MIN, Math.round(value)));
     setLighterLeverage(clamped);
     setGrvtLeverage(clamped);
+  };
+
+  const handleLeverageCommit = (value: number) => {
+    if (!symbol) {
+      return;
+    }
+    onLeverageCommit?.({ symbol, lighterLeverage: value, grvtLeverage: value });
   };
 
   const notionalAmount = Number(notionalValue);
@@ -507,6 +524,7 @@ export function QuickTradePanel({
                 <LeverageSlider
                   value={lighterLeverage}
                   onChange={handleLeverageChange}
+                  onCommit={handleLeverageCommit}
                   max={sharedMax}
                   accentColor="#3b82f6"
                 />
@@ -586,6 +604,7 @@ export function QuickTradePanel({
                 <LeverageSlider
                   value={grvtLeverage}
                   onChange={handleLeverageChange}
+                  onCommit={handleLeverageCommit}
                   max={sharedMax}
                   accentColor="#6366f1"
                 />
