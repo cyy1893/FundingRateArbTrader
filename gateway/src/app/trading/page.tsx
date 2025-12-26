@@ -409,13 +409,41 @@ function TradingPageContent() {
   const connectionStatus: "connected" | "connecting" | "disconnected" =
     status === "error" ? "disconnected" : status;
 
-  const getBestPrice = (venue: "lighter" | "grvt", side: "buy" | "sell") => {
+  const getTickSize = (levels: Array<{ price: number }> = []): number | null => {
+    const prices = levels
+      .map((level) => Number(level.price))
+      .filter((price) => Number.isFinite(price) && price > 0);
+    const unique = Array.from(new Set(prices)).sort((a, b) => a - b);
+    let minDiff: number | null = null;
+    for (let i = 1; i < unique.length; i += 1) {
+      const diff = unique[i] - unique[i - 1];
+      if (diff > 0 && (minDiff === null || diff < minDiff)) {
+        minDiff = diff;
+      }
+    }
+    return minDiff;
+  };
+
+  const getMakerPrice = (venue: "lighter" | "grvt", side: "buy" | "sell") => {
     const book = venue === "lighter" ? orderBook?.lighter : orderBook?.grvt;
     if (!book) return null;
-    if (side === "buy") {
-      return book.bids?.levels?.[0]?.price ?? null;
+    const bids = book.bids?.levels ?? [];
+    const asks = book.asks?.levels ?? [];
+    const bestBid = bids[0]?.price ?? null;
+    const bestAsk = asks[0]?.price ?? null;
+    if (!bestBid || !bestAsk) {
+      return null;
     }
-    return book.asks?.levels?.[0]?.price ?? null;
+    const tick = getTickSize([...bids.slice(0, 20), ...asks.slice(0, 20)]);
+    if (!tick || bestAsk - bestBid <= tick) {
+      return side === "buy" ? bestBid : bestAsk;
+    }
+    if (side === "buy") {
+      const price = bestAsk - tick;
+      return price > bestBid ? price : bestBid;
+    }
+    const price = bestBid + tick;
+    return price < bestAsk ? price : bestAsk;
   };
 
   const placeOrder = async (
@@ -454,8 +482,8 @@ function TradingPageContent() {
     const grvtDirection = subscription.grvt_direction ?? (subscription.lighter_direction === "long" ? "short" : "long");
     const grvtSide = grvtDirection === "long" ? "buy" : "sell";
 
-    const lighterPrice = getBestPrice("lighter", lighterSide);
-    const grvtPrice = getBestPrice("grvt", grvtSide);
+    const lighterPrice = getMakerPrice("lighter", lighterSide);
+    const grvtPrice = getMakerPrice("grvt", grvtSide);
     if (!lighterPrice || !grvtPrice) {
       setArbStatus("error");
       setArbMessage("订单簿数据不足，无法下单。");
@@ -517,7 +545,7 @@ function TradingPageContent() {
     if (lighterResult.ok !== grvtResult.ok) {
       const retryVenue = lighterResult.ok ? "grvt" : "lighter";
       const retrySide = retryVenue === "lighter" ? lighterSide : grvtSide;
-      const retryPrice = getBestPrice(retryVenue, retrySide);
+      const retryPrice = getMakerPrice(retryVenue, retrySide);
       const otherPrice = retryVenue === "lighter" ? grvtPrice : lighterPrice;
       if (retryPrice) {
         const retryLongPrice = retrySide === "buy" ? retryPrice : otherPrice;
