@@ -10,12 +10,18 @@ from typing import Any, Dict
 from fastapi import Depends, FastAPI, HTTPException, Security, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlmodel import Session
 
 from app.config import get_settings
 from app.events import EventBroadcaster
 from app.models import (
     ArbitrageSnapshotRequest,
     ArbitrageSnapshotResponse,
+    ArbCloseRequest,
+    ArbCloseResponse,
+    ArbOpenRequest,
+    ArbOpenResponse,
+    ArbStatusResponse,
     BalancesResponse,
     AvailableSymbolsRequest,
     AvailableSymbolsResponse,
@@ -40,6 +46,9 @@ from app.models import (
     PerpSnapshot,
     PerpSnapshotRequest,
 )
+from app.db_models import ArbPositionStatus, OrderLog, OrderStatus
+from app.db_session import get_session
+from app.services.arb_service import ArbService
 from app.services.lighter_service import LighterService
 from app.services.grvt_service import GrvtService
 from app.services.market_data_service import MarketDataService
@@ -241,6 +250,175 @@ async def create_grvt_order(
         ).model_dump()
     )
     return response
+
+
+@app.post("/arb/open", response_model=ArbOpenResponse)
+async def open_arb_position(
+    request: ArbOpenRequest,
+    session: Session = Depends(get_session),
+    lighter: LighterService = Depends(get_lighter_service),
+    grvt: GrvtService = Depends(get_grvt_service),
+    _: str = Depends(get_current_user),
+) -> ArbOpenResponse:
+    try:
+        position, risk_tasks = ArbService(session).open_position(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    now = datetime.utcnow()
+    client_base = int(now.timestamp() * 1000) % 2_147_483_647
+
+    def _record_order(
+        *,
+        venue: str,
+        side: str,
+        price: float,
+        size: float,
+        reduce_only: bool,
+        request_payload: dict,
+        response_payload: dict,
+        status_value: OrderStatus,
+    ) -> None:
+        session.add(
+            OrderLog(
+                arb_position_id=position.id,
+                venue=venue,
+                side=side,
+                price=price,
+                size=size,
+                reduce_only=reduce_only,
+                request_payload=request_payload,
+                response_payload=response_payload,
+                status=status_value,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    async def place_for_venue(
+        venue: str,
+        side: str,
+        price: float,
+        size: float,
+        client_index: int,
+    ) -> bool:
+        try:
+            if venue == "lighter":
+                order = LighterSymbolOrderRequest(
+                    symbol=request.symbol,
+                    client_order_index=client_index,
+                    side=side,
+                    base_amount=size,
+                    price=price,
+                    reduce_only=False,
+                    time_in_force="post_only",
+                )
+                response = await lighter.place_order_by_symbol(order)
+                _record_order(
+                    venue="lighter",
+                    side=side,
+                    price=price,
+                    size=size,
+                    reduce_only=False,
+                    request_payload=order.model_dump(),
+                    response_payload=response.model_dump(),
+                    status_value=OrderStatus.accepted,
+                )
+                return True
+            order = GrvtOrderRequest(
+                symbol=request.symbol,
+                side=side,
+                amount=size,
+                price=price,
+                post_only=True,
+                reduce_only=False,
+                order_duration_secs=10,
+                client_order_id=client_index,
+            )
+            response = await grvt.place_order(order)
+            _record_order(
+                venue="grvt",
+                side=side,
+                price=price,
+                size=size,
+                reduce_only=False,
+                request_payload=order.model_dump(),
+                response_payload=response.model_dump(),
+                status_value=OrderStatus.accepted,
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001
+            _record_order(
+                venue=venue,
+                side=side,
+                price=price,
+                size=size,
+                reduce_only=False,
+                request_payload={
+                    "symbol": request.symbol,
+                    "side": side,
+                    "size": size,
+                    "price": price,
+                },
+                response_payload={"error": str(exc)},
+                status_value=OrderStatus.failed,
+            )
+            return False
+
+    left_ok = await place_for_venue(
+        request.left_venue,
+        request.left_side,
+        request.left_price,
+        request.left_size,
+        client_base,
+    )
+    right_ok = await place_for_venue(
+        request.right_venue,
+        request.right_side,
+        request.right_price,
+        request.right_size,
+        client_base + 1,
+    )
+
+    if left_ok and right_ok:
+        position.status = ArbPositionStatus.pending
+    elif left_ok or right_ok:
+        position.status = ArbPositionStatus.partially_filled
+    else:
+        position.status = ArbPositionStatus.failed
+    position.updated_at = datetime.utcnow()
+    session.add(position)
+    session.commit()
+
+    return ArbOpenResponse(
+        arb_position_id=str(position.id),
+        status=position.status.value,
+        risk_task_ids=[str(task.id) for task in risk_tasks],
+    )
+
+
+@app.post("/arb/close", response_model=ArbCloseResponse)
+async def close_arb_position(
+    request: ArbCloseRequest,
+    session: Session = Depends(get_session),
+    _: str = Depends(get_current_user),
+) -> ArbCloseResponse:
+    try:
+        return ArbService(session).close_position(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@app.get("/arb/status/{arb_position_id}", response_model=ArbStatusResponse)
+async def get_arb_status(
+    arb_position_id: str,
+    session: Session = Depends(get_session),
+    _: str = Depends(get_current_user),
+) -> ArbStatusResponse:
+    try:
+        return ArbService(session).get_status(arb_position_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @app.post("/perp-snapshot", response_model=PerpSnapshot)

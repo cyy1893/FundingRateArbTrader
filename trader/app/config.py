@@ -43,6 +43,18 @@ class Settings(BaseSettings):
     auth_token_ttl_minutes: int = Field(7 * 24 * 60, description="Access token lifetime in minutes")
     auth_lockout_threshold: int = Field(3, description="Number of failed logins before lockout")
     auth_lockout_minutes: int = Field(60, description="Lockout duration in minutes after threshold is reached")
+    database_url: Optional[str] = Field(
+        default=None, description="SQLAlchemy database URL (e.g. postgresql+psycopg://user:pass@host:5432/db)"
+    )
+    pg_host: Optional[str] = Field(default=None, validation_alias="PGHOST", description="Postgres host")
+    pg_database: Optional[str] = Field(default=None, validation_alias="PGDATABASE", description="Postgres database name")
+    pg_user: Optional[str] = Field(default=None, validation_alias="PGUSER", description="Postgres user")
+    pg_password: Optional[str] = Field(default=None, validation_alias="PGPASSWORD", description="Postgres password")
+    pg_sslmode: Optional[str] = Field(default="require", validation_alias="PGSSLMODE", description="Postgres SSL mode")
+    pg_channelbinding: Optional[str] = Field(
+        default="require", validation_alias="PGCHANNELBINDING", description="Postgres channel binding requirement"
+    )
+    database_echo: bool = Field(False, description="Enable SQLAlchemy SQL echo logging")
 
 
 @lru_cache

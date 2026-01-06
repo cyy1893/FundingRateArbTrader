@@ -390,3 +390,93 @@ class ArbitrageSnapshotResponse(BaseModel):
     failures: list[ArbitrageFailure]
     fetched_at: datetime | None = None
     errors: list[ApiError] = Field(default_factory=list)
+
+
+class ArbOpenRequest(BaseModel):
+    symbol: str
+    left_venue: Literal["lighter", "grvt"]
+    right_venue: Literal["lighter", "grvt"]
+    left_side: Literal["buy", "sell"]
+    right_side: Literal["buy", "sell"]
+    left_price: float = Field(..., gt=0)
+    right_price: float = Field(..., gt=0)
+    left_size: float = Field(..., gt=0)
+    right_size: float = Field(..., gt=0)
+    notional: float = Field(..., gt=0)
+    leverage_left: float = Field(..., gt=0)
+    leverage_right: float = Field(..., gt=0)
+    avoid_adverse_spread: bool = False
+    auto_close_after_ms: int | None = Field(None, ge=0)
+    liquidation_guard_enabled: bool = False
+    liquidation_guard_threshold_pct: float | None = Field(None, gt=0, le=100)
+    meta: dict | None = None
+
+
+class ArbOpenResponse(BaseModel):
+    arb_position_id: str
+    status: str
+    risk_task_ids: list[str] = Field(default_factory=list)
+
+
+class ArbCloseRequest(BaseModel):
+    arb_position_id: str
+    reason: str | None = None
+
+
+class ArbCloseResponse(BaseModel):
+    arb_position_id: str
+    status: str
+
+
+class ArbPositionSnapshot(BaseModel):
+    id: str
+    symbol: str
+    left_venue: str
+    right_venue: str
+    left_side: str
+    right_side: str
+    notional: float
+    leverage_left: float
+    leverage_right: float
+    status: str
+    opened_at: datetime | None = None
+    closed_at: datetime | None = None
+    meta: dict | None = None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None = None
+
+
+class RiskTaskSnapshot(BaseModel):
+    id: str
+    arb_position_id: str
+    task_type: str
+    enabled: bool
+    threshold_pct: float | None = None
+    execute_at: datetime | None = None
+    triggered_at: datetime | None = None
+    status: str
+    trigger_reason: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None = None
+
+
+class OrderLogSnapshot(BaseModel):
+    id: str
+    arb_position_id: str
+    venue: str
+    side: str
+    price: float
+    size: float
+    reduce_only: bool
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None = None
+
+
+class ArbStatusResponse(BaseModel):
+    arb_position: ArbPositionSnapshot
+    risk_tasks: list[RiskTaskSnapshot]
+    order_logs: list[OrderLogSnapshot]
