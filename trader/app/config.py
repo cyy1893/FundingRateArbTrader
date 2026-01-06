@@ -35,8 +35,8 @@ class Settings(BaseSettings):
         "v1", description="GRVT websocket stream version (GRVT_WS_STREAM_VERSION)"
     )
     auth_users: str = Field(
-        ...,
-        description="Comma-separated username:password pairs for local auth (e.g. alice:pass,bob:pass)",
+        "",
+        description="Deprecated: comma-separated username:password pairs for local auth",
     )
     auth_jwt_secret: str = Field(..., description="Secret key used to sign JWTs")
     auth_jwt_algorithm: str = Field("HS256", description="JWT signing algorithm")

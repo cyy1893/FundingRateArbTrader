@@ -52,7 +52,7 @@ from app.services.arb_service import ArbService
 from app.services.lighter_service import LighterService
 from app.services.grvt_service import GrvtService
 from app.services.market_data_service import MarketDataService
-from app.utils.auth import AuthError, AuthManager, LockoutError, parse_users
+from app.utils.auth import AuthError, AuthManager, LockoutError
 
 
 logging.getLogger().setLevel(logging.INFO)
@@ -65,14 +65,6 @@ event_broadcaster = EventBroadcaster()
 lighter_service = LighterService(settings)
 grvt_service = GrvtService(settings)
 market_data_service = MarketDataService(settings)
-auth_manager = AuthManager(
-    users=parse_users([entry.strip() for entry in settings.auth_users.split(",") if entry.strip()]),
-    secret=settings.auth_jwt_secret,
-    algorithm=settings.auth_jwt_algorithm,
-    token_ttl_minutes=settings.auth_token_ttl_minutes,
-    lockout_threshold=settings.auth_lockout_threshold,
-    lockout_minutes=settings.auth_lockout_minutes,
-)
 auth_scheme = HTTPBearer()
 
 
@@ -109,8 +101,15 @@ def get_market_data_service() -> MarketDataService:
     return market_data_service
 
 
-def get_auth_manager() -> AuthManager:
-    return auth_manager
+def get_auth_manager(session: Session = Depends(get_session)) -> AuthManager:
+    return AuthManager(
+        session=session,
+        secret=settings.auth_jwt_secret,
+        algorithm=settings.auth_jwt_algorithm,
+        token_ttl_minutes=settings.auth_token_ttl_minutes,
+        lockout_threshold=settings.auth_lockout_threshold,
+        lockout_minutes=settings.auth_lockout_minutes,
+    )
 
 
 def get_current_user(
@@ -529,9 +528,10 @@ async def login(
 async def ws_events(
     websocket: WebSocket,
     broadcaster: EventBroadcaster = Depends(get_broadcaster),
+    manager: AuthManager = Depends(get_auth_manager),
 ):
     try:
-        await authenticate_websocket(websocket, auth_manager)
+        await authenticate_websocket(websocket, manager)
     except WebSocketDisconnect:
         return
     await websocket.accept()
@@ -551,9 +551,10 @@ async def ws_orderbook(
     websocket: WebSocket,
     lighter: LighterService = Depends(get_lighter_service),
     grvt: GrvtService = Depends(get_grvt_service),
+    manager: AuthManager = Depends(get_auth_manager),
 ):
     try:
-        await authenticate_websocket(websocket, auth_manager)
+        await authenticate_websocket(websocket, manager)
     except WebSocketDisconnect:
         return
     await websocket.accept()

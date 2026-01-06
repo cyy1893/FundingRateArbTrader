@@ -119,3 +119,23 @@ class OrderLog(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     deleted_at: Optional[datetime] = Field(default=None, index=True)
+
+
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+
+    id: uuid.UUID = Field(
+        default_factory=uuid7,
+        sa_column=Column(PGUUID(as_uuid=True), primary_key=True, nullable=False),
+    )
+    username: str = Field(index=True)
+    password_hash: str
+    password_salt: str
+    is_active: bool = True
+    is_admin: bool = False
+    failed_attempts: int = 0
+    failed_first_at: Optional[datetime] = None
+    locked_until: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    deleted_at: Optional[datetime] = Field(default=None, index=True)

@@ -4,9 +4,12 @@ import hashlib
 import hmac
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Tuple
+from typing import Tuple
 
 import jwt
+from sqlmodel import Session, select
+
+from app.db_models import User
 
 
 class AuthError(Exception):
@@ -25,23 +28,14 @@ class LockoutError(AuthError):
         self.until = until
 
 
-def parse_users(raw_users: list[str]) -> Dict[str, str]:
-    """
-    Parse a list of "username:password" strings into a mapping.
-    """
+def _hash_password(password: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100_000).hex()
 
-    users: Dict[str, str] = {}
-    for entry in raw_users:
-        if ":" not in entry:
-            raise ValueError("AUTH_USERS entries must be in the form username:password")
-        username, password = entry.split(":", 1)
-        username = username.strip()
-        if not username or not password:
-            raise ValueError("AUTH_USERS entries require both username and password")
-        users[username] = password
-    if not users:
-        raise ValueError("At least one user must be configured in AUTH_USERS")
-    return users
+
+def _verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
+    salt = bytes.fromhex(salt_hex)
+    candidate = _hash_password(password, salt)
+    return hmac.compare_digest(candidate, hash_hex)
 
 
 class AuthManager:
@@ -51,7 +45,7 @@ class AuthManager:
 
     def __init__(
         self,
-        users: Dict[str, str],
+        session: Session,
         secret: str,
         algorithm: str = "HS256",
         token_ttl_minutes: int = 60,
@@ -63,53 +57,54 @@ class AuthManager:
         self._token_ttl = timedelta(minutes=token_ttl_minutes)
         self._lockout_threshold = lockout_threshold
         self._lockout_window = timedelta(minutes=lockout_minutes)
-        self._users = {user: self._hash_password(password) for user, password in users.items()}
-        self._failed_attempts: Dict[str, list[float]] = {}
-        self._locked_until: Dict[str, float] = {}
+        self._session = session
 
-    @staticmethod
-    def _hash_password(password: str) -> str:
-        return hashlib.sha256(password.encode()).hexdigest()
-
-    def _password_matches(self, username: str, password: str) -> bool:
-        stored = self._users.get(username)
-        if stored is None:
-            return False
-        candidate = self._hash_password(password)
-        return hmac.compare_digest(stored, candidate)
-
-    def _record_failure(self, username: str) -> None:
-        now = time.time()
-        window_start = now - self._lockout_window.total_seconds()
-        attempts = [ts for ts in self._failed_attempts.get(username, []) if ts >= window_start]
-        attempts.append(now)
-        self._failed_attempts[username] = attempts
-        if len(attempts) >= self._lockout_threshold:
-            self._locked_until[username] = now + self._lockout_window.total_seconds()
-            self._failed_attempts[username] = []
-
-    def _clear_failures(self, username: str) -> None:
-        self._failed_attempts.pop(username, None)
-
-    def _is_locked(self, username: str) -> Tuple[bool, float | None]:
-        locked_until = self._locked_until.get(username)
-        if locked_until is None:
+    def _is_locked(self, user: User) -> Tuple[bool, float | None]:
+        if user.locked_until is None:
             return False, None
-        if locked_until <= time.time():
-            self._locked_until.pop(username, None)
+        locked_until_ts = user.locked_until.replace(tzinfo=timezone.utc).timestamp()
+        if locked_until_ts <= time.time():
+            user.locked_until = None
+            user.failed_attempts = 0
+            user.failed_first_at = None
+            self._session.add(user)
+            self._session.commit()
             return False, None
-        return True, locked_until
+        return True, locked_until_ts
 
     def authenticate(self, username: str, password: str) -> Tuple[str, int]:
-        locked, locked_until = self._is_locked(username)
+        user = self._session.exec(
+            select(User).where(User.username == username, User.deleted_at.is_(None))
+        ).first()
+        if user is None or not user.is_active:
+            raise AuthError("Invalid username or password")
+
+        locked, locked_until = self._is_locked(user)
         if locked and locked_until is not None:
             raise LockoutError(datetime.fromtimestamp(locked_until, tz=timezone.utc))
 
-        if not self._password_matches(username, password):
-            self._record_failure(username)
+        if not _verify_password(password, user.password_salt, user.password_hash):
+            now = datetime.now(tz=timezone.utc)
+            if not user.failed_first_at or (now - user.failed_first_at) > self._lockout_window:
+                user.failed_first_at = now
+                user.failed_attempts = 1
+            else:
+                user.failed_attempts += 1
+            if user.failed_attempts >= self._lockout_threshold:
+                user.locked_until = now + self._lockout_window
+                user.failed_attempts = 0
+                user.failed_first_at = None
+            user.updated_at = datetime.utcnow()
+            self._session.add(user)
+            self._session.commit()
             raise AuthError("Invalid username or password")
 
-        self._clear_failures(username)
+        user.failed_attempts = 0
+        user.failed_first_at = None
+        user.locked_until = None
+        user.updated_at = datetime.utcnow()
+        self._session.add(user)
+        self._session.commit()
         return self._create_token(username)
 
     def _create_token(self, username: str) -> Tuple[str, int]:
@@ -136,6 +131,10 @@ class AuthManager:
 
         if not username:
             raise AuthError("Invalid token payload")
+        user = self._session.exec(
+            select(User).where(User.username == username, User.deleted_at.is_(None))
+        ).first()
+        if user is None or not user.is_active:
+            raise AuthError("Invalid token payload")
 
         return username
-
