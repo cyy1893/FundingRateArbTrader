@@ -136,6 +136,12 @@ class User(SQLModel, table=True):
     failed_attempts: int = 0
     failed_first_at: Optional[datetime] = None
     locked_until: Optional[datetime] = None
+    lighter_account_index: Optional[int] = None
+    lighter_api_key_index: Optional[int] = None
+    lighter_private_key_enc: Optional[str] = None
+    grvt_api_key_enc: Optional[str] = None
+    grvt_private_key_enc: Optional[str] = None
+    grvt_trading_account_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     deleted_at: Optional[datetime] = Field(default=None, index=True)

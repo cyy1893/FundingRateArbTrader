@@ -15,9 +15,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     lighter_base_url: str = Field("https://mainnet.zklighter.elliot.ai", description="Lighter REST/WebSocket endpoint")
-    lighter_private_key: str = Field(..., description="Hex encoded L1 private key for the Lighter API key")
-    lighter_account_index: int = Field(..., description="Primary Lighter account index")
-    lighter_api_key_index: int = Field(..., description="API key slot to use when signing orders")
+    lighter_private_key: str = Field("", description="Deprecated: Lighter private key (use user credentials)")
+    lighter_account_index: int = Field(0, description="Deprecated: Lighter account index (use user credentials)")
+    lighter_api_key_index: int = Field(0, description="Deprecated: Lighter API key index (use user credentials)")
     lighter_max_api_key_index: Optional[int] = Field(
         default=None, description="Optional inclusive max api key index for multi key rotations"
     )
@@ -27,9 +27,9 @@ class Settings(BaseSettings):
     grvt_env: Literal["prod", "testnet", "staging", "dev"] = Field(
         "prod", description="Target GRVT environment for public market data"
     )
-    grvt_api_key: str = Field(..., description="GRVT API key for authenticated calls")
-    grvt_private_key: str = Field(..., description="GRVT private key used for signing")
-    grvt_trading_account_id: str = Field(..., description="GRVT trading account identifier")
+    grvt_api_key: str = Field("", description="Deprecated: GRVT API key (use user credentials)")
+    grvt_private_key: str = Field("", description="Deprecated: GRVT private key (use user credentials)")
+    grvt_trading_account_id: str = Field("", description="Deprecated: GRVT trading account id (use user credentials)")
     grvt_endpoint_version: str = Field("v1", description="GRVT REST endpoint version (GRVT_END_POINT_VERSION)")
     grvt_ws_stream_version: str = Field(
         "v1", description="GRVT websocket stream version (GRVT_WS_STREAM_VERSION)"
@@ -38,11 +38,15 @@ class Settings(BaseSettings):
         "",
         description="Deprecated: comma-separated username:password pairs for local auth",
     )
-    auth_jwt_secret: str = Field(..., description="Secret key used to sign JWTs")
+    auth_jwt_secret: str = Field("", description="Secret key used to sign JWTs")
     auth_jwt_algorithm: str = Field("HS256", description="JWT signing algorithm")
     auth_token_ttl_minutes: int = Field(7 * 24 * 60, description="Access token lifetime in minutes")
     auth_lockout_threshold: int = Field(3, description="Number of failed logins before lockout")
     auth_lockout_minutes: int = Field(60, description="Lockout duration in minutes after threshold is reached")
+    auth_crypto_key: str = Field(
+        "",
+        description="Base64-encoded symmetric key for encrypting private credentials",
+    )
     database_url: Optional[str] = Field(
         default=None, description="SQLAlchemy database URL (e.g. postgresql+psycopg://user:pass@host:5432/db)"
     )

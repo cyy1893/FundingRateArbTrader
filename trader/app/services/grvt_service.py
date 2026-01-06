@@ -40,7 +40,7 @@ class GrvtService:
         self._apply_env_overrides()
 
     async def start(self) -> None:
-        await self._ensure_client()
+        return
 
     async def stop(self) -> None:
         if self._client is not None:
@@ -51,75 +51,47 @@ class GrvtService:
 
     @property
     def is_ready(self) -> bool:
-        return self._client is not None
+        return True
 
     async def get_balances(self) -> GrvtBalanceSnapshot:
-        client = await self._ensure_client()
-        account_summary = await client.get_account_summary()
-        if not account_summary:
-            raise RuntimeError("GRVT account summary returned no data")
+        raise RuntimeError("Global GRVT credentials are disabled; use per-user credentials")
 
-        # Reuse SDK helper to compute free/used totals and enrich with raw summary fields.
-        ccxt_balances = client._get_balances_from_account_summary(account_summary)  # noqa: SLF001
+    async def get_balances_with_credentials(
+        self,
+        api_key: str,
+        private_key: str,
+        trading_account_id: str,
+    ) -> GrvtBalanceSnapshot:
+        client = await self._build_client_for_credentials(api_key, private_key, trading_account_id)
+        try:
+            account_summary = await client.get_account_summary()
+            if not account_summary:
+                raise RuntimeError("GRVT account summary returned no data")
 
-        assets: list[GrvtAssetBalance] = []
-        totals = ccxt_balances.get("total", {}) if isinstance(ccxt_balances, dict) else {}
-        free_map = ccxt_balances.get("free", {}) if isinstance(ccxt_balances, dict) else {}
-        used_map = ccxt_balances.get("used", {}) if isinstance(ccxt_balances, dict) else {}
-        for currency, total in totals.items():
-            free_value = free_map.get(currency)
-            used_value = used_map.get(currency)
-            usd_value = None
-            for balance in account_summary.get("spot_balances", []) or []:
-                if isinstance(balance, dict) and balance.get("currency") == currency:
-                    usd_value = self._to_float(balance.get("index_price")) * self._to_float(balance.get("balance"))
-                    break
-            assets.append(
-                GrvtAssetBalance(
-                    currency=currency,
-                    total=self._to_float(total),
-                    free=self._to_float(free_value),
-                    used=self._to_float(used_value),
-                    usd_value=usd_value,
-                )
-            )
-
-        positions: list[GrvtPositionBalance] = []
-        for position in account_summary.get("positions", []) or []:
-            if not isinstance(position, dict):
-                continue
-            positions.append(
-                GrvtPositionBalance(
-                    instrument=str(position.get("instrument", "")),
-                    size=self._to_float(position.get("size")),
-                    notional=self._to_float(position.get("notional")),
-                    entry_price=self._to_float(position.get("entry_price")),
-                    mark_price=self._to_float(position.get("mark_price")),
-                    unrealized_pnl=self._to_float(position.get("unrealized_pnl")),
-                    realized_pnl=self._to_float(position.get("realized_pnl")),
-                    total_pnl=self._to_float(position.get("total_pnl")),
-                    leverage=self._to_float(position.get("leverage")),
-                )
-            )
-
-        return GrvtBalanceSnapshot(
-            sub_account_id=str(account_summary.get("sub_account_id", "")),
-            settle_currency=str(account_summary.get("settle_currency", "")),
-            available_balance=self._to_float(account_summary.get("available_balance")),
-            total_equity=self._to_float(account_summary.get("total_equity")),
-            unrealized_pnl=self._to_float(account_summary.get("unrealized_pnl")),
-            timestamp=self._parse_timestamp(account_summary.get("event_time")),
-            balances=assets,
-            positions=positions,
-        )
+            return self._build_balance_snapshot(client, account_summary)
+        finally:
+            close = getattr(client, "close", None)
+            if close:
+                result = close()
+                if asyncio.iscoroutine(result):
+                    await result
 
     async def stream_orderbook(self, symbol: str, depth: int) -> asyncio.AsyncIterator[VenueOrderBook]:
         """
         Stream GRVT order books over WebSocket (market data only).
         """
+        raise RuntimeError("Global GRVT credentials are disabled; use per-user credentials")
 
-        instrument = await self._get_instrument(symbol)
-        client = await self._ensure_client()
+    async def stream_orderbook_with_credentials(
+        self,
+        symbol: str,
+        depth: int,
+        api_key: str,
+        private_key: str,
+        trading_account_id: str,
+    ) -> asyncio.AsyncIterator[VenueOrderBook]:
+        client = await self._build_client_for_credentials(api_key, private_key, trading_account_id)
+        instrument = await self._get_instrument_with_client(client, symbol)
         await client.refresh_cookie()
         cookie = getattr(client, "_cookie", {}) or {}
         gravity = cookie.get("gravity")
@@ -189,14 +161,32 @@ class GrvtService:
             ws_task.cancel()
             fallback_task.cancel()
             await asyncio.gather(ws_task, fallback_task, return_exceptions=True)
+            close = getattr(client, "close", None)
+            if close:
+                result = close()
+                if asyncio.iscoroutine(result):
+                    await result
 
     async def stream_trades(self, symbol: str, limit: int = 50) -> asyncio.AsyncIterator[list[TradeEntry]]:
         """
         Stream recent trades over WebSocket; falls back to HTTP if WS has not yielded yet.
         """
+        raise RuntimeError("Global GRVT credentials are disabled; use per-user credentials")
 
-        instrument = await self._get_instrument(symbol)
-        client = await self._ensure_client()
+    async def stream_trades_with_credentials(
+        self,
+        symbol: str,
+        limit: int,
+        api_key: str,
+        private_key: str,
+        trading_account_id: str,
+    ) -> asyncio.AsyncIterator[list[TradeEntry]]:
+        """
+        Stream recent trades over WebSocket; falls back to HTTP if WS has not yielded yet.
+        """
+
+        client = await self._build_client_for_credentials(api_key, private_key, trading_account_id)
+        instrument = await self._get_instrument_with_client(client, symbol)
         await client.refresh_cookie()
         cookie = getattr(client, "_cookie", {}) or {}
         gravity = cookie.get("gravity")
@@ -265,64 +255,148 @@ class GrvtService:
             ws_task.cancel()
             fallback_task.cancel()
             await asyncio.gather(ws_task, fallback_task, return_exceptions=True)
+            close = getattr(client, "close", None)
+            if close:
+                result = close()
+                if asyncio.iscoroutine(result):
+                    await result
 
     async def place_order(self, request: GrvtOrderRequest) -> GrvtOrderResponse:
-        client = await self._ensure_client()
-        instrument = await self._get_instrument(request.symbol)
-        market = (client.markets or {}).get(instrument, {})
-        amount = self._normalize_amount(request.amount, market)
-        price = self._normalize_price(request.price, market)
-        params: dict[str, Any] = {
-            "post_only": request.post_only,
-            "reduce_only": request.reduce_only,
-            "order_duration_secs": request.order_duration_secs,
-            "time_in_force": "GOOD_TILL_TIME",
-        }
-        if request.client_order_id is not None:
-            params["client_order_id"] = request.client_order_id
+        raise RuntimeError("Global GRVT credentials are disabled; use per-user credentials")
 
-        response = await client.create_order(
-            instrument,
-            "limit",
-            request.side,
-            amount,
-            price,
-            params,
-        )
-        return GrvtOrderResponse(payload=response or {})
+    async def place_order_with_credentials(
+        self,
+        request: GrvtOrderRequest,
+        api_key: str,
+        private_key: str,
+        trading_account_id: str,
+    ) -> GrvtOrderResponse:
+        client = await self._build_client_for_credentials(api_key, private_key, trading_account_id)
+        try:
+            instrument = await self._get_instrument_with_client(client, request.symbol)
+            market = (client.markets or {}).get(instrument, {})
+            amount = self._normalize_amount(request.amount, market)
+            price = self._normalize_price(request.price, market)
+            params: dict[str, Any] = {
+                "post_only": request.post_only,
+                "reduce_only": request.reduce_only,
+                "order_duration_secs": request.order_duration_secs,
+                "time_in_force": "GOOD_TILL_TIME",
+            }
+            if request.client_order_id is not None:
+                params["client_order_id"] = request.client_order_id
+
+            response = await client.create_order(
+                instrument,
+                "limit",
+                request.side,
+                amount,
+                price,
+                params,
+            )
+            return GrvtOrderResponse(payload=response or {})
+        finally:
+            close = getattr(client, "close", None)
+            if close:
+                result = close()
+                if asyncio.iscoroutine(result):
+                    await result
 
     async def _ensure_client(self) -> GrvtCcxtPro:
-        if self._client is not None:
-            return self._client
+        raise RuntimeError("Global GRVT credentials are disabled; use per-user credentials")
 
-        async with self._lock:
-            if self._client is not None:
-                return self._client
+    def _build_balance_snapshot(self, client: GrvtCcxtPro, account_summary: dict[str, Any]) -> GrvtBalanceSnapshot:
+        # Reuse SDK helper to compute free/used totals and enrich with raw summary fields.
+        ccxt_balances = client._get_balances_from_account_summary(account_summary)  # noqa: SLF001
 
-            missing: list[str] = []
-            if not self._settings.grvt_api_key:
-                missing.append("GRVT_API_KEY")
-            if not self._settings.grvt_private_key:
-                missing.append("GRVT_PRIVATE_KEY")
-            if not self._settings.grvt_trading_account_id:
-                missing.append("GRVT_TRADING_ACCOUNT_ID")
-            if missing:
-                raise RuntimeError(f"Missing GRVT configuration: {', '.join(missing)}")
+        assets: list[GrvtAssetBalance] = []
+        totals = ccxt_balances.get("total", {}) if isinstance(ccxt_balances, dict) else {}
+        free_map = ccxt_balances.get("free", {}) if isinstance(ccxt_balances, dict) else {}
+        used_map = ccxt_balances.get("used", {}) if isinstance(ccxt_balances, dict) else {}
+        for currency, total in totals.items():
+            free_value = free_map.get(currency)
+            used_value = used_map.get(currency)
+            usd_value = None
+            for balance in account_summary.get("spot_balances", []) or []:
+                if isinstance(balance, dict) and balance.get("currency") == currency:
+                    usd_value = self._to_float(balance.get("index_price")) * self._to_float(balance.get("balance"))
+                    break
+            assets.append(
+                GrvtAssetBalance(
+                    currency=currency,
+                    total=self._to_float(total),
+                    free=self._to_float(free_value),
+                    used=self._to_float(used_value),
+                    usd_value=usd_value,
+                )
+            )
 
-            try:
-                env = GrvtEnv(self._settings.grvt_env)
-            except ValueError as exc:
-                raise RuntimeError(f"Invalid GRVT environment: {self._settings.grvt_env}") from exc
+        positions: list[GrvtPositionBalance] = []
+        for position in account_summary.get("positions", []) or []:
+            if not isinstance(position, dict):
+                continue
+            positions.append(
+                GrvtPositionBalance(
+                    instrument=str(position.get("instrument", "")),
+                    size=self._to_float(position.get("size")),
+                    notional=self._to_float(position.get("notional")),
+                    entry_price=self._to_float(position.get("entry_price")),
+                    mark_price=self._to_float(position.get("mark_price")),
+                    unrealized_pnl=self._to_float(position.get("unrealized_pnl")),
+                    realized_pnl=self._to_float(position.get("realized_pnl")),
+                    total_pnl=self._to_float(position.get("total_pnl")),
+                    leverage=self._to_float(position.get("leverage")),
+                )
+            )
 
-            parameters = {
-                "trading_account_id": self._settings.grvt_trading_account_id,
-                "private_key": self._settings.grvt_private_key,
-                "api_key": self._settings.grvt_api_key,
-            }
-            self._client = GrvtCcxtPro(env=env, parameters=parameters)
-            await self._client.load_markets()
+        return GrvtBalanceSnapshot(
+            sub_account_id=str(account_summary.get("sub_account_id", "")),
+            settle_currency=str(account_summary.get("settle_currency", "")),
+            available_balance=self._to_float(account_summary.get("available_balance")),
+            total_equity=self._to_float(account_summary.get("total_equity")),
+            unrealized_pnl=self._to_float(account_summary.get("unrealized_pnl")),
+            timestamp=self._parse_timestamp(account_summary.get("event_time")),
+            balances=assets,
+            positions=positions,
+        )
 
-        return self._client
+    async def _build_client_for_credentials(
+        self,
+        api_key: str,
+        private_key: str,
+        trading_account_id: str,
+    ) -> GrvtCcxtPro:
+        try:
+            env = GrvtEnv(self._settings.grvt_env)
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid GRVT environment: {self._settings.grvt_env}") from exc
+
+        parameters = {
+            "trading_account_id": trading_account_id,
+            "private_key": private_key,
+            "api_key": api_key,
+        }
+        client = GrvtCcxtPro(env=env, parameters=parameters)
+        await client.load_markets()
+        return client
+
+    async def _get_instrument_with_client(self, client: GrvtCcxtPro, symbol: str) -> str:
+        normalized = symbol.strip().upper().replace("-PERP", "").replace("_PERP", "")
+        async with self._instrument_lock:
+            if normalized in self._instrument_map:
+                return self._instrument_map[normalized]
+
+            markets = await client.fetch_markets({"is_active": True, "kind": "PERPETUAL"})
+            for entry in markets:
+                base = str(entry.get("base", "")).upper()
+                instrument = str(entry.get("instrument", "")).strip()
+                if not base or not instrument:
+                    continue
+                self._instrument_map[base] = instrument
+
+            if normalized not in self._instrument_map:
+                raise ValueError(f"GRVT instrument not found for symbol {normalized}")
+            return self._instrument_map[normalized]
 
     async def _get_instrument(self, symbol: str) -> str:
         normalized = symbol.strip().upper().replace("-PERP", "").replace("_PERP", "")

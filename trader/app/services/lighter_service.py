@@ -57,7 +57,7 @@ class LighterService:
         self._logger = logging.getLogger(__name__)
 
     async def start(self) -> None:
-        await self._ensure_client()
+        return
 
     async def stop(self) -> None:
         if self._client is not None:
@@ -68,79 +68,21 @@ class LighterService:
             self._http_client = None
 
     async def _ensure_client(self) -> SignerClient:
-        if self._client is not None:
-            return self._client
-
-        async with self._lock:
-            if self._client is not None:
-                return self._client
-
-            nonce_type = nonce_manager.NonceManagerType.OPTIMISTIC
-            if self._settings.lighter_nonce_manager.lower() == "api":
-                nonce_type = nonce_manager.NonceManagerType.API
-
-            client = SignerClient(
-                url=self._settings.lighter_base_url,
-                account_index=self._settings.lighter_account_index,
-                api_private_keys={self._settings.lighter_api_key_index: self._settings.lighter_private_key},
-                nonce_management_type=nonce_type,
-            )
-
-            err = client.check_client()
-            if err is not None:
-                raise RuntimeError(f"Lighter API key validation failed: {err}")
-            self._client = client
-
-        return self._client
+        raise RuntimeError("Global Lighter credentials are disabled; use per-user credentials")
 
     async def place_order(self, request: LighterOrderRequest) -> LighterOrderResponse:
-        client = await self._ensure_client()
-
-        if request.order_type == "market":
-            payload, tx_hash, err = await client.create_market_order(
-                market_index=request.market_index,
-                client_order_index=request.client_order_index,
-                base_amount=request.base_amount,
-                avg_execution_price=request.avg_execution_price,  # type: ignore[arg-type]
-                is_ask=request.is_ask,
-                reduce_only=request.reduce_only,
-                nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
-                api_key_index=request.api_key_index if request.api_key_index is not None else SignerClient.DEFAULT_API_KEY_INDEX,
-            )
-        else:
-            time_in_force = {
-                "ioc": SignerClient.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,
-                "gtc": SignerClient.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
-                "post_only": SignerClient.ORDER_TIME_IN_FORCE_POST_ONLY,
-            }[request.time_in_force]
-
-            payload, tx_hash, err = await client.create_order(
-                market_index=request.market_index,
-                client_order_index=request.client_order_index,
-                base_amount=request.base_amount,
-                price=request.price,  # type: ignore[arg-type]
-                is_ask=request.is_ask,
-                order_type=SignerClient.ORDER_TYPE_LIMIT,
-                time_in_force=time_in_force,
-                reduce_only=request.reduce_only,
-                trigger_price=request.trigger_price or SignerClient.NIL_TRIGGER_PRICE,
-                order_expiry=request.order_expiry_secs or SignerClient.DEFAULT_28_DAY_ORDER_EXPIRY,
-                nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
-                api_key_index=request.api_key_index if request.api_key_index is not None else SignerClient.DEFAULT_API_KEY_INDEX,
-            )
-
-        if err is not None:
-            raise RuntimeError(f"Lighter create order failed: {err}")
-
-        payload_dict = json.loads(payload.to_json()) if payload is not None else {}
-        tx_hash_value = tx_hash.tx_hash if tx_hash is not None else ""
-
-        return LighterOrderResponse(
-            tx_hash=tx_hash_value,
-            payload=payload_dict,
-        )
+        raise RuntimeError("Global Lighter credentials are disabled; use per-user credentials")
 
     async def place_order_by_symbol(self, request: LighterSymbolOrderRequest) -> LighterOrderResponse:
+        raise RuntimeError("Global Lighter credentials are disabled; use per-user credentials")
+
+    async def place_order_by_symbol_with_credentials(
+        self,
+        request: LighterSymbolOrderRequest,
+        account_index: int,
+        api_key_index: int,
+        private_key: str,
+    ) -> LighterOrderResponse:
         market_index = await self._get_market_id(request.symbol)
         meta = await self._get_market_meta(request.symbol)
 
@@ -185,98 +127,197 @@ class LighterService:
             quote_amount,
         )
 
-        normalized = LighterOrderRequest(
-            market_index=market_index,
-            client_order_index=request.client_order_index,
-            base_amount=base_amount,
-            is_ask=request.side == "sell",
-            order_type="limit",
-            price=price,
-            reduce_only=request.reduce_only,
-            time_in_force=request.time_in_force,
-            order_expiry_secs=request.order_expiry_secs,
-            api_key_index=request.api_key_index,
-        )
-        return await self.place_order(normalized)
+        client = await self._build_client_for_credentials(account_index, api_key_index, private_key)
+        try:
+            time_in_force = {
+                "ioc": SignerClient.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,
+                "gtc": SignerClient.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
+                "post_only": SignerClient.ORDER_TIME_IN_FORCE_POST_ONLY,
+            }[request.time_in_force]
+            effective_api_key_index = request.api_key_index if request.api_key_index is not None else api_key_index
+
+            payload, tx_hash, err = await client.create_order(
+                market_index=market_index,
+                client_order_index=request.client_order_index,
+                base_amount=base_amount,
+                price=price,
+                is_ask=request.side == "sell",
+                order_type=SignerClient.ORDER_TYPE_LIMIT,
+                time_in_force=time_in_force,
+                reduce_only=request.reduce_only,
+                trigger_price=request.trigger_price or SignerClient.NIL_TRIGGER_PRICE,
+                order_expiry=request.order_expiry_secs or SignerClient.DEFAULT_28_DAY_ORDER_EXPIRY,
+                nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
+                api_key_index=effective_api_key_index,
+            )
+            if err is not None:
+                raise RuntimeError(f"Lighter create order failed: {err}")
+
+            payload_dict = json.loads(payload.to_json()) if payload is not None else {}
+            tx_hash_value = tx_hash.tx_hash if tx_hash is not None else ""
+            return LighterOrderResponse(
+                tx_hash=tx_hash_value,
+                payload=payload_dict,
+            )
+        finally:
+            await client.close()
+
+    async def place_order_with_credentials(
+        self,
+        request: LighterOrderRequest,
+        account_index: int,
+        api_key_index: int,
+        private_key: str,
+    ) -> LighterOrderResponse:
+        client = await self._build_client_for_credentials(account_index, api_key_index, private_key)
+        try:
+            if request.order_type == "market":
+                payload, tx_hash, err = await client.create_market_order(
+                    market_index=request.market_index,
+                    client_order_index=request.client_order_index,
+                    base_amount=request.base_amount,
+                    avg_execution_price=request.avg_execution_price,  # type: ignore[arg-type]
+                    is_ask=request.is_ask,
+                    reduce_only=request.reduce_only,
+                    nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
+                    api_key_index=request.api_key_index if request.api_key_index is not None else api_key_index,
+                )
+            else:
+                time_in_force = {
+                    "ioc": SignerClient.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,
+                    "gtc": SignerClient.ORDER_TIME_IN_FORCE_GOOD_TILL_TIME,
+                    "post_only": SignerClient.ORDER_TIME_IN_FORCE_POST_ONLY,
+                }[request.time_in_force]
+
+                payload, tx_hash, err = await client.create_order(
+                    market_index=request.market_index,
+                    client_order_index=request.client_order_index,
+                    base_amount=request.base_amount,
+                    price=request.price,  # type: ignore[arg-type]
+                    is_ask=request.is_ask,
+                    order_type=SignerClient.ORDER_TYPE_LIMIT,
+                    time_in_force=time_in_force,
+                    reduce_only=request.reduce_only,
+                    trigger_price=request.trigger_price or SignerClient.NIL_TRIGGER_PRICE,
+                    order_expiry=request.order_expiry_secs or SignerClient.DEFAULT_28_DAY_ORDER_EXPIRY,
+                    nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
+                    api_key_index=request.api_key_index if request.api_key_index is not None else api_key_index,
+                )
+
+            if err is not None:
+                raise RuntimeError(f"Lighter create order failed: {err}")
+
+            payload_dict = json.loads(payload.to_json()) if payload is not None else {}
+            tx_hash_value = tx_hash.tx_hash if tx_hash is not None else ""
+
+            return LighterOrderResponse(
+                tx_hash=tx_hash_value,
+                payload=payload_dict,
+            )
+        finally:
+            await client.close()
 
     async def update_leverage_by_symbol(self, request: LighterLeverageRequest) -> LighterLeverageResponse:
+        raise RuntimeError("Global Lighter credentials are disabled; use per-user credentials")
+
+    async def update_leverage_by_symbol_with_credentials(
+        self,
+        request: LighterLeverageRequest,
+        account_index: int,
+        api_key_index: int,
+        private_key: str,
+    ) -> LighterLeverageResponse:
         if request.leverage <= 0:
             raise ValueError("Invalid leverage for Lighter")
 
-        client = await self._ensure_client()
-        market_index = await self._get_market_id(request.symbol)
-        margin_mode = (
-            SignerClient.CROSS_MARGIN_MODE
-            if request.margin_mode == "cross"
-            else SignerClient.ISOLATED_MARGIN_MODE
-        )
+        client = await self._build_client_for_credentials(account_index, api_key_index, private_key)
+        try:
+            market_index = await self._get_market_id(request.symbol)
+            margin_mode = (
+                SignerClient.CROSS_MARGIN_MODE
+                if request.margin_mode == "cross"
+                else SignerClient.ISOLATED_MARGIN_MODE
+            )
 
-        payload, response, err = await client.update_leverage(
-            market_index=market_index,
-            margin_mode=margin_mode,
-            leverage=request.leverage,
-            nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
-            api_key_index=request.api_key_index if request.api_key_index is not None else SignerClient.DEFAULT_API_KEY_INDEX,
-        )
-        if err is not None:
-            raise RuntimeError(f"Lighter update leverage failed: {err}")
+            payload, response, err = await client.update_leverage(
+                market_index=market_index,
+                margin_mode=margin_mode,
+                leverage=request.leverage,
+                nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
+                api_key_index=request.api_key_index if request.api_key_index is not None else api_key_index,
+            )
+            if err is not None:
+                raise RuntimeError(f"Lighter update leverage failed: {err}")
 
-        payload_dict: dict[str, Any]
-        if isinstance(payload, str):
-            try:
-                payload_dict = json.loads(payload)
-            except json.JSONDecodeError:
-                payload_dict = {"payload": payload}
-        else:
-            payload_dict = payload.to_json() if payload is not None else {}
-            if isinstance(payload_dict, str):
+            payload_dict: dict[str, Any]
+            if isinstance(payload, str):
                 try:
-                    payload_dict = json.loads(payload_dict)
+                    payload_dict = json.loads(payload)
                 except json.JSONDecodeError:
-                    payload_dict = {"payload": payload_dict}
+                    payload_dict = {"payload": payload}
+            else:
+                payload_dict = payload.to_json() if payload is not None else {}
+                if isinstance(payload_dict, str):
+                    try:
+                        payload_dict = json.loads(payload_dict)
+                    except json.JSONDecodeError:
+                        payload_dict = {"payload": payload_dict}
 
-        response_dict: dict[str, Any]
-        if isinstance(response, dict):
-            response_dict = response
-        else:
-            response_dict = {"response": str(response)} if response is not None else {}
+            response_dict: dict[str, Any]
+            if isinstance(response, dict):
+                response_dict = response
+            else:
+                response_dict = {"response": str(response)} if response is not None else {}
 
-        return LighterLeverageResponse(payload=payload_dict, response=response_dict)
+            return LighterLeverageResponse(payload=payload_dict, response=response_dict)
+        finally:
+            await client.close()
 
     async def get_balances(self) -> LighterBalanceSnapshot:
-        client = await self._ensure_client()
-        account_api = AccountApi(client.api_client)
-        account_response = await account_api.account(
-            by="index", value=str(self._settings.lighter_account_index)
-        )
+        raise RuntimeError("Global Lighter credentials are disabled; use per-user credentials")
 
-        if not account_response.accounts:
-            raise RuntimeError("Lighter account response did not include any accounts")
-
-        account = account_response.accounts[0]
-        positions = [
-            LighterPositionBalance(
-                market_id=position.market_id,
-                symbol=position.symbol,
-                sign=position.sign,
-                position=self._to_float(position.position),
-                avg_entry_price=self._to_float(position.avg_entry_price),
-                position_value=self._to_float(position.position_value),
-                unrealized_pnl=self._to_float(position.unrealized_pnl),
-                realized_pnl=self._to_float(position.realized_pnl),
-                allocated_margin=self._to_float(position.allocated_margin),
+    async def get_balances_with_credentials(
+        self,
+        account_index: int,
+        api_key_index: int,
+        private_key: str,
+    ) -> LighterBalanceSnapshot:
+        client = await self._build_client_for_credentials(account_index, api_key_index, private_key)
+        try:
+            account_api = AccountApi(client.api_client)
+            account_response = await account_api.account(
+                by="index", value=str(account_index)
             )
-            for position in (account.positions or [])
-        ]
 
-        return LighterBalanceSnapshot(
-            account_index=account.account_index,
-            available_balance=self._to_float(account.available_balance),
-            collateral=self._to_float(account.collateral),
-            total_asset_value=self._to_float(account.total_asset_value),
-            cross_asset_value=self._to_float(account.cross_asset_value),
-            positions=positions,
-        )
+            if not account_response.accounts:
+                raise RuntimeError("Lighter account response did not include any accounts")
+
+            account = account_response.accounts[0]
+            positions = [
+                LighterPositionBalance(
+                    market_id=position.market_id,
+                    symbol=position.symbol,
+                    sign=position.sign,
+                    position=self._to_float(position.position),
+                    avg_entry_price=self._to_float(position.avg_entry_price),
+                    position_value=self._to_float(position.position_value),
+                    unrealized_pnl=self._to_float(position.unrealized_pnl),
+                    realized_pnl=self._to_float(position.realized_pnl),
+                    allocated_margin=self._to_float(position.allocated_margin),
+                )
+                for position in (account.positions or [])
+            ]
+
+            return LighterBalanceSnapshot(
+                account_index=account.account_index,
+                available_balance=self._to_float(account.available_balance),
+                collateral=self._to_float(account.collateral),
+                total_asset_value=self._to_float(account.total_asset_value),
+                cross_asset_value=self._to_float(account.cross_asset_value),
+                positions=positions,
+            )
+        finally:
+            await client.close()
 
     async def stream_orderbook(
         self,
@@ -309,7 +350,7 @@ class LighterService:
 
     @property
     def is_ready(self) -> bool:
-        return self._client is not None
+        return True
 
     @staticmethod
     def _to_float(value: Optional[str]) -> float:
@@ -546,6 +587,27 @@ class LighterService:
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(timeout=5.0)
         return self._http_client
+
+    async def _build_client_for_credentials(
+        self,
+        account_index: int,
+        api_key_index: int,
+        private_key: str,
+    ) -> SignerClient:
+        nonce_type = nonce_manager.NonceManagerType.OPTIMISTIC
+        if self._settings.lighter_nonce_manager.lower() == "api":
+            nonce_type = nonce_manager.NonceManagerType.API
+
+        client = SignerClient(
+            url=self._settings.lighter_base_url,
+            account_index=account_index,
+            api_private_keys={api_key_index: private_key},
+            nonce_management_type=nonce_type,
+        )
+        err = client.check_client()
+        if err is not None:
+            raise RuntimeError(f"Lighter API key validation failed: {err}")
+        return client
 
     @staticmethod
     def _build_ws_endpoint(base_url: str) -> str:

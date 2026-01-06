@@ -480,3 +480,24 @@ class ArbStatusResponse(BaseModel):
     arb_position: ArbPositionSnapshot
     risk_tasks: list[RiskTaskSnapshot]
     order_logs: list[OrderLogSnapshot]
+
+
+class AdminCreateUserRequest(BaseModel):
+    username: str
+    password: str
+    is_admin: bool = False
+    is_active: bool = True
+    lighter_account_index: int | None = None
+    lighter_api_key_index: int | None = None
+    lighter_private_key: str | None = None
+    grvt_api_key: str | None = None
+    grvt_private_key: str | None = None
+    grvt_trading_account_id: str | None = None
+
+
+class AdminUserResponse(BaseModel):
+    id: str
+    username: str
+    is_admin: bool
+    is_active: bool
+    created_at: datetime

@@ -43,6 +43,21 @@ uvicorn app.main:app --reload --port 8080
 
 The service attempts to connect to Lighter during startup. If the connection fails (bad base URL, auth failure, etc.) the app will exit with a descriptive error so you can fix the configuration.
 
+### 2.1 Create an admin user (database-backed login)
+
+First apply migrations, then create an admin user via the CLI tool:
+
+```bash
+alembic upgrade head
+python -m app.utils.user_admin create --username admin --password "StrongPass" --admin
+```
+
+To change an existing user's password:
+
+```bash
+python -m app.utils.user_admin set-password --username admin --password "NewPass"
+```
+
 ### 3. REST Endpoints
 
 #### `POST /orders/lighter`

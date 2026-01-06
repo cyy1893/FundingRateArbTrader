@@ -10,7 +10,8 @@ from typing import Any, Dict
 from fastapi import Depends, FastAPI, HTTPException, Security, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlmodel import Session
+from sqlmodel import Session, select
+import os
 
 from app.config import get_settings
 from app.events import EventBroadcaster
@@ -22,6 +23,8 @@ from app.models import (
     ArbOpenRequest,
     ArbOpenResponse,
     ArbStatusResponse,
+    AdminCreateUserRequest,
+    AdminUserResponse,
     BalancesResponse,
     AvailableSymbolsRequest,
     AvailableSymbolsResponse,
@@ -46,13 +49,14 @@ from app.models import (
     PerpSnapshot,
     PerpSnapshotRequest,
 )
-from app.db_models import ArbPositionStatus, OrderLog, OrderStatus
+from app.db_models import ArbPositionStatus, OrderLog, OrderStatus, User
 from app.db_session import get_session
 from app.services.arb_service import ArbService
 from app.services.lighter_service import LighterService
 from app.services.grvt_service import GrvtService
 from app.services.market_data_service import MarketDataService
-from app.utils.auth import AuthError, AuthManager, LockoutError
+from app.utils.auth import AuthError, AuthManager, LockoutError, _hash_password
+from app.utils.crypto import decrypt_secret, encrypt_secret
 
 
 logging.getLogger().setLevel(logging.INFO)
@@ -115,14 +119,54 @@ def get_auth_manager(session: Session = Depends(get_session)) -> AuthManager:
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Security(auth_scheme),
     manager: AuthManager = Depends(get_auth_manager),
-) -> str:
+    session: Session = Depends(get_session),
+) -> User:
     try:
-        return manager.validate_token(credentials.credentials)
+        username = manager.validate_token(credentials.credentials)
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=exc.message) from exc
+    user = session.exec(select(User).where(User.username == username, User.deleted_at.is_(None))).first()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    return user
 
 
-async def authenticate_websocket(websocket: WebSocket, manager: AuthManager) -> str:
+def get_current_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
+    return user
+
+
+def _get_lighter_credentials(user: User) -> tuple[int, int, str]:
+    if user.lighter_account_index is None or user.lighter_api_key_index is None or not user.lighter_private_key_enc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing Lighter credentials for user")
+    try:
+        private_key = decrypt_secret(user.lighter_private_key_enc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return user.lighter_account_index, user.lighter_api_key_index, private_key
+
+
+def _get_grvt_credentials(user: User) -> tuple[str, str, str]:
+    if (
+        not user.grvt_api_key_enc
+        or not user.grvt_private_key_enc
+        or not user.grvt_trading_account_id
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing GRVT credentials for user")
+    try:
+        api_key = decrypt_secret(user.grvt_api_key_enc)
+        private_key = decrypt_secret(user.grvt_private_key_enc)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return api_key, private_key, user.grvt_trading_account_id
+
+
+async def authenticate_websocket(
+    websocket: WebSocket,
+    manager: AuthManager,
+    session: Session,
+) -> User:
     token = websocket.query_params.get("token")
     if not token:
         auth_header = websocket.headers.get("authorization")
@@ -134,10 +178,15 @@ async def authenticate_websocket(websocket: WebSocket, manager: AuthManager) -> 
         raise WebSocketDisconnect
 
     try:
-        return manager.validate_token(token)
+        username = manager.validate_token(token)
     except AuthError as exc:
         await websocket.close(code=1008, reason=exc.message)
         raise WebSocketDisconnect
+    user = session.exec(select(User).where(User.username == username, User.deleted_at.is_(None))).first()
+    if user is None or not user.is_active:
+        await websocket.close(code=1008, reason="Invalid token payload")
+        raise WebSocketDisconnect
+    return user
 
 
 @app.get("/health")
@@ -153,11 +202,21 @@ async def health() -> Dict[str, Any]:
 async def balances(
     lighter: LighterService = Depends(get_lighter_service),
     grvt: GrvtService = Depends(get_grvt_service),
-    _: str = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> BalancesResponse:
+    lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(user)
+    grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(user)
     lighter_result, grvt_result = await asyncio.gather(
-        lighter.get_balances(),
-        grvt.get_balances(),
+        lighter.get_balances_with_credentials(
+            lighter_account_index,
+            lighter_api_key_index,
+            lighter_private_key,
+        ),
+        grvt.get_balances_with_credentials(
+            grvt_api_key,
+            grvt_private_key,
+            grvt_trading_account_id,
+        ),
         return_exceptions=True,
     )
 
@@ -178,10 +237,16 @@ async def create_lighter_order(
     order: LighterOrderRequest,
     service: LighterService = Depends(get_lighter_service),
     broadcaster: EventBroadcaster = Depends(get_broadcaster),
-    _: str = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     try:
-        response = await service.place_order(order)
+        account_index, api_key_index, private_key = _get_lighter_credentials(user)
+        response = await service.place_order_with_credentials(
+            order,
+            account_index=account_index,
+            api_key_index=api_key_index,
+            private_key=private_key,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
@@ -200,10 +265,16 @@ async def create_lighter_order_by_symbol(
     order: LighterSymbolOrderRequest,
     service: LighterService = Depends(get_lighter_service),
     broadcaster: EventBroadcaster = Depends(get_broadcaster),
-    _: str = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     try:
-        response = await service.place_order_by_symbol(order)
+        account_index, api_key_index, private_key = _get_lighter_credentials(user)
+        response = await service.place_order_by_symbol_with_credentials(
+            order,
+            account_index=account_index,
+            api_key_index=api_key_index,
+            private_key=private_key,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
@@ -221,10 +292,16 @@ async def create_lighter_order_by_symbol(
 async def update_lighter_leverage(
     request: LighterLeverageRequest,
     service: LighterService = Depends(get_lighter_service),
-    _: str = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     try:
-        return await service.update_leverage_by_symbol(request)
+        account_index, api_key_index, private_key = _get_lighter_credentials(user)
+        return await service.update_leverage_by_symbol_with_credentials(
+            request,
+            account_index=account_index,
+            api_key_index=api_key_index,
+            private_key=private_key,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
@@ -234,10 +311,16 @@ async def create_grvt_order(
     order: GrvtOrderRequest,
     service: GrvtService = Depends(get_grvt_service),
     broadcaster: EventBroadcaster = Depends(get_broadcaster),
-    _: str = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     try:
-        response = await service.place_order(order)
+        api_key, private_key, trading_account_id = _get_grvt_credentials(user)
+        response = await service.place_order_with_credentials(
+            order,
+            api_key=api_key,
+            private_key=private_key,
+            trading_account_id=trading_account_id,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
@@ -257,12 +340,15 @@ async def open_arb_position(
     session: Session = Depends(get_session),
     lighter: LighterService = Depends(get_lighter_service),
     grvt: GrvtService = Depends(get_grvt_service),
-    _: str = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> ArbOpenResponse:
     try:
         position, risk_tasks = ArbService(session).open_position(request)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(user)
+    grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(user)
 
     now = datetime.utcnow()
     client_base = int(now.timestamp() * 1000) % 2_147_483_647
@@ -312,7 +398,12 @@ async def open_arb_position(
                     reduce_only=False,
                     time_in_force="post_only",
                 )
-                response = await lighter.place_order_by_symbol(order)
+                response = await lighter.place_order_by_symbol_with_credentials(
+                    order,
+                    account_index=lighter_account_index,
+                    api_key_index=lighter_api_key_index,
+                    private_key=lighter_private_key,
+                )
                 _record_order(
                     venue="lighter",
                     side=side,
@@ -334,7 +425,12 @@ async def open_arb_position(
                 order_duration_secs=10,
                 client_order_id=client_index,
             )
-            response = await grvt.place_order(order)
+            response = await grvt.place_order_with_credentials(
+                order,
+                api_key=grvt_api_key,
+                private_key=grvt_private_key,
+                trading_account_id=grvt_trading_account_id,
+            )
             _record_order(
                 venue="grvt",
                 side=side,
@@ -400,7 +496,7 @@ async def open_arb_position(
 async def close_arb_position(
     request: ArbCloseRequest,
     session: Session = Depends(get_session),
-    _: str = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> ArbCloseResponse:
     try:
         return ArbService(session).close_position(request)
@@ -412,7 +508,7 @@ async def close_arb_position(
 async def get_arb_status(
     arb_position_id: str,
     session: Session = Depends(get_session),
-    _: str = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> ArbStatusResponse:
     try:
         return ArbService(session).get_status(arb_position_id)
@@ -524,14 +620,66 @@ async def login(
     return LoginResponse(access_token=token, expires_in=expires_in)
 
 
+@app.post("/admin/users", response_model=AdminUserResponse)
+async def create_user(
+    payload: AdminCreateUserRequest,
+    session: Session = Depends(get_session),
+    _: User = Depends(get_current_admin),
+) -> AdminUserResponse:
+    existing = session.exec(
+        select(User).where(User.username == payload.username, User.deleted_at.is_(None))
+    ).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
+
+    salt = os.urandom(16)
+    now = datetime.utcnow()
+    try:
+        lighter_private_key_enc = (
+            encrypt_secret(payload.lighter_private_key) if payload.lighter_private_key else None
+        )
+        grvt_api_key_enc = encrypt_secret(payload.grvt_api_key) if payload.grvt_api_key else None
+        grvt_private_key_enc = encrypt_secret(payload.grvt_private_key) if payload.grvt_private_key else None
+        grvt_trading_account_id = payload.grvt_trading_account_id
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    user = User(
+        username=payload.username,
+        password_hash=_hash_password(payload.password, salt),
+        password_salt=salt.hex(),
+        is_active=payload.is_active,
+        is_admin=payload.is_admin,
+        lighter_account_index=payload.lighter_account_index,
+        lighter_api_key_index=payload.lighter_api_key_index,
+        lighter_private_key_enc=lighter_private_key_enc,
+        grvt_api_key_enc=grvt_api_key_enc,
+        grvt_private_key_enc=grvt_private_key_enc,
+        grvt_trading_account_id=grvt_trading_account_id,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return AdminUserResponse(
+        id=str(user.id),
+        username=user.username,
+        is_admin=user.is_admin,
+        is_active=user.is_active,
+        created_at=user.created_at,
+    )
+
+
 @app.websocket("/ws/events")
 async def ws_events(
     websocket: WebSocket,
     broadcaster: EventBroadcaster = Depends(get_broadcaster),
     manager: AuthManager = Depends(get_auth_manager),
+    session: Session = Depends(get_session),
 ):
     try:
-        await authenticate_websocket(websocket, manager)
+        await authenticate_websocket(websocket, manager, session)
     except WebSocketDisconnect:
         return
     await websocket.accept()
@@ -552,9 +700,10 @@ async def ws_orderbook(
     lighter: LighterService = Depends(get_lighter_service),
     grvt: GrvtService = Depends(get_grvt_service),
     manager: AuthManager = Depends(get_auth_manager),
+    session: Session = Depends(get_session),
 ):
     try:
-        await authenticate_websocket(websocket, manager)
+        user = await authenticate_websocket(websocket, manager, session)
     except WebSocketDisconnect:
         return
     await websocket.accept()
@@ -600,14 +749,38 @@ async def ws_orderbook(
                 forward_updates("lighter_trades", lighter.stream_trades(subscription.symbol, limit=50))
             )
         )
+        try:
+            grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(user)
+        except HTTPException as exc:
+            await websocket.send_json({"error": exc.detail})
+            await websocket.close()
+            return
         tasks.append(
             asyncio.create_task(
-                forward_updates("grvt", grvt.stream_orderbook(subscription.symbol, subscription.depth))
+                forward_updates(
+                    "grvt",
+                    grvt.stream_orderbook_with_credentials(
+                        subscription.symbol,
+                        subscription.depth,
+                        api_key=grvt_api_key,
+                        private_key=grvt_private_key,
+                        trading_account_id=grvt_trading_account_id,
+                    ),
+                )
             )
         )
         tasks.append(
             asyncio.create_task(
-                forward_updates("grvt_trades", grvt.stream_trades(subscription.symbol, limit=50))
+                forward_updates(
+                    "grvt_trades",
+                    grvt.stream_trades_with_credentials(
+                        subscription.symbol,
+                        limit=50,
+                        api_key=grvt_api_key,
+                        private_key=grvt_private_key,
+                        trading_account_id=grvt_trading_account_id,
+                    ),
+                )
             )
         )
     except Exception as exc:  # noqa: BLE001

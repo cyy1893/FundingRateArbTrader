@@ -9,9 +9,20 @@ from sqlmodel import Session, select
 from app.db_models import User, uuid7
 from app.db_session import get_engine
 from app.utils.auth import _hash_password
+from app.utils.crypto import encrypt_secret
 
 
-def create_user(username: str, password: str, is_admin: bool) -> None:
+def create_user(
+    username: str,
+    password: str,
+    is_admin: bool,
+    lighter_account_index: int | None,
+    lighter_api_key_index: int | None,
+    lighter_private_key: str | None,
+    grvt_api_key: str | None,
+    grvt_private_key: str | None,
+    grvt_trading_account_id: str | None,
+) -> None:
     engine = get_engine()
     with Session(engine) as session:
         existing = session.exec(select(User).where(User.username == username, User.deleted_at.is_(None))).first()
@@ -26,6 +37,12 @@ def create_user(username: str, password: str, is_admin: bool) -> None:
             password_salt=salt.hex(),
             is_active=True,
             is_admin=is_admin,
+            lighter_account_index=lighter_account_index,
+            lighter_api_key_index=lighter_api_key_index,
+            lighter_private_key_enc=encrypt_secret(lighter_private_key) if lighter_private_key else None,
+            grvt_api_key_enc=encrypt_secret(grvt_api_key) if grvt_api_key else None,
+            grvt_private_key_enc=encrypt_secret(grvt_private_key) if grvt_private_key else None,
+            grvt_trading_account_id=grvt_trading_account_id,
             created_at=now,
             updated_at=now,
         )
@@ -55,6 +72,12 @@ def main() -> None:
     create_cmd.add_argument("--username", required=True)
     create_cmd.add_argument("--password", required=True)
     create_cmd.add_argument("--admin", action="store_true")
+    create_cmd.add_argument("--lighter-account-index", type=int)
+    create_cmd.add_argument("--lighter-api-key-index", type=int)
+    create_cmd.add_argument("--lighter-private-key")
+    create_cmd.add_argument("--grvt-api-key")
+    create_cmd.add_argument("--grvt-private-key")
+    create_cmd.add_argument("--grvt-trading-account-id")
 
     update_cmd = subparsers.add_parser("set-password", help="Update a user password")
     update_cmd.add_argument("--username", required=True)
@@ -62,7 +85,17 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.command == "create":
-        create_user(args.username, args.password, args.admin)
+        create_user(
+            args.username,
+            args.password,
+            args.admin,
+            args.lighter_account_index,
+            args.lighter_api_key_index,
+            args.lighter_private_key,
+            args.grvt_api_key,
+            args.grvt_private_key,
+            args.grvt_trading_account_id,
+        )
         print("User created")
     elif args.command == "set-password":
         update_password(args.username, args.password)
