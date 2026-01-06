@@ -710,31 +710,6 @@ function TradingPageContent() {
     }
   }, [balancesSnapshot, subscription, triggerLiquidationGuard]);
 
-  useEffect(() => {
-    if (!subscription?.auto_close_after_ms || !balancesSnapshot) {
-      return;
-    }
-    if (autoCloseScheduledRef.current) {
-      return;
-    }
-    const symbol = subscription.symbol.toUpperCase();
-    const lighterPosition = balancesSnapshot.lighter.positions.find(
-      (position) => position.symbol.toUpperCase() === symbol,
-    );
-    const grvtPosition = balancesSnapshot.grvt.positions.find(
-      (position) => position.instrument.toUpperCase() === symbol,
-    );
-    if (
-      lighterPosition &&
-      grvtPosition &&
-      Math.abs(lighterPosition.position) > 0 &&
-      Math.abs(grvtPosition.size) > 0
-    ) {
-      autoCloseScheduledRef.current = true;
-      scheduleAutoClose(subscription);
-    }
-  }, [balancesSnapshot, scheduleAutoClose, subscription]);
-
   const scheduleAutoClose = useCallback(
     (activeSubscription: OrderBookSubscription) => {
       const delayMs = activeSubscription.auto_close_after_ms;
@@ -770,6 +745,31 @@ function TradingPageContent() {
     },
     [clearAutoCloseTimer, submitCloseOrders],
   );
+
+  useEffect(() => {
+    if (!subscription?.auto_close_after_ms || !balancesSnapshot) {
+      return;
+    }
+    if (autoCloseScheduledRef.current) {
+      return;
+    }
+    const symbol = subscription.symbol.toUpperCase();
+    const lighterPosition = balancesSnapshot.lighter.positions.find(
+      (position) => position.symbol.toUpperCase() === symbol,
+    );
+    const grvtPosition = balancesSnapshot.grvt.positions.find(
+      (position) => position.instrument.toUpperCase() === symbol,
+    );
+    if (
+      lighterPosition &&
+      grvtPosition &&
+      Math.abs(lighterPosition.position) > 0 &&
+      Math.abs(grvtPosition.size) > 0
+    ) {
+      autoCloseScheduledRef.current = true;
+      scheduleAutoClose(subscription);
+    }
+  }, [balancesSnapshot, scheduleAutoClose, subscription]);
 
   const updateLighterLeverage = async (payload: Record<string, unknown>) => {
     const response = await fetch("/api/orders/lighter/leverage", {

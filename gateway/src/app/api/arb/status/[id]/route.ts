@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
 
@@ -9,14 +9,15 @@ const TRADER_API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ??
   "http://localhost:8080";
 
-export async function GET(_: Request, { params }: { params: { id: string } }) {
+export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const cookieStore = await cookies();
   const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
   if (!token) {
     return NextResponse.json({ error: "未登录，请先获取访问令牌。" }, { status: 401 });
   }
 
-  const upstreamUrl = `${TRADER_API_BASE_URL.replace(/\/$/, "")}/arb/status/${params.id}`;
+  const { id } = await params;
+  const upstreamUrl = `${TRADER_API_BASE_URL.replace(/\/$/, "")}/arb/status/${id}`;
 
   try {
     const response = await fetch(upstreamUrl, {
