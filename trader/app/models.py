@@ -200,6 +200,14 @@ class OrderBookSubscription(BaseModel):
     notional_value: float = Field(..., gt=0, description="Contract notional value in USD")
     depth: int = Field(10, ge=1, le=50, description="Number of price levels to include")
     throttle_ms: int = Field(500, ge=50, le=5000, description="Throttle interval in milliseconds for order book updates")
+    avoid_adverse_spread: bool = Field(False, description="Block orders when spread is unfavorable to the long side")
+    auto_close_after_ms: Optional[int] = Field(
+        None, ge=0, description="Auto-close delay in milliseconds after opening the hedge"
+    )
+    liquidation_guard_enabled: bool = Field(False, description="Enable liquidation guard based on PnL percentage")
+    liquidation_guard_threshold_pct: Optional[float] = Field(
+        None, gt=0, le=100, description="PnL percentage threshold for liquidation guard"
+    )
 
 
 class GrvtOrderRequest(BaseModel):

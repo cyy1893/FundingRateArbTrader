@@ -178,6 +178,8 @@ function TradingPageContent() {
   const searchParams = useSearchParams();
   const didShowToastRef = useRef(false);
   const lastLeverageCommitRef = useRef<{ symbol: string; leverage: number } | null>(null);
+  const autoCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const liquidationGuardTriggeredRef = useRef(false);
 
   useEffect(() => {
     const symbol = searchParams.get("symbol");
@@ -195,6 +197,7 @@ function TradingPageContent() {
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [normalized, setNormalized] = useState<UnifiedWalletData | null>(null);
+  const [balancesSnapshot, setBalancesSnapshot] = useState<BalancesResponse | null>(null);
   const [subscription, setSubscription] = useState<OrderBookSubscription | null>(null);
   const [draftSubscription, setDraftSubscription] = useState<OrderBookSubscription | null>(null);
   const [notionalReady, setNotionalReady] = useState(false);
@@ -236,6 +239,7 @@ function TradingPageContent() {
     async function loadBalances() {
       try {
         const data = await fetchBalances();
+        setBalancesSnapshot(data);
         setNormalized(normalizeBalances(data));
         setErrorMessage(null);
       } catch (error) {
@@ -455,6 +459,222 @@ function TradingPageContent() {
     return { ok: true, data, error: null };
   };
 
+  const clearAutoCloseTimer = () => {
+    if (autoCloseTimeoutRef.current) {
+      clearTimeout(autoCloseTimeoutRef.current);
+      autoCloseTimeoutRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (autoCloseTimeoutRef.current) {
+        clearTimeout(autoCloseTimeoutRef.current);
+        autoCloseTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const triggerLiquidationGuard = useCallback(
+    async ({
+      subscription: activeSubscription,
+      lighterPosition,
+      grvtPosition,
+    }: {
+      subscription: OrderBookSubscription;
+      lighterPosition?: LighterBalanceSnapshot["positions"][number];
+      grvtPosition?: GrvtBalanceSnapshot["positions"][number];
+    }) => {
+      if (liquidationGuardTriggeredRef.current) {
+        return;
+      }
+      liquidationGuardTriggeredRef.current = true;
+      clearAutoCloseTimer();
+
+      const symbol = activeSubscription.symbol;
+      const orders: Array<Promise<{ ok: boolean; data: unknown; error: string | null }>> = [];
+      const errors: string[] = [];
+      const clientBase = Date.now() % 2_147_483_647;
+
+      if (lighterPosition && Math.abs(lighterPosition.position) > 0) {
+        const lighterCloseSide = lighterPosition.position >= 0 ? "sell" : "buy";
+        const lighterClosePrice = getMakerPrice("lighter", lighterCloseSide, symbol);
+        if (!lighterClosePrice) {
+          errors.push("Lighter: 订单簿数据不足");
+        } else {
+          const lighterPayload = {
+            symbol,
+            client_order_index: clientBase,
+            side: lighterCloseSide,
+            base_amount: Math.abs(lighterPosition.position),
+            price: lighterClosePrice,
+            reduce_only: true,
+            time_in_force: "post_only",
+          };
+          orders.push(placeOrder("lighter", lighterPayload));
+        }
+      }
+
+      if (grvtPosition && Math.abs(grvtPosition.size) > 0) {
+        const grvtCloseSide = grvtPosition.size >= 0 ? "sell" : "buy";
+        const grvtClosePrice = getMakerPrice("grvt", grvtCloseSide, symbol);
+        if (!grvtClosePrice) {
+          errors.push("GRVT: 订单簿数据不足");
+        } else {
+          const grvtPayload = {
+            symbol,
+            side: grvtCloseSide,
+            amount: Math.abs(grvtPosition.size),
+            price: grvtClosePrice,
+            post_only: true,
+            reduce_only: true,
+            order_duration_secs: 10,
+            client_order_id: clientBase + 1,
+          };
+          orders.push(placeOrder("grvt", grvtPayload));
+        }
+      }
+
+      if (orders.length === 0) {
+        liquidationGuardTriggeredRef.current = false;
+        toast.error("避免爆仓触发失败：没有可平仓的仓位。", {
+          className: "bg-destructive text-destructive-foreground",
+        });
+        return;
+      }
+
+      if (errors.length > 0) {
+        toast.error(`避免爆仓触发失败：${errors.join(" | ")}`, {
+          className: "bg-destructive text-destructive-foreground",
+        });
+        return;
+      }
+
+      const results = await Promise.all(orders);
+      const failed = results.filter((result) => !result.ok);
+      if (failed.length === 0) {
+        toast.success("避免爆仓已触发，平仓挂单已提交。");
+      } else {
+        const details = failed.map((result) => result.error).filter(Boolean).join(" | ");
+        toast.error(`避免爆仓平仓失败：${details}`, {
+          className: "bg-destructive text-destructive-foreground",
+        });
+      }
+    },
+    [clearAutoCloseTimer, getMakerPrice, placeOrder],
+  );
+
+  useEffect(() => {
+    liquidationGuardTriggeredRef.current = false;
+  }, [
+    subscription?.symbol,
+    subscription?.liquidation_guard_enabled,
+    subscription?.liquidation_guard_threshold_pct,
+  ]);
+
+  useEffect(() => {
+    if (!subscription?.liquidation_guard_enabled || !balancesSnapshot) {
+      return;
+    }
+    if (liquidationGuardTriggeredRef.current) {
+      return;
+    }
+    const threshold = subscription.liquidation_guard_threshold_pct ?? 50;
+    if (!Number.isFinite(threshold) || threshold <= 0) {
+      return;
+    }
+    const symbol = subscription.symbol.toUpperCase();
+    const lighterPosition = balancesSnapshot.lighter.positions.find(
+      (position) => position.symbol.toUpperCase() === symbol,
+    );
+    const grvtPosition = balancesSnapshot.grvt.positions.find(
+      (position) => position.instrument.toUpperCase() === symbol,
+    );
+
+    const lighterPct =
+      lighterPosition && Math.abs(lighterPosition.position_value) > 0
+        ? (Math.abs(lighterPosition.unrealized_pnl) / Math.abs(lighterPosition.position_value)) * 100
+        : null;
+    const grvtPct =
+      grvtPosition && Math.abs(grvtPosition.notional) > 0
+        ? (Math.abs(grvtPosition.unrealized_pnl) / Math.abs(grvtPosition.notional)) * 100
+        : null;
+
+    if ((lighterPct != null && lighterPct >= threshold) || (grvtPct != null && grvtPct >= threshold)) {
+      triggerLiquidationGuard({ subscription, lighterPosition, grvtPosition });
+    }
+  }, [balancesSnapshot, subscription, triggerLiquidationGuard]);
+
+  const scheduleAutoClose = ({
+    subscription: activeSubscription,
+    lighterSide,
+    grvtSide,
+    lighterSize,
+    grvtSize,
+  }: {
+    subscription: OrderBookSubscription;
+    lighterSide: "buy" | "sell";
+    grvtSide: "buy" | "sell";
+    lighterSize: number;
+    grvtSize: number;
+  }) => {
+    const delayMs = activeSubscription.auto_close_after_ms;
+    if (!delayMs) {
+      return;
+    }
+    clearAutoCloseTimer();
+    autoCloseTimeoutRef.current = setTimeout(async () => {
+      const symbol = activeSubscription.symbol;
+      const lighterCloseSide = lighterSide === "buy" ? "sell" : "buy";
+      const grvtCloseSide = grvtSide === "buy" ? "sell" : "buy";
+      const lighterClosePrice = getMakerPrice("lighter", lighterCloseSide, symbol);
+      const grvtClosePrice = getMakerPrice("grvt", grvtCloseSide, symbol);
+      if (!lighterClosePrice || !grvtClosePrice) {
+        toast.error("自动平仓失败：订单簿数据不足。", {
+          className: "bg-destructive text-destructive-foreground",
+        });
+        return;
+      }
+
+      const clientBase = Date.now() % 2_147_483_647;
+      const lighterPayload = {
+        symbol,
+        client_order_index: clientBase,
+        side: lighterCloseSide,
+        base_amount: lighterSize,
+        price: lighterClosePrice,
+        reduce_only: true,
+        time_in_force: "post_only",
+      };
+      const grvtPayload = {
+        symbol,
+        side: grvtCloseSide,
+        amount: grvtSize,
+        price: grvtClosePrice,
+        post_only: true,
+        reduce_only: true,
+        order_duration_secs: 10,
+        client_order_id: clientBase + 1,
+      };
+
+      const [lighterResult, grvtResult] = await Promise.all([
+        placeOrder("lighter", lighterPayload),
+        placeOrder("grvt", grvtPayload),
+      ]);
+      if (lighterResult.ok && grvtResult.ok) {
+        toast.success("已提交定时平仓挂单。");
+        return;
+      }
+      const errors = [
+        lighterResult.ok ? null : `Lighter: ${lighterResult.error}`,
+        grvtResult.ok ? null : `GRVT: ${grvtResult.error}`,
+      ].filter(Boolean);
+      toast.error(`自动平仓失败：${errors.join(" | ")}`, {
+        className: "bg-destructive text-destructive-foreground",
+      });
+    }, delayMs);
+  };
+
   const updateLighterLeverage = async (payload: Record<string, unknown>) => {
     const response = await fetch("/api/orders/lighter/leverage", {
       method: "POST",
@@ -528,7 +748,7 @@ function TradingPageContent() {
 
     const longPrice = lighterSide === "buy" ? lighterPrice : grvtPrice;
     const shortPrice = lighterSide === "sell" ? lighterPrice : grvtPrice;
-    if (longPrice > shortPrice) {
+    if (activeSubscription.avoid_adverse_spread && longPrice > shortPrice) {
       setArbStatus("error");
       setArbMessage("当前价差对多头不利，已阻止下单。");
       return;
@@ -574,6 +794,13 @@ function TradingPageContent() {
     if (lighterResult.ok && grvtResult.ok) {
       setArbStatus("success");
       setArbMessage("套利下单已提交，挂单有效期 10 秒。");
+      scheduleAutoClose({
+        subscription: activeSubscription,
+        lighterSide,
+        grvtSide,
+        lighterSize,
+        grvtSize,
+      });
       return;
     }
 
@@ -594,6 +821,13 @@ function TradingPageContent() {
           if (retry.ok) {
             setArbStatus("success");
             setArbMessage("套利下单已提交，挂单有效期 10 秒。");
+            scheduleAutoClose({
+              subscription: activeSubscription,
+              lighterSide,
+              grvtSide,
+              lighterSize,
+              grvtSize,
+            });
             return;
           }
         }

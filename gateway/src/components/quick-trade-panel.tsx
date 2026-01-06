@@ -11,6 +11,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type SymbolOption = { symbol: string; displayName: string };
 
@@ -236,6 +243,10 @@ export function QuickTradePanel({
   const [grvtLeverage, setGrvtLeverage] = useState(1);
   const [grvtDirection, setGrvtDirection] = useState<"long" | "short">(defaultGrvtDirection ?? "short");
   const [notionalValue, setNotionalValue] = useState("");
+  const [avoidAdverseSpread, setAvoidAdverseSpread] = useState(false);
+  const [autoCloseSelection, setAutoCloseSelection] = useState<"off" | "24h" | "2d" | "1w">("off");
+  const [liquidationGuardEnabled, setLiquidationGuardEnabled] = useState(false);
+  const [liquidationGuardPct, setLiquidationGuardPct] = useState("50");
 
   const hasSymbols = availableSymbols.length > 0;
   const symbolKey = symbol.trim().toUpperCase();
@@ -323,6 +334,18 @@ export function QuickTradePanel({
   const safeNotional = Number.isFinite(notionalAmount) && notionalAmount > 0 ? notionalAmount : null;
   const lighterMargin = safeNotional ? safeNotional / Math.max(lighterLeverage, LEVERAGE_MIN) : null;
   const grvtMargin = safeNotional ? safeNotional / Math.max(grvtLeverage, LEVERAGE_MIN) : null;
+  const autoCloseAfterMs =
+    autoCloseSelection === "24h"
+      ? 24 * 60 * 60 * 1000
+      : autoCloseSelection === "2d"
+        ? 2 * 24 * 60 * 60 * 1000
+        : autoCloseSelection === "1w"
+          ? 7 * 24 * 60 * 60 * 1000
+          : undefined;
+  const parsedLiquidationPct = Number(liquidationGuardPct);
+  const liquidationGuardThresholdPct = Number.isFinite(parsedLiquidationPct)
+    ? Math.min(100, Math.max(1, parsedLiquidationPct))
+    : 50;
   const sortedSymbols = [...availableSymbols].sort((a, b) =>
     a.displayName.localeCompare(b.displayName),
   );
@@ -353,6 +376,10 @@ export function QuickTradePanel({
         notional_value: 1,
         depth: 10,
         throttle_ms: 100,
+        avoid_adverse_spread: avoidAdverseSpread,
+        auto_close_after_ms: autoCloseAfterMs,
+        liquidation_guard_enabled: liquidationGuardEnabled,
+        liquidation_guard_threshold_pct: liquidationGuardThresholdPct,
       } : null);
       onNotionalReady(false);
       return;
@@ -367,6 +394,10 @@ export function QuickTradePanel({
       notional_value: safeNotional,
       depth: 10,
       throttle_ms: 100,
+      avoid_adverse_spread: avoidAdverseSpread,
+      auto_close_after_ms: autoCloseAfterMs,
+      liquidation_guard_enabled: liquidationGuardEnabled,
+      liquidation_guard_threshold_pct: liquidationGuardThresholdPct,
     };
 
     onConfigChange(sub);
@@ -378,6 +409,10 @@ export function QuickTradePanel({
     grvtLeverage,
     grvtDirection,
     safeNotional,
+    avoidAdverseSpread,
+    autoCloseAfterMs,
+    liquidationGuardEnabled,
+    liquidationGuardThresholdPct,
     onConfigChange,
     onNotionalReady,
   ]);
@@ -671,6 +706,66 @@ export function QuickTradePanel({
           </div>
 
           {/* Notional Value Section */}
+          <div className="space-y-2 pt-3 border-t border-slate-100">
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-bold text-slate-700 uppercase tracking-wide">
+                风控设置
+              </Label>
+              <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-[11px] text-slate-700">
+                <span className="font-semibold">避免不利价差</span>
+                <input
+                  type="checkbox"
+                  checked={avoidAdverseSpread}
+                  onChange={(event) => setAvoidAdverseSpread(event.target.checked)}
+                  className="h-4 w-4 accent-primary"
+                />
+              </label>
+              <p className="text-[9px] text-slate-500">
+                勾选后，价差不利时将阻止下单。
+              </p>
+              <div className="space-y-1.5">
+                <Label className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">
+                  定时自动平仓
+                </Label>
+                <Select value={autoCloseSelection} onValueChange={(value) => setAutoCloseSelection(value as typeof autoCloseSelection)}>
+                  <SelectTrigger className="h-8 border-slate-200 bg-white text-[11px] font-semibold text-slate-700 focus:ring-0">
+                    <SelectValue placeholder="关闭" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="off">关闭</SelectItem>
+                    <SelectItem value="24h">24 小时</SelectItem>
+                    <SelectItem value="2d">2 天</SelectItem>
+                    <SelectItem value="1w">1 周</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-[11px] text-slate-700">
+                  <span className="font-semibold">避免爆仓</span>
+                  <input
+                    type="checkbox"
+                    checked={liquidationGuardEnabled}
+                    onChange={(event) => setLiquidationGuardEnabled(event.target.checked)}
+                    className="h-4 w-4 accent-primary"
+                  />
+                </label>
+                <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                  <span className="shrink-0">阈值</span>
+                  <Input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={liquidationGuardPct}
+                    onChange={(event) => setLiquidationGuardPct(event.target.value)}
+                    disabled={!liquidationGuardEnabled}
+                    className="h-7 w-20 border-slate-200 bg-white text-[11px] font-semibold text-slate-700 disabled:opacity-60"
+                  />
+                  <span className="shrink-0">%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-2 pt-3 border-t border-slate-100 pb-2">
             <Label htmlFor="notional" className="text-[10px] font-bold text-slate-700 uppercase tracking-wide">
               合约名义价值 (USD)
