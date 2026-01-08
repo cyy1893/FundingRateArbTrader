@@ -418,7 +418,7 @@ export function QuickTradePanel({
   ]);
 
   return (
-    <div className="bg-white border-x border-slate-200 h-full flex flex-col shadow-sm">
+    <div className="bg-white border-x border-slate-200 h-full flex flex-col shadow-sm min-h-0">
       {/* Header */}
       <div className="p-3 pb-2 border-b border-slate-100 flex items-center justify-between">
         <div>
@@ -446,8 +446,8 @@ export function QuickTradePanel({
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-hidden p-3">
-        <div className="space-y-4">
+      <div className="flex-1 overflow-y-auto p-3">
+        <div className="space-y-4 pb-2">
           {/* Symbol Selection */}
           <div className="space-y-1.5">
             <Label htmlFor="symbol" className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">

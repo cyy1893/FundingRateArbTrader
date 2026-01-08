@@ -970,7 +970,7 @@ function TradingPageContent() {
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left Panel - Quick Trade */}
-        <div className="w-72 border-r border-gray-200 p-3 bg-white">
+        <div className="w-72 border-r border-gray-200 p-3 bg-white flex flex-col min-h-0 overflow-hidden">
           <QuickTradePanel
             onExecuteArbitrage={executeArbitrage}
             onConfigChange={setDraftSubscription}
