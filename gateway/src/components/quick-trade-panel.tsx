@@ -2,7 +2,7 @@ import { useRef, useState, useEffect, useMemo } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, ArrowUpRight, ArrowDownRight, Info, Search, Lock } from "lucide-react";
+import { TrendingUp, ArrowUpRight, ArrowDownRight, Info, Search, Lock, Shield, Settings2, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { OrderBookSubscription } from "@/hooks/use-order-book-websocket";
 import {
@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Card, CardContent } from "@/components/ui/card";
 
 type SymbolOption = { symbol: string; displayName: string };
 
@@ -103,9 +104,11 @@ function LeverageSlider({
   const percentage = ((value - LEVERAGE_MIN) / (max - LEVERAGE_MIN)) * 100;
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex-1 h-10 flex items-center justify-center rounded-lg border-2 border-slate-100 bg-slate-50/50 shadow-sm transition-all focus-within:border-primary/30 focus-within:bg-white">
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div 
+          className="h-7 w-16 flex items-center justify-center rounded border border-slate-200 bg-slate-50 transition-all focus-within:border-primary/50 focus-within:bg-white"
+        >
           {isEditing ? (
             <input
               type="number"
@@ -122,29 +125,30 @@ function LeverageSlider({
                 }
               }}
               autoFocus
-              className="w-full bg-transparent text-center font-bold text-slate-900 outline-none"
+              className="w-full bg-transparent text-center text-xs font-bold text-slate-900 outline-none"
             />
           ) : (
             <button
               type="button"
               onClick={() => setIsEditing(true)}
-              className="w-full text-center font-bold text-slate-900 hover:text-primary transition-colors"
+              className="w-full text-center text-xs font-bold text-slate-900"
             >
               {value}x
             </button>
           )}
         </div>
+        <div className="text-[10px] font-bold text-slate-400 tabular-nums">
+          Max: {max}x
+        </div>
       </div>
 
-      <div className="px-2 relative">
-        <div
-          className="absolute h-1.5 rounded-full bg-slate-200 top-1/2 -translate-y-1/2 left-2 right-2 overflow-hidden"
-        >
+      <div className="relative h-4 flex items-center px-0.5">
+        <div className="absolute left-0.5 right-0.5 h-1 rounded-full bg-slate-100 overflow-hidden">
           <div
             className="h-full transition-all duration-300 ease-out"
             style={{
               width: `${percentage}%`,
-              backgroundColor: accentColor
+              backgroundColor: accentColor,
             }}
           />
         </div>
@@ -160,55 +164,39 @@ function LeverageSlider({
           onTouchEnd={() => onCommit?.(value)}
           style={{ ["--thumb-color" as never]: accentColor }}
           className={cn(
-            "relative w-full cursor-pointer appearance-none bg-transparent block",
-            "[-webkit-appearance:none] h-6",
-            "[&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5",
+            "relative w-full cursor-pointer appearance-none bg-transparent block z-10",
+            "[-webkit-appearance:none] h-4",
+            "[&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5",
             "[&::-webkit-slider-thumb]:appearance-none",
             "[&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--thumb-color)]",
             "[&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white",
-            "[&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:transition-all",
+            "[&::-webkit-slider-thumb]:shadow-sm [&::-webkit-slider-thumb]:transition-transform",
             "[&::-webkit-slider-thumb]:hover:scale-110",
             "active:[&::-webkit-slider-thumb]:scale-95",
-            "[&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full",
-            "[&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white",
-            "[&::-moz-range-thumb]:bg-[var(--thumb-color)] [&::-moz-range-thumb]:shadow-md",
-            "[&::-moz-range-thumb]:hover:scale-110"
+            "[&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:rounded-full",
+            "[&::-moz-range-thumb]:bg-[var(--thumb-color)] [&::-moz-range-thumb]:border-2",
+            "[&::-moz-range-thumb]:border-white"
           )}
         />
+      </div>
 
-        <div className="mt-1 flex justify-between px-0.5">
-          {ticks.map((tick) => {
-            const tickPos = ((tick - LEVERAGE_MIN) / (max - LEVERAGE_MIN)) * 100;
-            return (
-              <button
-                key={tick}
-                type="button"
-                onClick={() => {
-                  onChange(tick);
-                  onCommit?.(tick);
-                }}
-                className="flex flex-col items-center group transition-colors"
-                style={{
-                  position: 'absolute',
-                  left: `calc(10px + (100% - 20px) * ${tickPos / 100})`,
-                  transform: 'translateX(-50%)'
-                }}
-              >
-                <div className={cn(
-                  "h-1 w-1 rounded-full mb-1 transition-all",
-                  tick === value ? "scale-150 bg-slate-600" : "bg-slate-300 group-hover:bg-slate-400"
-                )} />
-                <span className={cn(
-                  "text-[10px] font-bold tracking-tight",
-                  tick === value ? "text-slate-900" : "text-slate-400 group-hover:text-slate-600"
-                )}>
-                  {tick}x
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="h-6" /> {/* Spacer for ticks */}
+      <div className="flex justify-between px-0.5">
+        {ticks.map((tick) => (
+          <button
+            key={tick}
+            type="button"
+            onClick={() => {
+              onChange(tick);
+              onCommit?.(tick);
+            }}
+            className={cn(
+              "text-[9px] font-bold transition-colors tabular-nums",
+              tick === value ? "text-slate-900 underline underline-offset-2" : "text-slate-400 hover:text-slate-600"
+            )}
+          >
+            {tick}x
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -243,9 +231,10 @@ export function QuickTradePanel({
   const [grvtLeverage, setGrvtLeverage] = useState(1);
   const [grvtDirection, setGrvtDirection] = useState<"long" | "short">(defaultGrvtDirection ?? "short");
   const [notionalValue, setNotionalValue] = useState("");
-  const [avoidAdverseSpread, setAvoidAdverseSpread] = useState(false);
-  const [autoCloseSelection, setAutoCloseSelection] = useState<"off" | "24h" | "2d" | "1w">("off");
-  const [liquidationGuardEnabled, setLiquidationGuardEnabled] = useState(false);
+  const [avoidAdverseSpread, setAvoidAdverseSpread] = useState(true);
+  const [customDays, setCustomDays] = useState("1");
+  const [customHours, setCustomHours] = useState("0");
+  const [liquidationGuardEnabled, setLiquidationGuardEnabled] = useState(true);
   const [liquidationGuardPct, setLiquidationGuardPct] = useState("50");
 
   const hasSymbols = availableSymbols.length > 0;
@@ -334,14 +323,12 @@ export function QuickTradePanel({
   const safeNotional = Number.isFinite(notionalAmount) && notionalAmount > 0 ? notionalAmount : null;
   const lighterMargin = safeNotional ? safeNotional / Math.max(lighterLeverage, LEVERAGE_MIN) : null;
   const grvtMargin = safeNotional ? safeNotional / Math.max(grvtLeverage, LEVERAGE_MIN) : null;
-  const autoCloseAfterMs =
-    autoCloseSelection === "24h"
-      ? 24 * 60 * 60 * 1000
-      : autoCloseSelection === "2d"
-        ? 2 * 24 * 60 * 60 * 1000
-        : autoCloseSelection === "1w"
-          ? 7 * 24 * 60 * 60 * 1000
-          : undefined;
+  const autoCloseAfterMs = useMemo(() => {
+    const d = parseInt(customDays, 10) || 0;
+    const h = parseInt(customHours, 10) || 0;
+    if (d === 0 && h === 0) return undefined;
+    return (d * 24 + h) * 60 * 60 * 1000;
+  }, [customDays, customHours]);
   const parsedLiquidationPct = Number(liquidationGuardPct);
   const liquidationGuardThresholdPct = Number.isFinite(parsedLiquidationPct)
     ? Math.min(100, Math.max(1, parsedLiquidationPct))
@@ -418,60 +405,55 @@ export function QuickTradePanel({
   ]);
 
   return (
-    <div className="bg-white border-x border-slate-200 h-full flex flex-col shadow-sm min-h-0">
-      {/* Header */}
-      <div className="p-3 pb-2 border-b border-slate-100 flex items-center justify-between">
-        <div>
-          <h3 className="text-[13px] font-bold text-slate-900 tracking-tight">
-            套利交易配置
+    <div className="h-full flex flex-col bg-white min-h-0 overflow-hidden text-slate-900 border-x border-slate-200">
+      {/* Header - Fixed & Compact */}
+      <div className="shrink-0 px-3 py-2 border-b border-slate-100 bg-slate-50/50">
+        <div className="flex items-center justify-between">
+          <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+            <Settings2 className="h-3 w-3" />
+            套利配置
           </h3>
-          <p className="text-[9px] font-medium text-slate-500 uppercase flex items-center gap-1 mt-0.5">
-            <span className="text-primary font-bold">{primaryLabel}</span>
-            <span className="text-slate-300">/</span>
-            <span className="text-indigo-600 font-bold">{secondaryLabel}</span>
-          </p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-[10px] font-bold text-slate-400 tabular-nums">
+              <span className="text-primary">{primaryLabel}</span>
+              <span className="mx-1 opacity-30">|</span>
+              <span className="text-indigo-600">{secondaryLabel}</span>
+            </p>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button className="text-slate-300 hover:text-slate-500 transition-colors">
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="text-[10px] bg-slate-900 text-white border-0">
+                  配置套利参数
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </div>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button className="text-slate-400 hover:text-slate-600 transition-colors">
-                <Info className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="max-w-[200px] text-xs">
-              在这里配置您的套利参数。系统将自动监听深度并计算最佳入场时机。
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
       </div>
 
-      {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto p-3">
-        <div className="space-y-4 pb-2">
-          {/* Symbol Selection */}
-          <div className="space-y-1.5">
-            <Label htmlFor="symbol" className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-              <Search className="h-3 w-3" />
-              币种
-            </Label>
+      {/* Main Content - Scrollable & Dense */}
+      <div className="flex-1 overflow-y-auto px-3 py-2.5 space-y-4">
+        {/* Symbol Selection - Integrated */}
+        <div className="space-y-1.5">
+          <Label htmlFor="symbol" className="text-[10px] font-bold text-slate-400 uppercase tracking-tight ml-0.5">
+            交易币种
+          </Label>
+          <div className="relative group">
             <div className="relative">
-              <div className="relative">
-                <Input
-                  id="symbol"
-                  name="symbol-search"
-                  value={symbolQuery}
-                  disabled={!hasSymbols}
-                  placeholder="搜索币种 (如 BTC, ETH)"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  onChange={(event) => {
-                    if (lockSymbol) {
-                      return;
-                    }
-                  if (symbolBlurTimeout.current) {
-                    clearTimeout(symbolBlurTimeout.current);
-                  }
+              <Input
+                id="symbol"
+                name="symbol-search"
+                value={symbolQuery}
+                disabled={!hasSymbols || lockSymbol}
+                placeholder="搜索币种 (如 BTC, ETH)"
+                autoComplete="off"
+                onChange={(event) => {
+                  if (lockSymbol) return;
+                  if (symbolBlurTimeout.current) clearTimeout(symbolBlurTimeout.current);
                   const next = event.target.value;
                   setSymbolQuery(next);
                   setIsSymbolMenuOpen(true);
@@ -480,21 +462,14 @@ export function QuickTradePanel({
                       option.symbol.toLowerCase() === next.trim().toLowerCase() ||
                       option.displayName.toLowerCase() === next.trim().toLowerCase(),
                   );
-                  if (exact) {
-                    setSymbol(exact.symbol);
-                  } else {
-                    setSymbol("");
-                  }
+                  if (exact) setSymbol(exact.symbol);
+                  else setSymbol("");
                 }}
                 onFocus={() => {
-                  if (!lockSymbol) {
-                    setIsSymbolMenuOpen(true);
-                  }
+                  if (!lockSymbol) setIsSymbolMenuOpen(true);
                 }}
                 onBlur={() => {
-                  symbolBlurTimeout.current = setTimeout(() => {
-                    setIsSymbolMenuOpen(false);
-                  }, 150);
+                  symbolBlurTimeout.current = setTimeout(() => setIsSymbolMenuOpen(false), 150);
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && suggestedSymbols[0]) {
@@ -502,323 +477,275 @@ export function QuickTradePanel({
                     handleSymbolSelect(suggestedSymbols[0]);
                   }
                 }}
-                  className={cn(
-                    "h-8 border-slate-200 bg-slate-50/50 text-slate-900 font-bold focus:bg-white focus:ring-primary/20 transition-all placeholder:font-normal placeholder:text-slate-400",
-                    lockSymbol && "pr-9"
-                  )}
-                />
-                {lockSymbol ? (
-                  <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-                    <Lock className="h-3.5 w-3.5" />
-                  </div>
-                ) : null}
-              </div>
-              {isSymbolMenuOpen && hasSymbols && !lockSymbol ? (
-                <div className="absolute left-0 right-0 top-full z-30 mt-2 max-h-64 overflow-y-auto rounded-md border border-gray-200 bg-white text-gray-900 shadow-xl">
+                className={cn(
+                  "h-8 border-slate-200 bg-slate-50 font-bold text-xs focus:bg-white focus:ring-0 transition-all",
+                  lockSymbol && "opacity-60 cursor-not-allowed bg-slate-100 pr-8"
+                )}
+              />
+              <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-300 pointer-events-none" />
+              {lockSymbol && (
+                <Lock className="absolute right-8 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-300" />
+              )}
+            </div>
+            {isSymbolMenuOpen && hasSymbols && !lockSymbol && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded border border-slate-200 bg-white shadow-lg animate-in fade-in duration-75">
+                <div className="py-0.5">
                   {suggestedSymbols.length > 0 ? (
-                    <div className="py-1">
-                      {suggestedSymbols.map((option) => (
-                        <button
-                          key={option.symbol}
-                          type="button"
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => handleSymbolSelect(option)}
-                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-100"
-                        >
-                          <span className="font-medium">{option.displayName}</span>
-                          <span className="text-xs text-gray-500">{option.symbol}</span>
-                        </button>
-                      ))}
-                    </div>
+                    suggestedSymbols.map((option) => (
+                      <button
+                        key={option.symbol}
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => handleSymbolSelect(option)}
+                        className="flex w-full items-center justify-between px-2.5 py-1.5 text-left hover:bg-slate-50 transition-colors"
+                      >
+                        <span className="text-[11px] font-bold text-slate-700">{option.displayName}</span>
+                        <span className="text-[9px] font-mono text-slate-400">{option.symbol}</span>
+                      </button>
+                    ))
                   ) : (
-                    <div className="px-3 py-2 text-xs text-gray-500">
-                      没有匹配的币种
-                    </div>
+                    <div className="px-2 py-2 text-[10px] text-slate-400 text-center">未找到</div>
                   )}
                 </div>
-              ) : null}
-            </div>
-            {!hasSymbols && (
-              <p className="text-[10px] text-amber-600">
-                暂无可用币种，请稍后再试
-              </p>
+              </div>
             )}
           </div>
+        </div>
 
-          {/* Lighter Section */}
-          <div className="pt-1">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="h-[1px] flex-1 bg-slate-100" />
-              <span className="text-[9px] font-bold text-primary/60 uppercase tracking-[0.2em]">Lighter 配置</span>
-              <div className="h-[1px] flex-1 bg-slate-100" />
+        {/* Venue A Section (Lighter) */}
+        <div className="space-y-2.5 pt-0.5">
+          <div className="flex items-center gap-1.5">
+            <div className="h-1.5 w-1 rounded-full bg-primary" />
+            <span className="text-[10px] font-black text-primary uppercase tracking-widest">Lighter</span>
+            <div className="flex-1 h-[1px] bg-slate-100" />
+          </div>
+          
+          <div className="space-y-1.5">
+            <Label className="text-[10px] font-bold text-slate-400 ml-0.5">杠杆参数</Label>
+            <LeverageSlider
+              value={lighterLeverage}
+              onChange={handleLeverageChange}
+              onCommit={handleLeverageCommit}
+              max={sharedMax}
+              accentColor="hsl(var(--primary))"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={lockDirections}
+              onClick={() => {
+                if (lockDirections) return;
+                setLighterDirection("long");
+                setGrvtDirection("short");
+              }}
+              className={cn(
+                "h-7 font-black text-[10px] px-0 uppercase transition-all",
+                lighterDirection === "long" 
+                  ? "bg-emerald-50 text-emerald-600 border-emerald-200" 
+                  : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+              )}
+            >
+              Long
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={lockDirections}
+              onClick={() => {
+                if (lockDirections) return;
+                setLighterDirection("short");
+                setGrvtDirection("long");
+              }}
+              className={cn(
+                "h-7 font-black text-[10px] px-0 uppercase transition-all",
+                lighterDirection === "short" 
+                  ? "bg-rose-50 text-rose-600 border-rose-200" 
+                  : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+              )}
+            >
+              Short
+            </Button>
+          </div>
+        </div>
+
+        {/* Venue B Section (GRVT) */}
+        <div className="space-y-2.5 pt-1">
+          <div className="flex items-center gap-1.5">
+            <div className="h-1.5 w-1 rounded-full bg-indigo-500" />
+            <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">GRVT</span>
+            <div className="flex-1 h-[1px] bg-slate-100" />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-[10px] font-bold text-slate-400 ml-0.5">杠杆参数</Label>
+            <LeverageSlider
+              value={grvtLeverage}
+              onChange={handleLeverageChange}
+              onCommit={handleLeverageCommit}
+              max={sharedMax}
+              accentColor="#6366f1"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={lockDirections}
+              onClick={() => {
+                if (lockDirections) return;
+                setGrvtDirection("long");
+                setLighterDirection("short");
+              }}
+              className={cn(
+                "h-7 font-black text-[10px] px-0 uppercase transition-all",
+                grvtDirection === "long" 
+                  ? "bg-emerald-50 text-emerald-600 border-emerald-200" 
+                  : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+              )}
+            >
+              Long
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={lockDirections}
+              onClick={() => {
+                if (lockDirections) return;
+                setGrvtDirection("short");
+                setLighterDirection("long");
+              }}
+              className={cn(
+                "h-7 font-black text-[10px] px-0 uppercase transition-all",
+                grvtDirection === "short" 
+                  ? "bg-rose-50 text-rose-600 border-rose-200" 
+                  : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+              )}
+            >
+              Short
+            </Button>
+          </div>
+        </div>
+
+        {/* Risk Management - Flatter Group */}
+        <div className="space-y-2 pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-between py-1 group cursor-pointer" onClick={() => setAvoidAdverseSpread(!avoidAdverseSpread)}>
+            <div className="flex flex-col">
+              <span className="text-[11px] font-bold text-slate-700">避免不利价差</span>
+              <span className="text-[9px] text-slate-400">阻止偏差超过阈值的成交</span>
             </div>
+            <div className={cn("h-4 w-7 rounded-full transition-colors relative", avoidAdverseSpread ? "bg-primary" : "bg-slate-200")}>
+              <div className={cn("absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform", avoidAdverseSpread && "translate-x-3")} />
+            </div>
+          </div>
 
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">杠杆倍数</Label>
-                <LeverageSlider
-                  value={lighterLeverage}
-                  onChange={handleLeverageChange}
-                  onCommit={handleLeverageCommit}
-                  max={sharedMax}
-                  accentColor="#3b82f6"
+          <div className="space-y-1.5 py-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-700">自动平仓</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase">Custom</span>
+            </div>
+            <div className="flex items-center gap-2 mt-1.5 bg-slate-50 px-2 py-1.5 rounded border border-slate-100 animate-in slide-in-from-top-1">
+              <div className="flex items-center gap-1 flex-1">
+                <Input
+                  type="number"
+                  min="0"
+                  placeholder="D"
+                  value={customDays}
+                  onChange={(e) => setCustomDays(e.target.value)}
+                  className="h-6 w-full border-slate-200 text-[10px] font-black p-1 text-center"
                 />
+                <span className="text-[9px] font-bold text-slate-400">D</span>
               </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">变动方向</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => {
-                      if (lockDirections) {
-                        return;
-                      }
-                      setLighterDirection("long");
-                      setGrvtDirection("short");
-                    }}
-                    disabled={lockDirections}
-                    className={cn(
-                      "relative overflow-hidden h-9 px-3 text-[11px] font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
-                      lighterDirection === "long"
-                        ? "bg-green-500 text-white border-green-600 shadow-sm"
-                        : "bg-white text-slate-600 border-slate-200 hover:border-green-200 hover:bg-green-50/30"
-                    )}
-                  >
-                    {lockDirections ? (
-                      <Lock className="h-3 w-3 text-slate-400" />
-                    ) : (
-                    <ArrowUpRight className={cn("h-3.5 w-3.5", lighterDirection === "long" ? "text-white" : "text-green-500")} />
-                    )}
-                    做多
-                    {lighterDirection === "long" && (
-                      <div className="absolute right-[-4px] top-[-4px] h-4 w-4 bg-white/20 rotate-45" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (lockDirections) {
-                        return;
-                      }
-                      setLighterDirection("short");
-                      setGrvtDirection("long");
-                    }}
-                    disabled={lockDirections}
-                    className={cn(
-                      "relative overflow-hidden h-9 px-3 text-[11px] font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
-                      lighterDirection === "short"
-                        ? "bg-red-500 text-white border-red-600 shadow-sm"
-                        : "bg-white text-slate-600 border-slate-200 hover:border-red-200 hover:bg-red-50/30"
-                    )}
-                  >
-                    {lockDirections ? (
-                      <Lock className="h-3 w-3 text-slate-400" />
-                    ) : (
-                    <ArrowDownRight className={cn("h-3.5 w-3.5", lighterDirection === "short" ? "text-white" : "text-red-500")} />
-                    )}
-                    做空
-                    {lighterDirection === "short" && (
-                      <div className="absolute right-[-4px] top-[-4px] h-4 w-4 bg-white/20 rotate-45" />
-                    )}
-                  </button>
-                </div>
+              <div className="flex items-center gap-1 flex-1">
+                <Input
+                  type="number"
+                  min="0"
+                  max="23"
+                  placeholder="H"
+                  value={customHours}
+                  onChange={(e) => setCustomHours(e.target.value)}
+                  className="h-6 w-full border-slate-200 text-[10px] font-black p-1 text-center"
+                />
+                <span className="text-[9px] font-bold text-slate-400">H</span>
               </div>
             </div>
           </div>
 
-          {/* GRVT Section */}
-          <div className="pt-2.5">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="h-[1px] flex-1 bg-slate-100" />
-              <span className="text-[9px] font-bold text-indigo-500/60 uppercase tracking-[0.2em]">GRVT 配置</span>
-              <div className="h-[1px] flex-1 bg-slate-100" />
+          <div className="space-y-1.5 py-1">
+            <div className="flex items-center justify-between cursor-pointer" onClick={() => setLiquidationGuardEnabled(!liquidationGuardEnabled)}>
+              <span className="text-[11px] font-bold text-slate-700">风控保护 (L/G)</span>
+              <div className={cn("h-4 w-7 rounded-full transition-colors relative", liquidationGuardEnabled ? "bg-primary" : "bg-slate-200")}>
+                <div className={cn("absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform", liquidationGuardEnabled && "translate-x-3")} />
+              </div>
             </div>
-
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">杠杆倍数</Label>
-                <LeverageSlider
-                  value={grvtLeverage}
-                  onChange={handleLeverageChange}
-                  onCommit={handleLeverageCommit}
-                  max={sharedMax}
-                  accentColor="#6366f1"
+            {liquidationGuardEnabled && (
+              <div className="flex items-center gap-2 bg-slate-50 px-2 py-1.5 rounded border border-slate-100 animate-in slide-in-from-top-1">
+                <span className="text-[9px] font-bold text-slate-400 uppercase">阈值</span>
+                <Input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={liquidationGuardPct}
+                  onChange={(e) => setLiquidationGuardPct(e.target.value)}
+                  className="h-6 w-12 border-slate-200 text-[10px] font-black p-1 text-center"
                 />
+                <span className="text-[9px] font-bold text-slate-400">%</span>
               </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">变动方向</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => {
-                      if (lockDirections) {
-                        return;
-                      }
-                      setGrvtDirection("long");
-                      setLighterDirection("short");
-                    }}
-                    disabled={lockDirections}
-                    className={cn(
-                      "relative overflow-hidden h-9 px-3 text-[11px] font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
-                      grvtDirection === "long"
-                        ? "bg-emerald-500 text-white border-emerald-600 shadow-sm"
-                        : "bg-white text-slate-600 border-slate-200 hover:border-emerald-200 hover:bg-emerald-50/30"
-                    )}
-                  >
-                    {lockDirections ? (
-                      <Lock className="h-3 w-3 text-slate-400" />
-                    ) : (
-                    <ArrowUpRight className={cn("h-3.5 w-3.5", grvtDirection === "long" ? "text-white" : "text-emerald-500")} />
-                    )}
-                    做多
-                    {grvtDirection === "long" && (
-                      <div className="absolute right-[-4px] top-[-4px] h-4 w-4 bg-white/20 rotate-45" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (lockDirections) {
-                        return;
-                      }
-                      setGrvtDirection("short");
-                      setLighterDirection("long");
-                    }}
-                    disabled={lockDirections}
-                    className={cn(
-                      "relative overflow-hidden h-9 px-3 text-[11px] font-bold rounded-lg border transition-all flex items-center justify-center gap-2",
-                      grvtDirection === "short"
-                        ? "bg-rose-500 text-white border-rose-600 shadow-sm"
-                        : "bg-white text-slate-600 border-slate-200 hover:border-rose-200 hover:bg-rose-50/30"
-                    )}
-                  >
-                    {lockDirections ? (
-                      <Lock className="h-3 w-3 text-slate-400" />
-                    ) : (
-                    <ArrowDownRight className={cn("h-3.5 w-3.5", grvtDirection === "short" ? "text-white" : "text-rose-500")} />
-                    )}
-                    做空
-                    {grvtDirection === "short" && (
-                      <div className="absolute right-[-4px] top-[-4px] h-4 w-4 bg-white/20 rotate-45" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
+        </div>
 
-          {/* Notional Value Section */}
-          <div className="space-y-2 pt-3 border-t border-slate-100">
-            <div className="space-y-1.5">
-              <Label className="text-[10px] font-bold text-slate-700 uppercase tracking-wide">
-                风控设置
-              </Label>
-              <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-[11px] text-slate-700">
-                <span className="font-semibold">避免不利价差</span>
-                <input
-                  type="checkbox"
-                  checked={avoidAdverseSpread}
-                  onChange={(event) => setAvoidAdverseSpread(event.target.checked)}
-                  className="h-4 w-4 accent-primary"
-                />
-              </label>
-              <p className="text-[9px] text-slate-500">
-                勾选后，价差不利时将阻止下单。
-              </p>
-              <div className="space-y-1.5">
-                <Label className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">
-                  定时自动平仓
-                </Label>
-                <Select value={autoCloseSelection} onValueChange={(value) => setAutoCloseSelection(value as typeof autoCloseSelection)}>
-                  <SelectTrigger className="h-8 border-slate-200 bg-white text-[11px] font-semibold text-slate-700 focus:ring-0">
-                    <SelectValue placeholder="关闭" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="off">关闭</SelectItem>
-                    <SelectItem value="24h">24 小时</SelectItem>
-                    <SelectItem value="2d">2 天</SelectItem>
-                    <SelectItem value="1w">1 周</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-[11px] text-slate-700">
-                  <span className="font-semibold">避免爆仓</span>
-                  <input
-                    type="checkbox"
-                    checked={liquidationGuardEnabled}
-                    onChange={(event) => setLiquidationGuardEnabled(event.target.checked)}
-                    className="h-4 w-4 accent-primary"
-                  />
-                </label>
-                <div className="flex items-center gap-2 text-[10px] text-slate-500">
-                  <span className="shrink-0">阈值</span>
-                  <Input
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={liquidationGuardPct}
-                    onChange={(event) => setLiquidationGuardPct(event.target.value)}
-                    disabled={!liquidationGuardEnabled}
-                    className="h-7 w-20 border-slate-200 bg-white text-[11px] font-semibold text-slate-700 disabled:opacity-60"
-                  />
-                  <span className="shrink-0">%</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-2 pt-3 border-t border-slate-100 pb-2">
-            <Label htmlFor="notional" className="text-[10px] font-bold text-slate-700 uppercase tracking-wide">
-              合约名义价值 (USD)
-            </Label>
-            <div className="relative">
-              <Input
-                id="notional"
-                type="number"
-                min="1"
-                value={notionalValue}
-                onChange={(e) => setNotionalValue(e.target.value)}
-                className="h-9 bg-slate-50/50 border-slate-200 text-slate-900 font-bold focus:bg-white focus:ring-primary/20 transition-all pr-12"
-                placeholder="0.00"
-              />
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-bold text-slate-400">USD</div>
-            </div>
+        {/* Notional Value - Dense Input */}
+        <div className="space-y-1.5 pt-1">
+          <Label htmlFor="notional" className="text-[10px] font-bold text-slate-400 uppercase tracking-tight ml-0.5">
+            合约面值 (USD)
+          </Label>
+          <div className="relative">
+            <Input
+              id="notional"
+              type="number"
+              min="1"
+              value={notionalValue}
+              onChange={(e) => setNotionalValue(e.target.value)}
+              className="h-8 bg-slate-50 border-slate-200 text-slate-900 font-bold text-xs focus:bg-white focus:ring-0 transition-all pr-10"
+              placeholder="0.00"
+            />
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-300">USD</div>
           </div>
         </div>
       </div>
 
-      {/* Action Button */}
-      <div className="p-3 bg-slate-50/50 border-t border-slate-100 space-y-2">
-        <div className="grid grid-cols-2 gap-2">
-          <div className="relative flex flex-col items-center justify-center py-1.5 rounded-lg border border-blue-100 bg-blue-50/30">
-            <span className="text-[8px] uppercase tracking-[0.15em] font-black text-blue-500/60 mb-0.5">
-              Lighter 保证金
+      {/* Footer - Integrated Action Area */}
+      <div className="shrink-0 p-3 bg-white border-t border-slate-100 space-y-2.5">
+        {/* Margin Summary - Compact Table Style */}
+        <div className="grid grid-cols-2 bg-slate-50/50 border border-slate-100 rounded">
+          <div className="p-2 border-r border-slate-100 flex flex-col items-center gap-0.5">
+            <span className="text-[7px] uppercase font-black text-slate-400 tracking-tighter">Lighter Margin</span>
+            <span className="font-mono text-[10px] font-black text-primary">
+              {lighterMargin != null ? `$${lighterMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "--"}
             </span>
-            <span className="font-mono text-[11px] font-black text-blue-700">
-              {lighterMargin != null
-                ? `${lighterMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                : "--"}
-            </span>
-            <div className="absolute left-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-blue-400/30" />
           </div>
-
-          <div className="relative flex flex-col items-center justify-center py-1.5 rounded-lg border border-indigo-100 bg-indigo-50/30">
-            <span className="text-[8px] uppercase tracking-[0.15em] font-black text-indigo-500/60 mb-0.5">
-              GRVT 保证金
+          <div className="p-2 flex flex-col items-center gap-0.5">
+            <span className="text-[7px] uppercase font-black text-slate-400 tracking-tighter">GRVT Margin</span>
+            <span className="font-mono text-[10px] font-black text-indigo-600">
+              {grvtMargin != null ? `$${grvtMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "--"}
             </span>
-            <span className="font-mono text-[11px] font-black text-indigo-700">
-              {grvtMargin != null
-                ? `${grvtMargin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                : "--"}
-            </span>
-            <div className="absolute left-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-indigo-400/30" />
           </div>
         </div>
+
+        {/* Execute Button - Professional Gradient Style */}
         <Button
           onClick={onExecuteArbitrage}
-          disabled={!hasSymbols || executeDisabled}
-          className="w-full h-10 bg-primary hover:bg-primary/90 text-white font-black text-sm uppercase tracking-[0.15em] transition-all transform active:scale-[0.98] shadow-md shadow-primary/20 disabled:opacity-50 disabled:grayscale"
+          disabled={!hasSymbols || executeDisabled || !safeNotional}
+          className={cn(
+            "w-full h-10 text-[11px] font-black uppercase tracking-[0.1em] transition-all active:scale-[0.99]",
+            "bg-primary hover:bg-primary/90 text-white shadow-sm",
+            "disabled:opacity-30 disabled:grayscale disabled:shadow-none"
+          )}
         >
-          <TrendingUp className="h-4 w-4 mr-2" />
           {executeLabel}
         </Button>
       </div>

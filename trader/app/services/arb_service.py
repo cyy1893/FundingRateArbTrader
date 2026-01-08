@@ -154,6 +154,8 @@ def _serialize_order_log(log: OrderLog):
         "price": log.price,
         "size": log.size,
         "reduce_only": log.reduce_only,
+        "request_payload": log.request_payload,
+        "response_payload": log.response_payload,
         "status": log.status.value,
         "created_at": log.created_at,
         "updated_at": log.updated_at,

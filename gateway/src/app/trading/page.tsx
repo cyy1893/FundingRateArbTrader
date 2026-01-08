@@ -678,6 +678,15 @@ function TradingPageContent() {
   }, [subscription?.symbol, subscription?.auto_close_after_ms, clearAutoCloseTimer]);
 
   useEffect(() => {
+    if (!draftSubscription || !subscription) {
+      return;
+    }
+    if (draftSubscription.symbol !== subscription.symbol) {
+      setSubscription(draftSubscription);
+    }
+  }, [draftSubscription, subscription]);
+
+  useEffect(() => {
     if (!subscription?.liquidation_guard_enabled || !balancesSnapshot) {
       return;
     }

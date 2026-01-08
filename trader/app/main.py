@@ -449,6 +449,15 @@ async def open_arb_position(
             )
             return True
         except Exception as exc:  # noqa: BLE001
+            logging.error(
+                "arb order failed venue=%s symbol=%s side=%s price=%s size=%s error=%s",
+                venue,
+                request.symbol,
+                side,
+                price,
+                size,
+                exc,
+            )
             _record_order(
                 venue=venue,
                 side=side,

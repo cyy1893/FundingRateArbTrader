@@ -51,9 +51,11 @@ class LighterSymbolOrderRequest(BaseModel):
     price: float = Field(..., gt=0, description="Limit price in quote units")
     reduce_only: bool = False
     time_in_force: Literal["post_only", "gtc", "ioc"] = "post_only"
+    trigger_price: Optional[float] = Field(None, description="Trigger price for conditional orders")
     order_expiry_secs: Optional[int] = Field(
         None, description="Optional unix timestamp when the order expires"
     )
+    nonce: Optional[int] = None
     api_key_index: Optional[int] = None
 
 
@@ -470,6 +472,8 @@ class OrderLogSnapshot(BaseModel):
     price: float
     size: float
     reduce_only: bool
+    request_payload: dict | None = None
+    response_payload: dict | None = None
     status: str
     created_at: datetime
     updated_at: datetime

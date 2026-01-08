@@ -35,6 +35,8 @@ class GrvtService:
         self._settings = settings
         self._client: GrvtCcxtPro | None = None
         self._lock = asyncio.Lock()
+        self._client_cache: dict[tuple[str, str, str], GrvtCcxtPro] = {}
+        self._client_cache_lock = asyncio.Lock()
         self._instrument_map: dict[str, str] = {}
         self._instrument_lock = asyncio.Lock()
         self._apply_env_overrides()
@@ -48,6 +50,12 @@ class GrvtService:
             if session is not None and not session.closed:
                 await session.close()
             self._client = None
+        if self._client_cache:
+            for client in self._client_cache.values():
+                session = getattr(client, "_session", None)
+                if session is not None and not session.closed:
+                    await session.close()
+            self._client_cache = {}
 
     @property
     def is_ready(self) -> bool:
@@ -62,19 +70,12 @@ class GrvtService:
         private_key: str,
         trading_account_id: str,
     ) -> GrvtBalanceSnapshot:
-        client = await self._build_client_for_credentials(api_key, private_key, trading_account_id)
-        try:
-            account_summary = await client.get_account_summary()
-            if not account_summary:
-                raise RuntimeError("GRVT account summary returned no data")
+        client = await self._get_cached_client_for_credentials(api_key, private_key, trading_account_id)
+        account_summary = await client.get_account_summary()
+        if not account_summary:
+            raise RuntimeError("GRVT account summary returned no data")
 
-            return self._build_balance_snapshot(client, account_summary)
-        finally:
-            close = getattr(client, "close", None)
-            if close:
-                result = close()
-                if asyncio.iscoroutine(result):
-                    await result
+        return self._build_balance_snapshot(client, account_summary)
 
     async def stream_orderbook(self, symbol: str, depth: int) -> asyncio.AsyncIterator[VenueOrderBook]:
         """
@@ -90,7 +91,7 @@ class GrvtService:
         private_key: str,
         trading_account_id: str,
     ) -> asyncio.AsyncIterator[VenueOrderBook]:
-        client = await self._build_client_for_credentials(api_key, private_key, trading_account_id)
+        client = await self._get_cached_client_for_credentials(api_key, private_key, trading_account_id)
         instrument = await self._get_instrument_with_client(client, symbol)
         await client.refresh_cookie()
         cookie = getattr(client, "_cookie", {}) or {}
@@ -161,11 +162,6 @@ class GrvtService:
             ws_task.cancel()
             fallback_task.cancel()
             await asyncio.gather(ws_task, fallback_task, return_exceptions=True)
-            close = getattr(client, "close", None)
-            if close:
-                result = close()
-                if asyncio.iscoroutine(result):
-                    await result
 
     async def stream_trades(self, symbol: str, limit: int = 50) -> asyncio.AsyncIterator[list[TradeEntry]]:
         """
@@ -185,7 +181,7 @@ class GrvtService:
         Stream recent trades over WebSocket; falls back to HTTP if WS has not yielded yet.
         """
 
-        client = await self._build_client_for_credentials(api_key, private_key, trading_account_id)
+        client = await self._get_cached_client_for_credentials(api_key, private_key, trading_account_id)
         instrument = await self._get_instrument_with_client(client, symbol)
         await client.refresh_cookie()
         cookie = getattr(client, "_cookie", {}) or {}
@@ -255,11 +251,6 @@ class GrvtService:
             ws_task.cancel()
             fallback_task.cancel()
             await asyncio.gather(ws_task, fallback_task, return_exceptions=True)
-            close = getattr(client, "close", None)
-            if close:
-                result = close()
-                if asyncio.iscoroutine(result):
-                    await result
 
     async def place_order(self, request: GrvtOrderRequest) -> GrvtOrderResponse:
         raise RuntimeError("Global GRVT credentials are disabled; use per-user credentials")
@@ -271,36 +262,29 @@ class GrvtService:
         private_key: str,
         trading_account_id: str,
     ) -> GrvtOrderResponse:
-        client = await self._build_client_for_credentials(api_key, private_key, trading_account_id)
-        try:
-            instrument = await self._get_instrument_with_client(client, request.symbol)
-            market = (client.markets or {}).get(instrument, {})
-            amount = self._normalize_amount(request.amount, market)
-            price = self._normalize_price(request.price, market)
-            params: dict[str, Any] = {
-                "post_only": request.post_only,
-                "reduce_only": request.reduce_only,
-                "order_duration_secs": request.order_duration_secs,
-                "time_in_force": "GOOD_TILL_TIME",
-            }
-            if request.client_order_id is not None:
-                params["client_order_id"] = request.client_order_id
+        client = await self._get_cached_client_for_credentials(api_key, private_key, trading_account_id)
+        instrument = await self._get_instrument_with_client(client, request.symbol)
+        market = (client.markets or {}).get(instrument, {})
+        amount = self._normalize_amount(request.amount, market)
+        price = self._normalize_price(request.price, market)
+        params: dict[str, Any] = {
+            "post_only": request.post_only,
+            "reduce_only": request.reduce_only,
+            "order_duration_secs": request.order_duration_secs,
+            "time_in_force": "GOOD_TILL_TIME",
+        }
+        if request.client_order_id is not None:
+            params["client_order_id"] = request.client_order_id
 
-            response = await client.create_order(
-                instrument,
-                "limit",
-                request.side,
-                amount,
-                price,
-                params,
-            )
-            return GrvtOrderResponse(payload=response or {})
-        finally:
-            close = getattr(client, "close", None)
-            if close:
-                result = close()
-                if asyncio.iscoroutine(result):
-                    await result
+        response = await client.create_order(
+            instrument,
+            "limit",
+            request.side,
+            amount,
+            price,
+            params,
+        )
+        return GrvtOrderResponse(payload=response or {})
 
     async def _ensure_client(self) -> GrvtCcxtPro:
         raise RuntimeError("Global GRVT credentials are disabled; use per-user credentials")
@@ -379,6 +363,21 @@ class GrvtService:
         client = GrvtCcxtPro(env=env, parameters=parameters)
         await client.load_markets()
         return client
+
+    async def _get_cached_client_for_credentials(
+        self,
+        api_key: str,
+        private_key: str,
+        trading_account_id: str,
+    ) -> GrvtCcxtPro:
+        cache_key = (api_key, private_key, trading_account_id)
+        async with self._client_cache_lock:
+            cached = self._client_cache.get(cache_key)
+            if cached is not None:
+                return cached
+            client = await self._build_client_for_credentials(api_key, private_key, trading_account_id)
+            self._client_cache[cache_key] = client
+            return client
 
     async def _get_instrument_with_client(self, client: GrvtCcxtPro, symbol: str) -> str:
         normalized = symbol.strip().upper().replace("-PERP", "").replace("_PERP", "")

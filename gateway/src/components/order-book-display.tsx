@@ -365,7 +365,10 @@ export function OrderBookDisplay({ orderBook, trades, status, hasSnapshot, hasLi
 
   return (
     <>
-      <div className="flex items-center justify-end mb-2">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-slate-600">
+          监控币种：{(lighterSymbol ?? grvtSymbol ?? "—").toUpperCase()}
+        </div>
         <button
           onClick={toggleMode}
           className="rounded-md border px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
