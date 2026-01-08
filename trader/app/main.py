@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 from collections.abc import AsyncIterator
 from typing import Any, Dict
+from cachetools import TTLCache
 
 from fastapi import Depends, FastAPI, HTTPException, Security, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,6 +71,7 @@ lighter_service = LighterService(settings)
 grvt_service = GrvtService(settings)
 market_data_service = MarketDataService(settings)
 auth_scheme = HTTPBearer()
+_user_cache = TTLCache(maxsize=2048, ttl=settings.user_cache_ttl_seconds)
 
 
 @asynccontextmanager
@@ -125,7 +127,11 @@ def get_current_user(
         username = manager.validate_token(credentials.credentials)
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=exc.message) from exc
-    user = session.exec(select(User).where(User.username == username, User.deleted_at.is_(None))).first()
+    user = _user_cache.get(username)
+    if user is None:
+        user = session.exec(select(User).where(User.username == username, User.deleted_at.is_(None))).first()
+        if user is not None and settings.user_cache_ttl_seconds > 0:
+            _user_cache[username] = user
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
     return user

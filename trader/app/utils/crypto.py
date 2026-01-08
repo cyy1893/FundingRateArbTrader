@@ -7,9 +7,9 @@ from app.config import get_settings
 
 def _get_fernet() -> Fernet:
     settings = get_settings()
-    if not settings.auth_crypto_key:
-        raise ValueError("AUTH_CRYPTO_KEY is required for credential encryption")
-    return Fernet(settings.auth_crypto_key.encode("utf-8"))
+    if not settings.crypto_key:
+        raise ValueError("CRYPTO_KEY is required for credential encryption")
+    return Fernet(settings.crypto_key.encode("utf-8"))
 
 
 def encrypt_secret(value: str) -> str:
