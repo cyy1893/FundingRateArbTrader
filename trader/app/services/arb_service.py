@@ -13,9 +13,10 @@ class ArbService:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def open_position(self, request: ArbOpenRequest) -> tuple[ArbPosition, list[RiskTask]]:
+    def open_position(self, request: ArbOpenRequest, user_id: uuid.UUID) -> tuple[ArbPosition, list[RiskTask]]:
         now = datetime.utcnow()
         position = ArbPosition(
+            user_id=user_id,
             symbol=request.symbol,
             left_venue=request.left_venue,
             right_venue=request.right_venue,

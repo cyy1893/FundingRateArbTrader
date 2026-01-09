@@ -379,6 +379,31 @@ class GrvtService:
             self._client_cache[cache_key] = client
             return client
 
+    async def get_best_prices_with_credentials(
+        self,
+        symbol: str,
+        api_key: str,
+        private_key: str,
+        trading_account_id: str,
+        depth: int = 1,
+    ) -> tuple[float | None, float | None, str]:
+        client = await self._get_cached_client_for_credentials(api_key, private_key, trading_account_id)
+        instrument = await self._get_instrument_with_client(client, symbol)
+        raw = await client.fetch_order_book(instrument, limit=max(1, depth))
+        bids = raw.get("bids") if isinstance(raw, dict) else None
+        asks = raw.get("asks") if isinstance(raw, dict) else None
+
+        def extract_price(level: Any) -> float:
+            if isinstance(level, (list, tuple)) and level:
+                return self._to_float(level[0])
+            if isinstance(level, dict):
+                return self._to_float(level.get("price"))
+            return 0.0
+
+        best_bid = extract_price(bids[0]) if isinstance(bids, list) and bids else 0.0
+        best_ask = extract_price(asks[0]) if isinstance(asks, list) and asks else 0.0
+        return (best_bid or None), (best_ask or None), instrument
+
     async def _get_instrument_with_client(self, client: GrvtCcxtPro, symbol: str) -> str:
         normalized = symbol.strip().upper().replace("-PERP", "").replace("_PERP", "")
         async with self._instrument_lock:

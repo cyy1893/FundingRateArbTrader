@@ -179,7 +179,6 @@ function TradingPageContent() {
   const searchParams = useSearchParams();
   const didShowToastRef = useRef(false);
   const lastLeverageCommitRef = useRef<{ symbol: string; leverage: number } | null>(null);
-  const autoCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const liquidationGuardTriggeredRef = useRef(false);
 
   useEffect(() => {
@@ -219,7 +218,6 @@ function TradingPageContent() {
   const [arbMessage, setArbMessage] = useState<string | null>(null);
   const [, setArbPositionId] = useState<string | null>(null);
   const balancesRef = useRef<BalancesResponse | null>(null);
-  const autoCloseScheduledRef = useRef(false);
   const symbolsCacheKey = `fra:trade-symbols:${comparisonSelection.primarySource.id}:${comparisonSelection.secondarySource.id}`;
   const SYMBOLS_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -464,21 +462,6 @@ function TradingPageContent() {
     return { ok: true, data, error: null };
   };
 
-  const clearAutoCloseTimer = useCallback(() => {
-    if (autoCloseTimeoutRef.current) {
-      clearTimeout(autoCloseTimeoutRef.current);
-      autoCloseTimeoutRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (autoCloseTimeoutRef.current) {
-        clearTimeout(autoCloseTimeoutRef.current);
-        autoCloseTimeoutRef.current = null;
-      }
-    };
-  }, []);
 
   const submitCloseOrders = useCallback(
     async ({
@@ -605,8 +588,6 @@ function TradingPageContent() {
         return;
       }
       liquidationGuardTriggeredRef.current = true;
-      clearAutoCloseTimer();
-
       const result = await submitCloseOrders({
         subscription: activeSubscription,
         lighterPosition,
@@ -617,7 +598,7 @@ function TradingPageContent() {
         liquidationGuardTriggeredRef.current = false;
       }
     },
-    [clearAutoCloseTimer, submitCloseOrders],
+    [submitCloseOrders],
   );
 
   useEffect(() => {
@@ -627,11 +608,6 @@ function TradingPageContent() {
     subscription?.liquidation_guard_enabled,
     subscription?.liquidation_guard_threshold_pct,
   ]);
-
-  useEffect(() => {
-    autoCloseScheduledRef.current = false;
-    clearAutoCloseTimer();
-  }, [subscription?.symbol, subscription?.auto_close_after_ms, clearAutoCloseTimer]);
 
   useEffect(() => {
     if (!draftSubscription || !subscription) {
@@ -675,66 +651,6 @@ function TradingPageContent() {
     }
   }, [balancesSnapshot, subscription, triggerLiquidationGuard]);
 
-  const scheduleAutoClose = useCallback(
-    (activeSubscription: OrderBookSubscription) => {
-      const delayMs = activeSubscription.auto_close_after_ms;
-      if (!delayMs) {
-        return;
-      }
-      clearAutoCloseTimer();
-      autoCloseTimeoutRef.current = setTimeout(async () => {
-        const snapshot = balancesRef.current;
-        if (!snapshot) {
-          toast.error("自动平仓失败：未获取到仓位数据。", {
-            className: "bg-destructive text-destructive-foreground",
-          });
-          return;
-        }
-        const symbol = activeSubscription.symbol.toUpperCase();
-        const lighterPosition = snapshot.lighter.positions.find(
-          (position) => position.symbol.toUpperCase() === symbol,
-        );
-        const grvtPosition = snapshot.grvt.positions.find(
-          (position) => position.instrument.toUpperCase() === symbol,
-        );
-        const result = await submitCloseOrders({
-          subscription: activeSubscription,
-          lighterPosition,
-          grvtPosition,
-          reason: "定时平仓",
-        });
-        if (result === "no-position") {
-          autoCloseScheduledRef.current = false;
-        }
-      }, delayMs);
-    },
-    [clearAutoCloseTimer, submitCloseOrders],
-  );
-
-  useEffect(() => {
-    if (!subscription?.auto_close_after_ms || !balancesSnapshot) {
-      return;
-    }
-    if (autoCloseScheduledRef.current) {
-      return;
-    }
-    const symbol = subscription.symbol.toUpperCase();
-    const lighterPosition = balancesSnapshot.lighter.positions.find(
-      (position) => position.symbol.toUpperCase() === symbol,
-    );
-    const grvtPosition = balancesSnapshot.grvt.positions.find(
-      (position) => position.instrument.toUpperCase() === symbol,
-    );
-    if (
-      lighterPosition &&
-      grvtPosition &&
-      Math.abs(lighterPosition.position) > 0 &&
-      Math.abs(grvtPosition.size) > 0
-    ) {
-      autoCloseScheduledRef.current = true;
-      scheduleAutoClose(subscription);
-    }
-  }, [balancesSnapshot, scheduleAutoClose, subscription]);
 
   const updateLighterLeverage = async (payload: Record<string, unknown>) => {
     const response = await fetch("/api/orders/lighter/leverage", {

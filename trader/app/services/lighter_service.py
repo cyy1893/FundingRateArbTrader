@@ -582,6 +582,22 @@ class LighterService:
             self._http_client = httpx.AsyncClient(timeout=5.0)
         return self._http_client
 
+    async def get_best_prices(self, symbol: str, depth: int = 1) -> tuple[float | None, float | None]:
+        stream = self.stream_orderbook(symbol, depth=max(1, depth))
+        try:
+            snapshot = await asyncio.wait_for(anext(stream), timeout=5)
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("Failed to fetch Lighter orderbook for %s: %s", symbol, exc)
+            return None, None
+        finally:
+            await stream.aclose()
+
+        bids = snapshot.bids.levels if snapshot and snapshot.bids else []
+        asks = snapshot.asks.levels if snapshot and snapshot.asks else []
+        best_bid = bids[0].price if bids else None
+        best_ask = asks[0].price if asks else None
+        return best_bid, best_ask
+
     async def _build_client_for_credentials(
         self,
         account_index: int,

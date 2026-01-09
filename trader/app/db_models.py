@@ -57,6 +57,9 @@ class ArbPosition(SQLModel, table=True):
         default_factory=uuid7,
         sa_column=Column(PGUUID(as_uuid=True), primary_key=True, nullable=False),
     )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(PGUUID(as_uuid=True), nullable=False, index=True),
+    )
     symbol: str = Field(index=True)
     left_venue: str
     right_venue: str

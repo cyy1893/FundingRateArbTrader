@@ -4,6 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 from datetime import datetime, timezone
+from uuid import UUID
 from collections.abc import AsyncIterator
 from typing import Any, Dict
 from cachetools import TTLCache
@@ -50,8 +51,17 @@ from app.models import (
     PerpSnapshot,
     PerpSnapshotRequest,
 )
-from app.db_models import ArbPositionStatus, OrderLog, OrderStatus, User
-from app.db_session import get_session
+from app.db_models import (
+    ArbPosition,
+    ArbPositionStatus,
+    OrderLog,
+    OrderStatus,
+    RiskTask,
+    RiskTaskStatus,
+    RiskTaskType,
+    User,
+)
+from app.db_session import get_engine, get_session
 from app.services.arb_service import ArbService
 from app.services.lighter_service import LighterService
 from app.services.grvt_service import GrvtService
@@ -77,7 +87,10 @@ _user_cache = TTLCache(maxsize=2048, ttl=settings.user_cache_ttl_seconds)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await asyncio.gather(lighter_service.start(), grvt_service.start())
+    auto_close_task = asyncio.create_task(auto_close_worker())
     yield
+    auto_close_task.cancel()
+    await asyncio.gather(auto_close_task, return_exceptions=True)
     await asyncio.gather(lighter_service.stop(), grvt_service.stop(), market_data_service.close())
 
 
@@ -116,6 +129,197 @@ def get_auth_manager(session: Session = Depends(get_session)) -> AuthManager:
         lockout_threshold=settings.auth_lockout_threshold,
         lockout_minutes=settings.auth_lockout_minutes,
     )
+
+
+async def _get_lighter_best_prices(symbol: str) -> tuple[float | None, float | None]:
+    return await lighter_service.get_best_prices(symbol, depth=1)
+
+
+async def _get_grvt_best_prices(
+    symbol: str,
+    api_key: str,
+    private_key: str,
+    trading_account_id: str,
+) -> tuple[float | None, float | None, str]:
+    return await grvt_service.get_best_prices_with_credentials(
+        symbol,
+        api_key=api_key,
+        private_key=private_key,
+        trading_account_id=trading_account_id,
+        depth=1,
+    )
+
+
+async def _execute_auto_close_task(task_id: UUID) -> None:
+    engine = get_engine()
+    with Session(engine) as session:
+        task = session.get(RiskTask, task_id)
+        if task is None or task.status != RiskTaskStatus.pending or task.task_type != RiskTaskType.auto_close:
+            return
+        position = session.get(ArbPosition, task.arb_position_id)
+        if position is None or position.status in {ArbPositionStatus.closed, ArbPositionStatus.failed}:
+            task.status = RiskTaskStatus.canceled
+            task.trigger_reason = "position inactive"
+            task.triggered_at = datetime.utcnow()
+            session.add(task)
+            session.commit()
+            return
+        user = session.get(User, position.user_id)
+        if user is None:
+            task.status = RiskTaskStatus.failed
+            task.trigger_reason = "user not found"
+            task.triggered_at = datetime.utcnow()
+            session.add(task)
+            session.commit()
+            return
+
+    symbol = position.symbol
+    try:
+        lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(user)
+        grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(user)
+        lighter_snapshot = await lighter_service.get_balances_with_credentials(
+            lighter_account_index,
+            lighter_api_key_index,
+            lighter_private_key,
+        )
+        grvt_snapshot = await grvt_service.get_balances_with_credentials(
+            grvt_api_key,
+            grvt_private_key,
+            grvt_trading_account_id,
+        )
+        grvt_best_bid, grvt_best_ask, grvt_instrument = await _get_grvt_best_prices(
+            symbol,
+            grvt_api_key,
+            grvt_private_key,
+            grvt_trading_account_id,
+        )
+        lighter_best_bid, lighter_best_ask = await _get_lighter_best_prices(symbol)
+    except Exception as exc:  # noqa: BLE001
+        with Session(engine) as session:
+            task = session.get(RiskTask, task_id)
+            if task is not None:
+                task.status = RiskTaskStatus.failed
+                task.trigger_reason = f"snapshot error: {exc}"
+                task.triggered_at = datetime.utcnow()
+                session.add(task)
+                session.commit()
+        return
+
+    lighter_position = next(
+        (pos for pos in lighter_snapshot.positions if pos.symbol.upper() == symbol.upper()),
+        None,
+    )
+    grvt_position = next(
+        (pos for pos in grvt_snapshot.positions if pos.instrument.upper() == grvt_instrument.upper()),
+        None,
+    )
+
+    orders: list[tuple[str, dict[str, Any]]] = []
+    if lighter_position and abs(lighter_position.position) > 0:
+        side = "sell" if lighter_position.position >= 0 else "buy"
+        price = lighter_best_bid if side == "buy" else lighter_best_ask
+        if price:
+            orders.append(
+                (
+                    "lighter",
+                    LighterSymbolOrderRequest(
+                        symbol=symbol,
+                        client_order_index=int(datetime.utcnow().timestamp() * 1000) % 2_147_483_647,
+                        side=side,
+                        base_amount=abs(lighter_position.position),
+                        price=price,
+                        reduce_only=True,
+                        time_in_force="post_only",
+                    ).model_dump(),
+                )
+            )
+    if grvt_position and abs(grvt_position.size) > 0:
+        side = "sell" if grvt_position.size >= 0 else "buy"
+        price = grvt_best_bid if side == "buy" else grvt_best_ask
+        if price:
+            orders.append(
+                (
+                    "grvt",
+                    GrvtOrderRequest(
+                        symbol=symbol,
+                        side=side,
+                        amount=abs(grvt_position.size),
+                        price=price,
+                        post_only=True,
+                        reduce_only=True,
+                        order_duration_secs=None,
+                        client_order_id=int(datetime.utcnow().timestamp() * 1000 + 1) % 2_147_483_647,
+                    ).model_dump(),
+                )
+            )
+
+    if not orders:
+        with Session(engine) as session:
+            task = session.get(RiskTask, task_id)
+            if task is not None:
+                task.status = RiskTaskStatus.failed
+                task.trigger_reason = "no positions or price"
+                task.triggered_at = datetime.utcnow()
+                session.add(task)
+                session.commit()
+        return
+
+    async def _place_order(venue: str, payload: dict[str, Any]) -> tuple[str, bool, str | None]:
+        try:
+            if venue == "lighter":
+                response = await lighter_service.place_order_by_symbol_with_credentials(
+                    LighterSymbolOrderRequest(**payload),
+                    account_index=lighter_account_index,
+                    api_key_index=lighter_api_key_index,
+                    private_key=lighter_private_key,
+                )
+            else:
+                response = await grvt_service.place_order_with_credentials(
+                    GrvtOrderRequest(**payload),
+                    api_key=grvt_api_key,
+                    private_key=grvt_private_key,
+                    trading_account_id=grvt_trading_account_id,
+                )
+            logging.info("auto close order placed venue=%s payload=%s response=%s", venue, payload, response.model_dump())
+            return venue, True, None
+        except Exception as exc:  # noqa: BLE001
+            logging.error("auto close order failed venue=%s payload=%s error=%s", venue, payload, exc)
+            return venue, False, str(exc)
+
+    results = await asyncio.gather(*(_place_order(venue, payload) for venue, payload in orders))
+    failed = [result for result in results if not result[1]]
+
+    with Session(engine) as session:
+        task = session.get(RiskTask, task_id)
+        if task is None:
+            return
+        task.triggered_at = datetime.utcnow()
+        if failed:
+            task.status = RiskTaskStatus.failed
+            task.trigger_reason = " | ".join(f"{venue}: {err}" for venue, _, err in failed if err)
+        else:
+            task.status = RiskTaskStatus.triggered
+            task.trigger_reason = "auto close orders placed"
+        session.add(task)
+        session.commit()
+
+
+async def auto_close_worker() -> None:
+    engine = get_engine()
+    while True:
+        await asyncio.sleep(2)
+        now = datetime.utcnow()
+        with Session(engine) as session:
+            task_ids = session.exec(
+                select(RiskTask.id)
+                .where(RiskTask.enabled.is_(True))
+                .where(RiskTask.task_type == RiskTaskType.auto_close)
+                .where(RiskTask.status == RiskTaskStatus.pending)
+                .where(RiskTask.execute_at.is_not(None))
+                .where(RiskTask.execute_at <= now)
+            ).all()
+        for task_id in task_ids:
+            await _execute_auto_close_task(task_id)
 
 
 def get_current_user(
@@ -349,7 +553,7 @@ async def open_arb_position(
     user: User = Depends(get_current_user),
 ) -> ArbOpenResponse:
     try:
-        position, risk_tasks = ArbService(session).open_position(request)
+        position, risk_tasks = ArbService(session).open_position(request, user.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
