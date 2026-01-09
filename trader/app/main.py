@@ -428,7 +428,7 @@ async def open_arb_position(
                 price=price,
                 post_only=True,
                 reduce_only=False,
-                order_duration_secs=10,
+                order_duration_secs=None,
                 client_order_id=client_index,
             )
             response = await grvt.place_order_with_credentials(
@@ -475,19 +475,21 @@ async def open_arb_position(
             )
             return False
 
-    left_ok = await place_for_venue(
-        request.left_venue,
-        request.left_side,
-        request.left_price,
-        request.left_size,
-        client_base,
-    )
-    right_ok = await place_for_venue(
-        request.right_venue,
-        request.right_side,
-        request.right_price,
-        request.right_size,
-        client_base + 1,
+    left_ok, right_ok = await asyncio.gather(
+        place_for_venue(
+            request.left_venue,
+            request.left_side,
+            request.left_price,
+            request.left_size,
+            client_base,
+        ),
+        place_for_venue(
+            request.right_venue,
+            request.right_side,
+            request.right_price,
+            request.right_size,
+            client_base + 1,
+        ),
     )
 
     if left_ok and right_ok:

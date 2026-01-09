@@ -505,7 +505,6 @@ function TradingPageContent() {
         side: "buy" | "sell",
         size: number,
         price: number,
-        useTaker: boolean,
         clientId: number,
       ) => {
         if (venue === "lighter") {
@@ -516,7 +515,7 @@ function TradingPageContent() {
             base_amount: size,
             price,
             reduce_only: true,
-            time_in_force: useTaker ? "ioc" : "post_only",
+            time_in_force: "post_only",
           };
         }
         return {
@@ -524,9 +523,8 @@ function TradingPageContent() {
           side,
           amount: size,
           price,
-          post_only: !useTaker,
+          post_only: true,
           reduce_only: true,
-          order_duration_secs: 10,
           client_order_id: clientId,
         };
       };
@@ -535,7 +533,6 @@ function TradingPageContent() {
         venue: "lighter" | "grvt",
         side: "buy" | "sell",
         size: number,
-        useTaker: boolean,
         clientId: number,
       ) => {
         const price = getMakerPrice(venue, side, symbol);
@@ -545,17 +542,17 @@ function TradingPageContent() {
         }
         orders.push({
           venue,
-          payload: buildPayload(venue, side, size, price, useTaker, clientId),
+          payload: buildPayload(venue, side, size, price, clientId),
         });
       };
 
       if (lighterPosition && Math.abs(lighterPosition.position) > 0) {
         const side = lighterPosition.position >= 0 ? "sell" : "buy";
-        addOrder("lighter", side, Math.abs(lighterPosition.position), false, clientBase);
+        addOrder("lighter", side, Math.abs(lighterPosition.position), clientBase);
       }
       if (grvtPosition && Math.abs(grvtPosition.size) > 0) {
         const side = grvtPosition.size >= 0 ? "sell" : "buy";
-        addOrder("grvt", side, Math.abs(grvtPosition.size), false, clientBase + 1);
+        addOrder("grvt", side, Math.abs(grvtPosition.size), clientBase + 1);
       }
 
       if (orders.length === 0) {
@@ -583,51 +580,10 @@ function TradingPageContent() {
         return "ok";
       }
 
-      const takerOrders: Array<{ venue: "lighter" | "grvt"; payload: Record<string, unknown> }> = [];
-      const takerErrors: string[] = [];
-      if (failedVenues.includes("lighter") && lighterPosition && Math.abs(lighterPosition.position) > 0) {
-        const side = lighterPosition.position >= 0 ? "sell" : "buy";
-        const price = getMakerPrice("lighter", side, symbol);
-        if (!price) {
-          takerErrors.push("Lighter: 订单簿数据不足");
-        } else {
-          takerOrders.push({
-            venue: "lighter",
-            payload: buildPayload("lighter", side, Math.abs(lighterPosition.position), price, true, clientBase + 2),
-          });
-        }
-      }
-      if (failedVenues.includes("grvt") && grvtPosition && Math.abs(grvtPosition.size) > 0) {
-        const side = grvtPosition.size >= 0 ? "sell" : "buy";
-        const price = getMakerPrice("grvt", side, symbol);
-        if (!price) {
-          takerErrors.push("GRVT: 订单簿数据不足");
-        } else {
-          takerOrders.push({
-            venue: "grvt",
-            payload: buildPayload("grvt", side, Math.abs(grvtPosition.size), price, true, clientBase + 3),
-          });
-        }
-      }
-
-      if (takerOrders.length === 0) {
-        const message = takerErrors.length > 0 ? takerErrors.join(" | ") : "挂单失败且无法降级为 IOC。";
-        toast.error(`${reason}失败：${message}`, {
-          className: "bg-destructive text-destructive-foreground",
-        });
-        return "error";
-      }
-
-      const takerResults = await Promise.all(
-        takerOrders.map((order) => placeOrder(order.venue, order.payload)),
-      );
-      const takerFailed = takerResults.filter((result) => !result.ok);
-      if (takerFailed.length === 0) {
-        toast.success(`${reason}已降级为 IOC 提交。`);
-        return "ok";
-      }
-      const detail = takerFailed.map((result) => result.error).filter(Boolean).join(" | ");
-      toast.error(`${reason}失败：${detail}`, {
+      const message = failedVenues
+        .map((venue) => (venue === "lighter" ? "Lighter" : "GRVT"))
+        .join(" | ");
+      toast.error(`${reason}失败：${message} 挂单未被接受。`, {
         className: "bg-destructive text-destructive-foreground",
       });
       return "error";
