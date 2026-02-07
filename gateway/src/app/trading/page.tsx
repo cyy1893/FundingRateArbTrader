@@ -25,10 +25,56 @@ import { getAvailableSymbols } from "@/lib/available-symbols";
 type ErrorPayload = { detail?: string; error?: string };
 type ArbOpenResponse = { arb_position_id?: string; status?: string; error?: string };
 
+type RetryFetchOptions = {
+  attempts?: number;
+  baseDelayMs?: number;
+  retryStatusCodes?: number[];
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithShortRetry(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  options: RetryFetchOptions = {},
+): Promise<Response> {
+  const attempts = Math.max(1, options.attempts ?? 3);
+  const baseDelayMs = Math.max(1, options.baseDelayMs ?? 300);
+  const retryStatusCodes = options.retryStatusCodes ?? [502, 503, 504];
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(input, init);
+      if (!retryStatusCodes.includes(response.status) || attempt === attempts - 1) {
+        return response;
+      }
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1) {
+        throw error;
+      }
+    }
+    await sleep(baseDelayMs * (attempt + 1));
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+
+  return fetch(input, init);
+}
+
 async function fetchBalances(): Promise<BalancesResponse> {
-  const response = await fetch("/api/balances", {
-    cache: "no-store",
-  });
+  const response = await fetchWithShortRetry(
+    "/api/balances",
+    {
+      cache: "no-store",
+    },
+    { attempts: 3, baseDelayMs: 300, retryStatusCodes: [502, 503, 504] },
+  );
 
   if (!response.ok) {
     let payload: ErrorPayload | null = null;
@@ -326,10 +372,23 @@ function TradingPageContent() {
           }
         }
 
-        const snapshot = await getAvailableSymbols(
-          comparisonSelection.primarySource,
-          comparisonSelection.secondarySource,
-        );
+        const snapshot = await (async () => {
+          let lastError: unknown;
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            try {
+              return await getAvailableSymbols(
+                comparisonSelection.primarySource,
+                comparisonSelection.secondarySource,
+              );
+            } catch (error) {
+              lastError = error;
+              if (attempt < 2) {
+                await sleep(300 * (attempt + 1));
+              }
+            }
+          }
+          throw lastError;
+        })();
         if (cancelled) {
           return;
         }
@@ -364,10 +423,23 @@ function TradingPageContent() {
 
     const loadLeverageCaps = async () => {
       try {
-        const snapshot = await getPerpetualSnapshot(
-          comparisonSelection.primarySource,
-          comparisonSelection.secondarySource,
-        );
+        const snapshot = await (async () => {
+          let lastError: unknown;
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            try {
+              return await getPerpetualSnapshot(
+                comparisonSelection.primarySource,
+                comparisonSelection.secondarySource,
+              );
+            } catch (error) {
+              lastError = error;
+              if (attempt < 2) {
+                await sleep(300 * (attempt + 1));
+              }
+            }
+          }
+          throw lastError;
+        })();
         if (cancelled) {
           return;
         }
