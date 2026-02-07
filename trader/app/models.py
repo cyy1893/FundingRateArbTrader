@@ -505,3 +505,20 @@ class AdminUserResponse(BaseModel):
     is_admin: bool
     is_active: bool
     created_at: datetime
+
+
+class AdminUserSummary(BaseModel):
+    id: str
+    username: str
+    is_admin: bool
+    is_active: bool
+    failed_attempts: int
+    locked_until: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    has_lighter_credentials: bool
+    has_grvt_credentials: bool
+
+
+class AdminUserListResponse(BaseModel):
+    users: list[AdminUserSummary]

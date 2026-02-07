@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import hmac
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
@@ -9,7 +10,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Dict
 from cachetools import TTLCache
 
-from fastapi import Depends, FastAPI, HTTPException, Security, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Security, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session, select
@@ -26,7 +27,9 @@ from app.models import (
     ArbOpenResponse,
     ArbStatusResponse,
     AdminCreateUserRequest,
+    AdminUserListResponse,
     AdminUserResponse,
+    AdminUserSummary,
     BalancesResponse,
     AvailableSymbolsRequest,
     AvailableSymbolsResponse,
@@ -345,6 +348,18 @@ def get_current_admin(user: User = Depends(get_current_user)) -> User:
     if not user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
     return user
+
+
+def verify_admin_registration_secret(request: Request) -> None:
+    header_name = settings.admin_client_header_name
+    provided_secret = request.headers.get(header_name)
+    if not provided_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Missing required admin client header: {header_name}",
+        )
+    if not hmac.compare_digest(provided_secret, settings.admin_registration_secret):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid admin client secret")
 
 
 def _get_lighter_credentials(user: User) -> tuple[int, int, str]:
@@ -844,9 +859,11 @@ async def login(
 @app.post("/admin/users", response_model=AdminUserResponse)
 async def create_user(
     payload: AdminCreateUserRequest,
+    request: Request,
     session: Session = Depends(get_session),
     _: User = Depends(get_current_admin),
 ) -> AdminUserResponse:
+    verify_admin_registration_secret(request)
     existing = session.exec(
         select(User).where(User.username == payload.username, User.deleted_at.is_(None))
     ).first()
@@ -889,6 +906,41 @@ async def create_user(
         is_admin=user.is_admin,
         is_active=user.is_active,
         created_at=user.created_at,
+    )
+
+
+@app.get("/admin/users", response_model=AdminUserListResponse)
+async def list_users(
+    session: Session = Depends(get_session),
+    _: User = Depends(get_current_admin),
+) -> AdminUserListResponse:
+    users = session.exec(
+        select(User)
+        .where(User.deleted_at.is_(None))
+        .order_by(User.created_at.desc())
+    ).all()
+    return AdminUserListResponse(
+        users=[
+            AdminUserSummary(
+                id=str(user.id),
+                username=user.username,
+                is_admin=user.is_admin,
+                is_active=user.is_active,
+                failed_attempts=user.failed_attempts,
+                locked_until=user.locked_until,
+                created_at=user.created_at,
+                updated_at=user.updated_at,
+                has_lighter_credentials=bool(
+                    user.lighter_account_index is not None
+                    and user.lighter_api_key_index is not None
+                    and user.lighter_private_key_enc
+                ),
+                has_grvt_credentials=bool(
+                    user.grvt_api_key_enc and user.grvt_private_key_enc and user.grvt_trading_account_id
+                ),
+            )
+            for user in users
+        ]
     )
 
 

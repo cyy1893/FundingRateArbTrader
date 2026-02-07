@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal, Optional
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     auth_token_ttl_minutes: int = Field(7 * 24 * 60, description="Access token lifetime in minutes")
     auth_lockout_threshold: int = Field(3, description="Number of failed logins before lockout")
     auth_lockout_minutes: int = Field(60, description="Lockout duration in minutes after threshold is reached")
+    admin_registration_secret: str = Field(
+        "",
+        description="Shared secret required by the admin frontend to create users",
+    )
+    admin_client_header_name: str = Field(
+        "X-Admin-Client-Secret",
+        description="HTTP header name used to carry admin registration secret",
+    )
     user_cache_ttl_seconds: int = Field(300, ge=0, description="User cache TTL in seconds (0 to disable)")
     crypto_key: str = Field(
         "",
@@ -60,6 +68,14 @@ class Settings(BaseSettings):
         default="require", validation_alias="PGCHANNELBINDING", description="Postgres channel binding requirement"
     )
     database_echo: bool = Field(False, description="Enable SQLAlchemy SQL echo logging")
+
+    @model_validator(mode="after")
+    def validate_admin_registration_secret(self) -> "Settings":
+        if not self.admin_registration_secret:
+            raise ValueError("ADMIN_REGISTRATION_SECRET is required for admin user registration APIs.")
+        if not self.admin_client_header_name:
+            raise ValueError("ADMIN_CLIENT_HEADER_NAME must not be empty.")
+        return self
 
 
 @lru_cache

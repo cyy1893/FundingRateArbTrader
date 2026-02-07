@@ -30,6 +30,10 @@ GRVT_PRIVATE_KEY=your-grvt-private-key
 GRVT_TRADING_ACCOUNT_ID=your-grvt-trading-account-id
 GRVT_END_POINT_VERSION=v1
 GRVT_WS_STREAM_VERSION=v1
+
+AUTH_JWT_SECRET=super-secret-change-me
+ADMIN_REGISTRATION_SECRET=replace-with-random-admin-secret
+ADMIN_CLIENT_HEADER_NAME=X-Admin-Client-Secret
 ```
 
 > **Note:** Private keys are loaded directly from env vars. Keep the `.env` file out of version control.
@@ -43,7 +47,7 @@ uvicorn app.main:app --reload --port 8080
 
 The service attempts to connect to Lighter during startup. If the connection fails (bad base URL, auth failure, etc.) the app will exit with a descriptive error so you can fix the configuration.
 
-### 2.1 Create an admin user (database-backed login)
+### 2.1 Bootstrap an admin user (database-backed login)
 
 First apply migrations, then create an admin user via the CLI tool:
 
@@ -52,11 +56,22 @@ alembic upgrade head
 python -m app.utils.user_admin create --username admin --password "StrongPass" --admin
 ```
 
+Use this CLI path for bootstrap only (initial admin account). Regular user creation should go through the dedicated `admin` frontend, which calls backend admin APIs with an additional shared secret header.
+
 To change an existing user's password:
 
 ```bash
 python -m app.utils.user_admin set-password --username admin --password "NewPass"
 ```
+
+### 2.2 Admin API security
+
+- `GET /admin/users` requires an admin JWT.
+- `POST /admin/users` requires both:
+  - admin JWT
+  - `ADMIN_CLIENT_HEADER_NAME` header whose value matches `ADMIN_REGISTRATION_SECRET`
+
+Keep `ADMIN_REGISTRATION_SECRET` only in trusted server runtime (`trader` and `admin`), never in browser-exposed env.
 
 ### 3. REST Endpoints
 

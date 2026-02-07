@@ -26,3 +26,18 @@ services:
       - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
     ports:
       - "3000:3000"
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    image: funding-rate-arb-admin:latest
+    container_name: funding-rate-arb-admin
+    depends_on:
+      - trader
+    env_file:
+      - ./trader/.env
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
+    ports:
+      - "3002:3000"
