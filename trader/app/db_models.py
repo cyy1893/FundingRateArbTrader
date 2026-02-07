@@ -139,6 +139,21 @@ class User(SQLModel, table=True):
     failed_attempts: int = 0
     failed_first_at: Optional[datetime] = None
     locked_until: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    deleted_at: Optional[datetime] = Field(default=None, index=True)
+
+
+class TradingProfile(SQLModel, table=True):
+    __tablename__ = "trading_profiles"
+
+    id: uuid.UUID = Field(
+        default_factory=uuid7,
+        sa_column=Column(PGUUID(as_uuid=True), primary_key=True, nullable=False),
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(PGUUID(as_uuid=True), nullable=False, unique=True, index=True),
+    )
     lighter_account_index: Optional[int] = None
     lighter_api_key_index: Optional[int] = None
     lighter_private_key_enc: Optional[str] = None

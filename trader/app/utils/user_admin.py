@@ -6,7 +6,7 @@ from datetime import datetime
 
 from sqlmodel import Session, select
 
-from app.db_models import User, uuid7
+from app.db_models import TradingProfile, User, uuid7
 from app.db_session import get_engine
 from app.utils.auth import _hash_password
 from app.utils.crypto import encrypt_secret
@@ -37,6 +37,11 @@ def create_user(
             password_salt=salt.hex(),
             is_active=True,
             is_admin=is_admin,
+            created_at=now,
+            updated_at=now,
+        )
+        profile = TradingProfile(
+            user_id=user.id,
             lighter_account_index=lighter_account_index,
             lighter_api_key_index=lighter_api_key_index,
             lighter_private_key_enc=encrypt_secret(lighter_private_key) if lighter_private_key else None,
@@ -47,6 +52,7 @@ def create_user(
             updated_at=now,
         )
         session.add(user)
+        session.add(profile)
         session.commit()
 
 

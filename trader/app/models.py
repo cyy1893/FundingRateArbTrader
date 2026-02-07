@@ -491,12 +491,12 @@ class AdminCreateUserRequest(BaseModel):
     password: str
     is_admin: bool = False
     is_active: bool = True
-    lighter_account_index: int | None = None
-    lighter_api_key_index: int | None = None
-    lighter_private_key: str | None = None
-    grvt_api_key: str | None = None
-    grvt_private_key: str | None = None
-    grvt_trading_account_id: str | None = None
+    lighter_account_index: int
+    lighter_api_key_index: int
+    lighter_private_key: str
+    grvt_api_key: str
+    grvt_private_key: str
+    grvt_trading_account_id: str
 
 
 class AdminUserResponse(BaseModel):
@@ -518,6 +518,15 @@ class AdminUserSummary(BaseModel):
     updated_at: datetime
     has_lighter_credentials: bool
     has_grvt_credentials: bool
+    lighter_account_index: int | None = None
+    lighter_api_key_index: int | None = None
+    lighter_private_key_configured: bool
+    lighter_private_key: str | None = None
+    grvt_trading_account_id: str | None = None
+    grvt_api_key_configured: bool
+    grvt_private_key_configured: bool
+    grvt_api_key: str | None = None
+    grvt_private_key: str | None = None
 
 
 class AdminUserListResponse(BaseModel):

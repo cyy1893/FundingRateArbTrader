@@ -77,6 +77,19 @@ def _login_token(client: TestClient, username: str, password: str) -> str:
     return token
 
 
+def _create_payload(username: str) -> dict:
+    return {
+        "username": username,
+        "password": f"{username}-pass",
+        "lighter_account_index": 1,
+        "lighter_api_key_index": 0,
+        "lighter_private_key": "0xabc123",
+        "grvt_api_key": "grvt-api-key",
+        "grvt_private_key": "grvt-private-key",
+        "grvt_trading_account_id": "grvt-account-id",
+    }
+
+
 def test_admin_users_list_requires_admin(client: TestClient) -> None:
     user_token = _login_token(client, "trader", "user-pass")
     response = client.get("/admin/users", headers={"Authorization": f"Bearer {user_token}"})
@@ -98,6 +111,15 @@ def test_admin_users_list_masks_sensitive_fields(client: TestClient) -> None:
     assert "grvt_private_key_enc" not in first_user
     assert "has_lighter_credentials" in first_user
     assert "has_grvt_credentials" in first_user
+    assert "lighter_account_index" in first_user
+    assert "lighter_api_key_index" in first_user
+    assert "lighter_private_key_configured" in first_user
+    assert "lighter_private_key" in first_user
+    assert "grvt_trading_account_id" in first_user
+    assert "grvt_api_key_configured" in first_user
+    assert "grvt_private_key_configured" in first_user
+    assert "grvt_api_key" in first_user
+    assert "grvt_private_key" in first_user
 
 
 def test_admin_create_user_requires_client_secret(client: TestClient) -> None:
@@ -106,21 +128,21 @@ def test_admin_create_user_requires_client_secret(client: TestClient) -> None:
 
     missing_secret = client.post(
         "/admin/users",
-        json={"username": "alice", "password": "alice-pass"},
+        json=_create_payload("alice"),
         headers=headers,
     )
     assert missing_secret.status_code == 403
 
     wrong_secret = client.post(
         "/admin/users",
-        json={"username": "alice", "password": "alice-pass"},
+        json=_create_payload("alice"),
         headers={**headers, settings.admin_client_header_name: "wrong-secret"},
     )
     assert wrong_secret.status_code == 403
 
     ok = client.post(
         "/admin/users",
-        json={"username": "alice", "password": "alice-pass"},
+        json=_create_payload("alice"),
         headers={**headers, settings.admin_client_header_name: settings.admin_registration_secret},
     )
     assert ok.status_code == 200
@@ -133,8 +155,22 @@ def test_admin_create_user_conflict(client: TestClient) -> None:
         "Authorization": f"Bearer {admin_token}",
         settings.admin_client_header_name: settings.admin_registration_secret,
     }
-    first = client.post("/admin/users", json={"username": "bob", "password": "bob-pass"}, headers=headers)
+    first = client.post("/admin/users", json=_create_payload("bob"), headers=headers)
     assert first.status_code == 200
 
-    second = client.post("/admin/users", json={"username": "bob", "password": "bob-pass"}, headers=headers)
+    second = client.post("/admin/users", json=_create_payload("bob"), headers=headers)
     assert second.status_code == 409
+
+
+def test_admin_create_user_requires_exchange_fields(client: TestClient) -> None:
+    admin_token = _login_token(client, "admin", "admin-pass")
+    headers = {
+        "Authorization": f"Bearer {admin_token}",
+        settings.admin_client_header_name: settings.admin_registration_secret,
+    }
+    response = client.post(
+        "/admin/users",
+        json={"username": "no-creds", "password": "pass"},
+        headers=headers,
+    )
+    assert response.status_code == 422

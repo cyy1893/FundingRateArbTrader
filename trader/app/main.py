@@ -62,6 +62,7 @@ from app.db_models import (
     RiskTask,
     RiskTaskStatus,
     RiskTaskType,
+    TradingProfile,
     User,
 )
 from app.db_session import get_engine, get_session
@@ -178,8 +179,18 @@ async def _execute_auto_close_task(task_id: UUID) -> None:
 
     symbol = position.symbol
     try:
-        lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(user)
-        grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(user)
+        with Session(engine) as session:
+            profile_user = session.get(User, user.id)
+            if profile_user is None:
+                raise RuntimeError("user not found")
+            lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(
+                session,
+                profile_user,
+            )
+            grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(
+                session,
+                profile_user,
+            )
         lighter_snapshot = await lighter_service.get_balances_with_credentials(
             lighter_account_index,
             lighter_api_key_index,
@@ -362,29 +373,47 @@ def verify_admin_registration_secret(request: Request) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid admin client secret")
 
 
-def _get_lighter_credentials(user: User) -> tuple[int, int, str]:
-    if user.lighter_account_index is None or user.lighter_api_key_index is None or not user.lighter_private_key_enc:
+def _get_trading_profile(session: Session, user: User) -> TradingProfile:
+    profile = session.exec(
+        select(TradingProfile).where(
+            TradingProfile.user_id == user.id,
+            TradingProfile.deleted_at.is_(None),
+        )
+    ).first()
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing trading profile for user")
+    return profile
+
+
+def _get_lighter_credentials(session: Session, user: User) -> tuple[int, int, str]:
+    profile = _get_trading_profile(session, user)
+    if (
+        profile.lighter_account_index is None
+        or profile.lighter_api_key_index is None
+        or not profile.lighter_private_key_enc
+    ):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing Lighter credentials for user")
     try:
-        private_key = decrypt_secret(user.lighter_private_key_enc)
+        private_key = decrypt_secret(profile.lighter_private_key_enc)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return user.lighter_account_index, user.lighter_api_key_index, private_key
+    return profile.lighter_account_index, profile.lighter_api_key_index, private_key
 
 
-def _get_grvt_credentials(user: User) -> tuple[str, str, str]:
+def _get_grvt_credentials(session: Session, user: User) -> tuple[str, str, str]:
+    profile = _get_trading_profile(session, user)
     if (
-        not user.grvt_api_key_enc
-        or not user.grvt_private_key_enc
-        or not user.grvt_trading_account_id
+        not profile.grvt_api_key_enc
+        or not profile.grvt_private_key_enc
+        or not profile.grvt_trading_account_id
     ):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing GRVT credentials for user")
     try:
-        api_key = decrypt_secret(user.grvt_api_key_enc)
-        private_key = decrypt_secret(user.grvt_private_key_enc)
+        api_key = decrypt_secret(profile.grvt_api_key_enc)
+        private_key = decrypt_secret(profile.grvt_private_key_enc)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return api_key, private_key, user.grvt_trading_account_id
+    return api_key, private_key, profile.grvt_trading_account_id
 
 
 async def authenticate_websocket(
@@ -427,10 +456,11 @@ async def health() -> Dict[str, Any]:
 async def balances(
     lighter: LighterService = Depends(get_lighter_service),
     grvt: GrvtService = Depends(get_grvt_service),
+    session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> BalancesResponse:
-    lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(user)
-    grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(user)
+    lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(session, user)
+    grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(session, user)
     lighter_result, grvt_result = await asyncio.gather(
         lighter.get_balances_with_credentials(
             lighter_account_index,
@@ -462,10 +492,11 @@ async def create_lighter_order(
     order: LighterOrderRequest,
     service: LighterService = Depends(get_lighter_service),
     broadcaster: EventBroadcaster = Depends(get_broadcaster),
+    session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
     try:
-        account_index, api_key_index, private_key = _get_lighter_credentials(user)
+        account_index, api_key_index, private_key = _get_lighter_credentials(session, user)
         response = await service.place_order_with_credentials(
             order,
             account_index=account_index,
@@ -490,10 +521,11 @@ async def create_lighter_order_by_symbol(
     order: LighterSymbolOrderRequest,
     service: LighterService = Depends(get_lighter_service),
     broadcaster: EventBroadcaster = Depends(get_broadcaster),
+    session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
     try:
-        account_index, api_key_index, private_key = _get_lighter_credentials(user)
+        account_index, api_key_index, private_key = _get_lighter_credentials(session, user)
         response = await service.place_order_by_symbol_with_credentials(
             order,
             account_index=account_index,
@@ -517,10 +549,11 @@ async def create_lighter_order_by_symbol(
 async def update_lighter_leverage(
     request: LighterLeverageRequest,
     service: LighterService = Depends(get_lighter_service),
+    session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
     try:
-        account_index, api_key_index, private_key = _get_lighter_credentials(user)
+        account_index, api_key_index, private_key = _get_lighter_credentials(session, user)
         return await service.update_leverage_by_symbol_with_credentials(
             request,
             account_index=account_index,
@@ -536,10 +569,11 @@ async def create_grvt_order(
     order: GrvtOrderRequest,
     service: GrvtService = Depends(get_grvt_service),
     broadcaster: EventBroadcaster = Depends(get_broadcaster),
+    session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
     try:
-        api_key, private_key, trading_account_id = _get_grvt_credentials(user)
+        api_key, private_key, trading_account_id = _get_grvt_credentials(session, user)
         response = await service.place_order_with_credentials(
             order,
             api_key=api_key,
@@ -572,8 +606,8 @@ async def open_arb_position(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(user)
-    grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(user)
+    lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(session, user)
+    grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(session, user)
 
     now = datetime.utcnow()
     client_base = int(now.timestamp() * 1000) % 2_147_483_647
@@ -888,6 +922,11 @@ async def create_user(
         password_salt=salt.hex(),
         is_active=payload.is_active,
         is_admin=payload.is_admin,
+        created_at=now,
+        updated_at=now,
+    )
+    profile = TradingProfile(
+        user_id=user.id,
         lighter_account_index=payload.lighter_account_index,
         lighter_api_key_index=payload.lighter_api_key_index,
         lighter_private_key_enc=lighter_private_key_enc,
@@ -898,6 +937,7 @@ async def create_user(
         updated_at=now,
     )
     session.add(user)
+    session.add(profile)
     session.commit()
     session.refresh(user)
     return AdminUserResponse(
@@ -919,8 +959,40 @@ async def list_users(
         .where(User.deleted_at.is_(None))
         .order_by(User.created_at.desc())
     ).all()
-    return AdminUserListResponse(
-        users=[
+    user_ids = [user.id for user in users]
+    profiles = session.exec(
+        select(TradingProfile).where(
+            TradingProfile.user_id.in_(user_ids),
+            TradingProfile.deleted_at.is_(None),
+        )
+    ).all()
+    profile_by_user_id = {profile.user_id: profile for profile in profiles}
+    summaries: list[AdminUserSummary] = []
+    for user in users:
+        profile = profile_by_user_id.get(user.id)
+
+        lighter_private_key: str | None = None
+        grvt_api_key: str | None = None
+        grvt_private_key: str | None = None
+        if profile is not None:
+            try:
+                lighter_private_key = (
+                    decrypt_secret(profile.lighter_private_key_enc)
+                    if profile.lighter_private_key_enc
+                    else None
+                )
+                grvt_api_key = decrypt_secret(profile.grvt_api_key_enc) if profile.grvt_api_key_enc else None
+                grvt_private_key = (
+                    decrypt_secret(profile.grvt_private_key_enc)
+                    if profile.grvt_private_key_enc
+                    else None
+                )
+            except ValueError:
+                lighter_private_key = None
+                grvt_api_key = None
+                grvt_private_key = None
+
+        summaries.append(
             AdminUserSummary(
                 id=str(user.id),
                 username=user.username,
@@ -931,17 +1003,30 @@ async def list_users(
                 created_at=user.created_at,
                 updated_at=user.updated_at,
                 has_lighter_credentials=bool(
-                    user.lighter_account_index is not None
-                    and user.lighter_api_key_index is not None
-                    and user.lighter_private_key_enc
+                    profile
+                    and profile.lighter_account_index is not None
+                    and profile.lighter_api_key_index is not None
+                    and profile.lighter_private_key_enc
                 ),
                 has_grvt_credentials=bool(
-                    user.grvt_api_key_enc and user.grvt_private_key_enc and user.grvt_trading_account_id
+                    profile
+                    and profile.grvt_api_key_enc
+                    and profile.grvt_private_key_enc
+                    and profile.grvt_trading_account_id
                 ),
+                lighter_account_index=profile.lighter_account_index if profile else None,
+                lighter_api_key_index=profile.lighter_api_key_index if profile else None,
+                lighter_private_key_configured=bool(profile and profile.lighter_private_key_enc),
+                lighter_private_key=lighter_private_key,
+                grvt_trading_account_id=profile.grvt_trading_account_id if profile else None,
+                grvt_api_key_configured=bool(profile and profile.grvt_api_key_enc),
+                grvt_private_key_configured=bool(profile and profile.grvt_private_key_enc),
+                grvt_api_key=grvt_api_key,
+                grvt_private_key=grvt_private_key,
             )
-            for user in users
-        ]
-    )
+        )
+
+    return AdminUserListResponse(users=summaries)
 
 
 @app.websocket("/ws/events")
@@ -1023,7 +1108,7 @@ async def ws_orderbook(
             )
         )
         try:
-            grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(user)
+            grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(session, user)
         except HTTPException as exc:
             await websocket.send_json({"error": exc.detail})
             await websocket.close()
