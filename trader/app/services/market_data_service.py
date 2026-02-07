@@ -71,7 +71,7 @@ class MarketDataService:
             response.raise_for_status()
             raw = response.json()
         except Exception as exc:  # noqa: BLE001
-            errors.append(ApiError(source="Hyperliquid API", message=str(exc)))
+            errors.append(ApiError(source="Hyperliquid API", message=_format_exception(exc)))
             return ExchangeSnapshot(markets=[], errors=errors)
 
         if not isinstance(raw, list) or len(raw) < 2:
@@ -121,21 +121,55 @@ class MarketDataService:
     async def _fetch_lighter_markets(self) -> ExchangeSnapshot:
         errors: list[ApiError] = []
         leverage_map = await self._get_lighter_leverage_map()
-        try:
-            order_books_res, funding_res, stats_res = await asyncio.gather(
-                self._client.get(f"{self._lighter_base_url}/api/v1/orderBooks"),
-                self._client.get(f"{self._lighter_base_url}/api/v1/funding-rates"),
-                self._client.get(f"{self._lighter_base_url}/api/v1/exchangeStats"),
-            )
-            order_books_res.raise_for_status()
-            funding_res.raise_for_status()
-            stats_res.raise_for_status()
-            order_books = order_books_res.json()
-            funding_rates = funding_res.json()
-            exchange_stats = stats_res.json()
-        except Exception as exc:  # noqa: BLE001
-            errors.append(ApiError(source="Lighter API", message=str(exc)))
-            return ExchangeSnapshot(markets=[], errors=errors)
+        order_books: dict[str, Any] = {}
+        funding_rates: dict[str, Any] = {}
+        exchange_stats: dict[str, Any] = {}
+
+        async def _fetch_json(path: str) -> dict[str, Any]:
+            last_exc: Exception | None = None
+            for attempt in range(5):
+                try:
+                    response = await self._client.get(f"{self._lighter_base_url}{path}")
+                    response.raise_for_status()
+                    payload = response.json()
+                    if isinstance(payload, dict):
+                        return payload
+                    return {}
+                except httpx.HTTPStatusError as exc:
+                    last_exc = exc
+                    status = exc.response.status_code
+                    if status < 500:
+                        break
+                except httpx.RequestError as exc:
+                    last_exc = exc
+                if attempt < 4:
+                    await asyncio.sleep(0.4 * (attempt + 1))
+            if last_exc is not None:
+                raise last_exc
+            return {}
+
+        fetches = await asyncio.gather(
+            _fetch_json("/api/v1/orderBooks"),
+            _fetch_json("/api/v1/funding-rates"),
+            _fetch_json("/api/v1/exchangeStats"),
+            return_exceptions=True,
+        )
+        order_books_result, funding_result, stats_result = fetches
+
+        if isinstance(order_books_result, Exception):
+            errors.append(ApiError(source="Lighter API", message=_format_exception(order_books_result)))
+        else:
+            order_books = order_books_result
+
+        if isinstance(funding_result, Exception):
+            errors.append(ApiError(source="Lighter API", message=_format_exception(funding_result)))
+        else:
+            funding_rates = funding_result
+
+        if isinstance(stats_result, Exception):
+            errors.append(ApiError(source="Lighter API", message=_format_exception(stats_result)))
+        else:
+            exchange_stats = stats_result
 
         volume_by_symbol: dict[str, float] = {}
         markets: list[ExchangeMarketMetrics] = []
@@ -203,7 +237,10 @@ class MarketDataService:
             if market and leverage is not None:
                 market.max_leverage = leverage
 
-        return ExchangeSnapshot(markets=list(symbol_to_market.values()), errors=errors)
+        markets_result = list(symbol_to_market.values())
+        if not markets_result and errors:
+            return ExchangeSnapshot(markets=[], errors=errors)
+        return ExchangeSnapshot(markets=markets_result, errors=errors)
 
     async def _fetch_grvt_markets(self) -> ExchangeSnapshot:
         errors: list[ApiError] = []
@@ -217,7 +254,7 @@ class MarketDataService:
             payload = resp.json()
             instruments = payload.get("result", []) or []
         except Exception as exc:  # noqa: BLE001
-            errors.append(ApiError(source="GRVT API", message=str(exc)))
+            errors.append(ApiError(source="GRVT API", message=_format_exception(exc)))
             return ExchangeSnapshot(markets=[], errors=errors)
 
         # Filter perpetual instruments
@@ -254,7 +291,11 @@ class MarketDataService:
             base_symbol = str(inst.get("base", "")).upper()
             ticker = tickers.get(inst.get("instrument", ""))
             mark_price = _parse_float(ticker.get("mark_price")) if ticker else None
-            funding_rate_pct = _parse_float(ticker.get("funding_rate_8h_curr") or ticker.get("funding_rate"))
+            funding_rate_pct = (
+                _parse_float(ticker.get("funding_rate_8h_curr") or ticker.get("funding_rate"))
+                if ticker
+                else None
+            )
             interval_hours = _parse_float(inst.get("funding_interval_hours")) or 8.0
             funding_rate_hourly = (
                 (funding_rate_pct / 100.0) / max(interval_hours, 1.0) if funding_rate_pct is not None else None
@@ -848,8 +889,10 @@ class MarketDataService:
             base_symbol = left_market.base_symbol or left_market.symbol
             matching_right = secondary_by_base.get(base_symbol) if base_symbol else None
             combined_volume = None
-            if left_market.day_notional_volume is not None or (matching_right and matching_right.volume_usd is not None):
-                combined_volume = (left_market.day_notional_volume or 0) + (matching_right.volume_usd if matching_right else 0 or 0)
+            left_volume = left_market.day_notional_volume
+            right_volume = matching_right.volume_usd if matching_right else None
+            if left_volume is not None or right_volume is not None:
+                combined_volume = (left_volume or 0.0) + (right_volume or 0.0)
 
             right_payload = None
             if matching_right:
@@ -970,6 +1013,13 @@ def _parse_lighter_leverage_markdown(markdown: str, overrides: dict[str, float])
             leverage_map[symbol] = value
             leverage_map[f"{symbol}-PERP"] = value
     return leverage_map
+
+
+def _format_exception(exc: Exception) -> str:
+    message = str(exc).strip()
+    if message:
+        return message
+    return exc.__class__.__name__
 
 
 def _normalize_timestamp_to_hour(value: Any) -> int | None:
