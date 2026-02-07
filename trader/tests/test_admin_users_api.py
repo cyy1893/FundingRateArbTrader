@@ -174,3 +174,60 @@ def test_admin_create_user_requires_exchange_fields(client: TestClient) -> None:
         headers=headers,
     )
     assert response.status_code == 422
+
+
+def test_admin_reset_password_requires_client_secret(client: TestClient) -> None:
+    admin_token = _login_token(client, "admin", "admin-pass")
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    users_response = client.get("/admin/users", headers=headers)
+    assert users_response.status_code == 200
+    target = next(user for user in users_response.json()["users"] if user["username"] == "trader")
+    user_id = target["id"]
+
+    missing_secret = client.post(
+        f"/admin/users/{user_id}/reset-password",
+        json={},
+        headers=headers,
+    )
+    assert missing_secret.status_code == 403
+
+    wrong_secret = client.post(
+        f"/admin/users/{user_id}/reset-password",
+        json={},
+        headers={**headers, settings.admin_client_header_name: "wrong-secret"},
+    )
+    assert wrong_secret.status_code == 403
+
+
+def test_admin_reset_password_success_and_can_login(client: TestClient) -> None:
+    admin_token = _login_token(client, "admin", "admin-pass")
+    headers = {
+        "Authorization": f"Bearer {admin_token}",
+        settings.admin_client_header_name: settings.admin_registration_secret,
+    }
+
+    users_response = client.get("/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
+    assert users_response.status_code == 200
+    target = next(user for user in users_response.json()["users"] if user["username"] == "trader")
+    user_id = target["id"]
+
+    reset_response = client.post(
+        f"/admin/users/{user_id}/reset-password",
+        json={},
+        headers=headers,
+    )
+    assert reset_response.status_code == 200
+    reset_payload = reset_response.json()
+    assert reset_payload["username"] == "trader"
+    assert isinstance(reset_payload["temporary_password"], str)
+    assert reset_payload["temporary_password"]
+
+    old_login = client.post("/login", json={"username": "trader", "password": "user-pass"})
+    assert old_login.status_code == 401
+
+    new_login = client.post(
+        "/login",
+        json={"username": "trader", "password": reset_payload["temporary_password"]},
+    )
+    assert new_login.status_code == 200

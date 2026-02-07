@@ -44,3 +44,10 @@ export type AdminCreateUserResponse = {
   is_active: boolean;
   created_at: string;
 };
+
+export type AdminResetPasswordResponse = {
+  id: string;
+  username: string;
+  updated_at: string;
+  temporary_password: string;
+};

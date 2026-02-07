@@ -531,3 +531,14 @@ class AdminUserSummary(BaseModel):
 
 class AdminUserListResponse(BaseModel):
     users: list[AdminUserSummary]
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str | None = None
+
+
+class AdminResetPasswordResponse(BaseModel):
+    id: str
+    username: str
+    updated_at: datetime
+    temporary_password: str

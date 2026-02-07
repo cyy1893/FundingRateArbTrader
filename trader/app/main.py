@@ -4,6 +4,8 @@ import asyncio
 from contextlib import asynccontextmanager
 import hmac
 import logging
+import secrets
+import string
 from datetime import datetime, timezone
 from uuid import UUID
 from collections.abc import AsyncIterator
@@ -27,6 +29,8 @@ from app.models import (
     ArbOpenResponse,
     ArbStatusResponse,
     AdminCreateUserRequest,
+    AdminResetPasswordRequest,
+    AdminResetPasswordResponse,
     AdminUserListResponse,
     AdminUserResponse,
     AdminUserSummary,
@@ -371,6 +375,11 @@ def verify_admin_registration_secret(request: Request) -> None:
         )
     if not hmac.compare_digest(provided_secret, settings.admin_registration_secret):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid admin client secret")
+
+
+def _generate_temporary_password(length: int = 18) -> str:
+    charset = string.ascii_letters + string.digits + "!@#$%^&*()_+-="
+    return "".join(secrets.choice(charset) for _ in range(length))
 
 
 def _get_trading_profile(session: Session, user: User) -> TradingProfile:
@@ -1027,6 +1036,47 @@ async def list_users(
         )
 
     return AdminUserListResponse(users=summaries)
+
+
+@app.post("/admin/users/{user_id}/reset-password", response_model=AdminResetPasswordResponse)
+async def reset_user_password(
+    user_id: UUID,
+    request: Request,
+    payload: AdminResetPasswordRequest,
+    session: Session = Depends(get_session),
+    _: User = Depends(get_current_admin),
+) -> AdminResetPasswordResponse:
+    verify_admin_registration_secret(request)
+
+    user = session.exec(
+        select(User).where(
+            User.id == user_id,
+            User.deleted_at.is_(None),
+        )
+    ).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    new_password = payload.new_password or _generate_temporary_password()
+    salt = os.urandom(16)
+    now = datetime.utcnow()
+    user.password_hash = _hash_password(new_password, salt)
+    user.password_salt = salt.hex()
+    user.failed_attempts = 0
+    user.failed_first_at = None
+    user.locked_until = None
+    user.updated_at = now
+
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+
+    return AdminResetPasswordResponse(
+        id=str(user.id),
+        username=user.username,
+        updated_at=user.updated_at,
+        temporary_password=new_password,
+    )
 
 
 @app.websocket("/ws/events")

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { clearClientAuthToken, extractUsernameFromToken, getClientAuthToken } from "@/lib/auth";
-import type { AdminUserListResponse, AdminUserSummary } from "@/types/admin";
+import type { AdminResetPasswordResponse, AdminUserListResponse, AdminUserSummary } from "@/types/admin";
 
 function toLocalTime(value: string | null): string {
   if (!value) return "-";
@@ -29,6 +29,8 @@ export default function UsersPage() {
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resettingUserId, setResettingUserId] = useState<string | null>(null);
+  const [resetResult, setResetResult] = useState<{ username: string; temporaryPassword: string } | null>(null);
   const currentUser = useMemo(() => extractUsernameFromToken(getClientAuthToken()), []);
 
   const loadUsers = async () => {
@@ -69,6 +71,38 @@ export default function UsersPage() {
     router.push("/login");
   };
 
+  const handleResetPassword = async (user: AdminUserSummary) => {
+    setError(null);
+    setResetResult(null);
+    setResettingUserId(user.id);
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}/reset-password`, {
+        method: "POST",
+      });
+      const data = (await response.json()) as AdminResetPasswordResponse | { error?: string };
+      if (!response.ok) {
+        const message = extractErrorMessage(data, "Failed to reset password");
+        if (response.status === 401) {
+          clearClientAuthToken();
+          router.push("/login");
+          return;
+        }
+        setError(message);
+        return;
+      }
+      const payload = data as AdminResetPasswordResponse;
+      setResetResult({
+        username: payload.username,
+        temporaryPassword: payload.temporary_password,
+      });
+      await loadUsers();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to reset password");
+    } finally {
+      setResettingUserId(null);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-7xl px-6 py-8">
       <header className="mb-6 flex items-center justify-between">
@@ -96,6 +130,12 @@ export default function UsersPage() {
 
         {loading ? <p className="text-sm text-[var(--muted)]">Loading...</p> : null}
         {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+        {resetResult ? (
+          <p className="mb-3 text-sm text-[var(--primary)]">
+            Password reset for <span className="font-semibold">{resetResult.username}</span>:{" "}
+            <span className="font-mono">{resetResult.temporaryPassword}</span>
+          </p>
+        ) : null}
 
         {!loading && !error ? (
           <div className="overflow-x-auto">
@@ -114,6 +154,7 @@ export default function UsersPage() {
                   <th className="px-2 py-2">GRVT API Key (plain)</th>
                   <th className="px-2 py-2">GRVT Private Key (plain)</th>
                   <th className="px-2 py-2">Created</th>
+                  <th className="px-2 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -131,6 +172,15 @@ export default function UsersPage() {
                     <td className="px-2 py-2 font-mono text-xs">{user.grvt_api_key ?? "-"}</td>
                     <td className="px-2 py-2 font-mono text-xs">{user.grvt_private_key ?? "-"}</td>
                     <td className="px-2 py-2">{toLocalTime(user.created_at)}</td>
+                    <td className="px-2 py-2">
+                      <button
+                        className="rounded-md border border-[var(--line)] px-3 py-1 text-xs"
+                        disabled={resettingUserId === user.id}
+                        onClick={() => void handleResetPassword(user)}
+                      >
+                        {resettingUserId === user.id ? "Resetting..." : "Reset Password"}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
