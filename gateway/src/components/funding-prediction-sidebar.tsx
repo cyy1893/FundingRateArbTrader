@@ -21,7 +21,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatVolume } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 type SidebarRequest = {
@@ -45,6 +44,8 @@ type PredictionSidebarPayload = {
 type SidebarState = {
   isOpen: boolean;
   loading: boolean;
+  progress: number;
+  stage: string;
   error: string | null;
   data: PredictionSidebarPayload | null;
   lastRequest: SidebarRequest | null;
@@ -62,6 +63,8 @@ export function FundingPredictionSidebarProvider({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [stage, setStage] = useState("准备请求…");
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<PredictionSidebarPayload | null>(null);
   const [lastRequest, setLastRequest] = useState<SidebarRequest | null>(null);
@@ -90,22 +93,70 @@ export function FundingPredictionSidebarProvider({
 
     setIsOpen(true);
     setLoading(true);
+    setProgress(1);
+    setStage("创建任务…");
     setError(null);
     setData(null);
 
     try {
-      const response = await fetch(
-        `/api/funding/prediction?${params.toString()}`,
-        { cache: "no-store" },
-      );
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error ?? "无法加载资金费率预测");
+      const createResponse = await fetch("/api/funding/prediction/jobs", {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sourceA: request.sourceA,
+          sourceB: request.sourceB,
+          volumeThreshold: request.volumeThreshold,
+          forceRefresh: Boolean(request.forceRefresh),
+        }),
+      });
+      if (!createResponse.ok) {
+        const createPayload = await createResponse.json().catch(() => null);
+        throw new Error(createPayload?.error ?? "无法创建推荐任务");
       }
-      const payload = (await response.json()) as PredictionSidebarPayload;
-      setData(payload);
+      const createPayload = (await createResponse.json()) as { jobId: string };
+      if (!createPayload.jobId) {
+        throw new Error("推荐任务创建失败");
+      }
+
+      while (true) {
+        const statusResponse = await fetch(
+          `/api/funding/prediction/jobs/${createPayload.jobId}`,
+          { cache: "no-store" },
+        );
+        if (!statusResponse.ok) {
+          const statusPayload = await statusResponse.json().catch(() => null);
+          throw new Error(statusPayload?.error ?? "查询推荐任务失败");
+        }
+        const statusPayload = (await statusResponse.json()) as {
+          status: "pending" | "running" | "completed" | "failed";
+          progress: number;
+          stage: string;
+          error?: string | null;
+          result?: PredictionSidebarPayload | null;
+        };
+        setProgress(Number(statusPayload.progress ?? 0));
+        setStage(statusPayload.stage || "计算中…");
+
+        if (statusPayload.status === "completed") {
+          if (!statusPayload.result) {
+            throw new Error("推荐任务已完成但返回为空");
+          }
+          setData(statusPayload.result);
+          setProgress(100);
+          setStage("完成");
+          break;
+        }
+        if (statusPayload.status === "failed") {
+          throw new Error(statusPayload.error || "推荐任务失败");
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "无法加载资金费率预测";
+      const msg = err instanceof Error ? err.message : "无法加载推荐套利结果";
       setError(msg);
       toast.error(msg, { className: "bg-destructive text-destructive-foreground" });
     } finally {
@@ -123,6 +174,8 @@ export function FundingPredictionSidebarProvider({
   const close = useCallback(() => {
     setIsOpen(false);
     setLoading(false);
+    setProgress(0);
+    setStage("准备请求…");
     setError(null);
   }, []);
 
@@ -130,6 +183,8 @@ export function FundingPredictionSidebarProvider({
     () => ({
       isOpen,
       loading,
+      progress,
+      stage,
       error,
       data,
       lastRequest,
@@ -137,7 +192,7 @@ export function FundingPredictionSidebarProvider({
       refresh,
       close,
     }),
-    [isOpen, loading, error, data, lastRequest, open, refresh, close],
+    [isOpen, loading, progress, stage, error, data, lastRequest, open, refresh, close],
   );
 
   return (
@@ -156,7 +211,7 @@ export function useFundingPredictionSidebar() {
 }
 
 export function FundingPredictionContent() {
-  const { loading, error, data, refresh, lastRequest } = useFundingPredictionSidebar();
+  const { loading, progress, stage, error, data, refresh, lastRequest } = useFundingPredictionSidebar();
   const hasContent = Boolean(data && data.entries.length > 0);
 
   return (
@@ -164,7 +219,7 @@ export function FundingPredictionContent() {
       <div className="flex items-start justify-between border-b p-6">
         <div>
           <h2 className="text-lg font-semibold leading-none tracking-tight">
-            预测 24 小时套利 APR
+            推荐套利币种
           </h2>
           <p className="mt-2 text-sm text-muted-foreground">
             {data
@@ -192,9 +247,23 @@ export function FundingPredictionContent() {
       <div className="flex-1 overflow-y-auto p-6">
         {loading ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
-            <div className="flex items-center gap-2 text-sm">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              预测生成中…
+            <div className="w-full max-w-md space-y-4">
+              <div className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>{stage}</span>
+                </div>
+                <span className="tabular-nums text-xs">{Math.round(progress)}%</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-200 ease-out"
+                  style={{ width: `${Math.max(0, Math.min(progress, 100))}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                进度由后端实时上报，反映实际完成比例。
+              </p>
             </div>
           </div>
         ) : error ? (
@@ -206,7 +275,7 @@ export function FundingPredictionContent() {
           <PredictionResults payload={data!} />
         ) : (
           <p className="text-sm text-muted-foreground">
-            选择交易所并点击“预测 24 小时套利 APR”以查看结果。
+            选择交易所并点击“推荐套利币种”以查看结果。
           </p>
         )}
       </div>
@@ -226,7 +295,7 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
     <div className="space-y-4">
       <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
         <div>
-          注：预测使用 16 小时半衰期的 EWMA，窗口为最近 72 小时，且仅显示 {payload.metadata.volumeLabel} 的币种。
+          注：评分偏好高 APR、低资金费率波动、低价格波动、低盘口价差；盘口价差使用近 10 秒均值。仅显示 {payload.metadata.volumeLabel} 的币种。
         </div>
         {payload.failures.length > 0 ? (
           <div className="mt-2">
@@ -239,10 +308,12 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
           <TableRow className="text-[11px] uppercase tracking-wide text-muted-foreground">
             <TableHead>币种</TableHead>
             <TableHead>方向</TableHead>
-            <TableHead className="text-right">Lighter 24h 量</TableHead>
-            <TableHead className="text-right">GRVT 24h 量</TableHead>
-            <TableHead className="text-right">预测 24 小时收益</TableHead>
             <TableHead className="text-right">预测年化 APR</TableHead>
+            <TableHead className="text-right">资金费率波动率(24h)</TableHead>
+            <TableHead className="text-right">价格波动率(24h估算)</TableHead>
+            <TableHead className="text-right">Lighter 买卖价差(10s均值)</TableHead>
+            <TableHead className="text-right">GRVT 买卖价差(10s均值)</TableHead>
+            <TableHead className="text-right">综合分</TableHead>
             <TableHead className="text-right">去交易</TableHead>
           </TableRow>
         </TableHeader>
@@ -255,17 +326,23 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
               <TableCell className="text-xs">
                 {renderDirection(entry, payload.metadata)}
               </TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground">
-                {formatVolume(entry.leftVolume24h)}
-              </TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground">
-                {formatVolume(entry.rightVolume24h)}
-              </TableCell>
-              <TableCell className="text-right text-sm font-medium">
-                {formatDecimalPercent(entry.totalDecimal)}
-              </TableCell>
               <TableCell className="text-right font-semibold text-primary">
                 {formatDecimalPercent(entry.annualizedDecimal)}
+              </TableCell>
+              <TableCell className="text-right text-sm font-medium">
+                {formatPercent(entry.spreadVolatility24hPct)}
+              </TableCell>
+              <TableCell className="text-right text-sm font-medium">
+                {formatPercent(entry.priceVolatility24hPct)}
+              </TableCell>
+              <TableCell className="text-right text-xs text-muted-foreground">
+                {formatBps(entry.leftBidAskSpreadBps)}
+              </TableCell>
+              <TableCell className="text-right text-xs text-muted-foreground">
+                {formatBps(entry.rightBidAskSpreadBps)}
+              </TableCell>
+              <TableCell className="text-right text-sm font-semibold">
+                {entry.recommendationScore.toFixed(2)}
               </TableCell>
               <TableCell className="text-right">
                 <a
@@ -335,4 +412,18 @@ function formatDecimalPercent(value: number): string {
   }
   const percent = value * 100;
   return `${percent.toFixed(4)}%`;
+}
+
+function formatPercent(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "—";
+  }
+  return `${value.toFixed(4)}%`;
+}
+
+function formatBps(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "—";
+  }
+  return `${value.toFixed(2)} bps`;
 }

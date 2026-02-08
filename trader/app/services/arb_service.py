@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 import uuid
 
 from sqlmodel import Session, select
@@ -39,18 +39,6 @@ class ArbService:
         self._session.add(position)
 
         risk_tasks: list[RiskTask] = []
-        if request.auto_close_after_ms and request.auto_close_after_ms > 0:
-            risk_tasks.append(
-                RiskTask(
-                    arb_position_id=position.id,
-                    task_type=RiskTaskType.auto_close,
-                    enabled=True,
-                    execute_at=now + timedelta(milliseconds=request.auto_close_after_ms),
-                    status=RiskTaskStatus.pending,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
         if request.liquidation_guard_enabled:
             threshold = request.liquidation_guard_threshold_pct or 50
             risk_tasks.append(

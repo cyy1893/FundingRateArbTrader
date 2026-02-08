@@ -5,11 +5,12 @@ import asyncio
 import re
 from datetime import datetime, timezone
 from time import time
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
 
 from app.config import Settings
+from app.services.lighter_service import LighterService
 from app.models import (
     ArbitrageSnapshotResponse,
     ApiError,
@@ -39,7 +40,19 @@ PREDICTION_FORECAST_HOURS = 24
 PREDICTION_HOURS_PER_YEAR = 24 * 365
 MAX_PREDICTION_WORKERS = 5
 PREDICTION_HALF_LIFE_HOURS = 16.0
+PREDICTION_VOLATILITY_WINDOW_HOURS = 24
+RECOMMENDATION_APR_WEIGHT = 0.75
+RECOMMENDATION_FUNDING_VOLATILITY_WEIGHT = 0.125
+RECOMMENDATION_PRICE_VOLATILITY_WEIGHT = 0.125
+SPREAD_INTOLERABLE_BPS = 10.0
+SPREAD_STEEPNESS_BPS = 1.5
+DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS = 12.0
+DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT = 5.0
+SPREAD_SAMPLING_DURATION_SECONDS = 10
+SPREAD_SAMPLING_INTERVAL_SECONDS = 1
+LIGHTER_SPREAD_FETCH_CONCURRENCY = 8
 CACHE_TTL_SECONDS = 10 * 60
+PREDICTION_CACHE_TTL_SECONDS = 5 * 60
 AVAILABLE_SYMBOLS_CACHE_TTL_SECONDS = 60 * 60
 SYMBOL_RENAMES: dict[str, str] = {
     "1000PEPE": "kPEPE",
@@ -49,9 +62,10 @@ SYMBOL_RENAMES: dict[str, str] = {
 
 
 class MarketDataService:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, lighter_service: LighterService | None = None) -> None:
         self._lighter_base_url = settings.lighter_base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=10.0)
+        self._lighter_service = lighter_service
         self._lighter_leverage_map: dict[str, float] | None = None
         self._grvt_market_data_base, _ = self._build_grvt_endpoints(settings.grvt_env)
         self._arbitrage_cache: dict[tuple[str, str, float], tuple[float, ArbitrageSnapshotResponse]] = {}
@@ -181,6 +195,7 @@ class MarketDataService:
                 symbol = str(entry.get("symbol", "")).upper()
                 base_symbol = _normalize_derivatives_base(symbol)
                 mark_price = _parse_float(entry.get("price"))
+                best_bid, best_ask = _extract_best_bid_ask(entry)
                 markets.append(
                     ExchangeMarketMetrics(
                         base_symbol=base_symbol,
@@ -196,6 +211,8 @@ class MarketDataService:
                         day_notional_volume=None,
                         open_interest=None,
                         volume_usd=None,
+                        best_bid=best_bid,
+                        best_ask=best_ask,
                     )
                 )
 
@@ -291,6 +308,7 @@ class MarketDataService:
             base_symbol = str(inst.get("base", "")).upper()
             ticker = tickers.get(inst.get("instrument", ""))
             mark_price = _parse_float(ticker.get("mark_price")) if ticker else None
+            best_bid, best_ask = _extract_best_bid_ask(ticker if isinstance(ticker, dict) else {})
             funding_rate_pct = (
                 _parse_float(ticker.get("funding_rate_8h_curr") or ticker.get("funding_rate"))
                 if ticker
@@ -320,6 +338,8 @@ class MarketDataService:
                     day_notional_volume=volume_q if volume_q > 0 else None,
                     open_interest=open_interest,
                     volume_usd=volume_q if volume_q > 0 else None,
+                    best_bid=best_bid,
+                    best_ask=best_ask,
                 )
             )
 
@@ -570,12 +590,145 @@ class MarketDataService:
         self._available_symbols_cache[cache_key] = (time(), symbols, snapshot.fetched_at)
         return symbols, snapshot.fetched_at
 
+    async def _sample_average_bid_ask_spreads(
+        self,
+        primary: str,
+        secondary: str,
+        symbols: set[str],
+        duration_seconds: int,
+        interval_seconds: int,
+        progress_callback: Callable[[float, str], Awaitable[None] | None] | None = None,
+    ) -> dict[str, dict[str, float]]:
+        if not symbols:
+            return {}
+
+        sample_count = max(duration_seconds // max(interval_seconds, 1), 1)
+        sums: dict[str, dict[str, float]] = {}
+        counts: dict[str, int] = {}
+        mid_samples: dict[str, list[float]] = {}
+
+        for index in range(sample_count):
+            try:
+                snapshot = await self.get_perp_snapshot(primary, secondary)
+            except Exception:  # noqa: BLE001
+                if index + 1 < sample_count:
+                    await asyncio.sleep(interval_seconds)
+                continue
+
+            snapshot_by_symbol = {
+                (row.symbol or row.left_symbol or "").upper(): row
+                for row in snapshot.rows
+                if (row.symbol or row.left_symbol)
+            }
+
+            primary_lighter_map: dict[str, tuple[float | None, float | None]] = {}
+            secondary_lighter_map: dict[str, tuple[float | None, float | None]] = {}
+            if primary.lower() == "lighter":
+                primary_lighter_map = await self._fetch_lighter_best_prices_map(symbols)
+            if secondary.lower() == "lighter":
+                secondary_lighter_map = await self._fetch_lighter_best_prices_map(symbols)
+
+            for symbol_key in symbols:
+                row = snapshot_by_symbol.get(symbol_key)
+                if row is None:
+                    continue
+                right_payload = row.right if isinstance(row.right, dict) else {}
+                if not right_payload:
+                    continue
+
+                if primary.lower() == "lighter":
+                    left_bid, left_ask = primary_lighter_map.get(symbol_key, (None, None))
+                else:
+                    left_bid = _parse_float(row.best_bid)
+                    left_ask = _parse_float(row.best_ask)
+
+                if secondary.lower() == "lighter":
+                    right_bid, right_ask = secondary_lighter_map.get(symbol_key, (None, None))
+                else:
+                    right_bid = _parse_float(right_payload.get("best_bid"))
+                    right_ask = _parse_float(right_payload.get("best_ask"))
+
+                left_spread_bps = _compute_bid_ask_spread_bps(
+                    left_bid,
+                    left_ask,
+                    default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
+                )
+                right_spread_bps = _compute_bid_ask_spread_bps(
+                    right_bid,
+                    right_ask,
+                    default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
+                )
+                bucket = sums.setdefault(symbol_key, {"left": 0.0, "right": 0.0, "combined": 0.0})
+                bucket["left"] += left_spread_bps
+                bucket["right"] += right_spread_bps
+                bucket["combined"] += left_spread_bps + right_spread_bps
+                counts[symbol_key] = counts.get(symbol_key, 0) + 1
+
+                left_mid = _compute_mid_price(left_bid, left_ask, _parse_float(row.mark_price))
+                right_mid = _compute_mid_price(
+                    right_bid,
+                    right_ask,
+                    _parse_float(right_payload.get("mark_price")),
+                )
+                combined_mid = _combine_mid_prices(left_mid, right_mid)
+                if combined_mid is not None and combined_mid > 0:
+                    mid_samples.setdefault(symbol_key, []).append(combined_mid)
+
+            if index + 1 < sample_count:
+                await asyncio.sleep(interval_seconds)
+
+            await _invoke_progress_callback(
+                progress_callback,
+                5 + ((index + 1) / max(sample_count, 1)) * 85,
+                f"盘口采样 {index + 1}/{sample_count}",
+            )
+
+        averages: dict[str, dict[str, float]] = {}
+        for symbol_key, total_values in sums.items():
+            count = counts.get(symbol_key, 0)
+            if count <= 0:
+                continue
+            averages[symbol_key] = {
+                "left": total_values["left"] / count,
+                "right": total_values["right"] / count,
+                "combined": total_values["combined"] / count,
+                "price_volatility_24h_pct": _compute_price_volatility_24h_pct(
+                    mid_samples.get(symbol_key, []),
+                    interval_seconds=interval_seconds,
+                    default_value=DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
+                ),
+            }
+        return averages
+
+    async def _fetch_lighter_best_prices_map(
+        self,
+        symbols: set[str],
+    ) -> dict[str, tuple[float | None, float | None]]:
+        if self._lighter_service is None or not symbols:
+            return {}
+
+        semaphore = asyncio.Semaphore(LIGHTER_SPREAD_FETCH_CONCURRENCY)
+        results: dict[str, tuple[float | None, float | None]] = {}
+
+        async def _fetch_one(symbol_key: str) -> None:
+            symbol_for_lighter = _normalize_lighter_symbol_for_book(symbol_key)
+            async with semaphore:
+                try:
+                    bid, ask = await self._lighter_service.get_best_prices(symbol_for_lighter, depth=1)
+                    results[symbol_key] = (bid, ask)
+                except Exception:  # noqa: BLE001
+                    results[symbol_key] = (None, None)
+
+        await asyncio.gather(*(_fetch_one(symbol_key) for symbol_key in symbols))
+        return results
+
     async def get_funding_prediction_snapshot(
         self,
         primary: str,
         secondary: str,
         volume_threshold: float = 0.0,
         force_refresh: bool = False,
+        progress_callback: Callable[[float, str], Awaitable[None] | None] | None = None,
     ) -> FundingPredictionResponse:
         """
         Predict 24h funding rates based on recent funding history and return
@@ -584,13 +737,15 @@ class MarketDataService:
         cache_key = (primary, secondary, float(volume_threshold))
         if not force_refresh:
             cached = self._prediction_cache.get(cache_key)
-            if cached and time() - cached[0] < CACHE_TTL_SECONDS:
+            if cached and time() - cached[0] < PREDICTION_CACHE_TTL_SECONDS:
+                await _invoke_progress_callback(progress_callback, 100.0, "命中缓存")
                 return cached[1]
 
+        await _invoke_progress_callback(progress_callback, 3.0, "加载市场快照")
         snapshot = await self.get_perp_snapshot(primary, secondary)
         fetched_at = snapshot.fetched_at
         volume_cutoff = max(volume_threshold, 0.0)
-        entries: list[dict[str, Any]] = []
+        raw_entries: list[dict[str, Any]] = []
         failures: list[dict[str, str]] = []
 
         def _passes_volume(row: MarketRow) -> bool:
@@ -599,15 +754,31 @@ class MarketDataService:
             left_volume = _parse_float(row.day_notional_volume) or 0.0
             right_payload = row.right if isinstance(row.right, dict) else None
             right_volume = _parse_float(right_payload.get("volume_usd")) if right_payload else None
-            return left_volume >= volume_cutoff and (right_volume or 0.0) >= volume_cutoff
+            return left_volume + (right_volume or 0.0) >= volume_cutoff
 
         eligible_rows = [
             row
             for row in snapshot.rows
             if isinstance(row.right, dict) and row.right.get("symbol") and _passes_volume(row)
         ]
+        sampling_symbols = {
+            (row.symbol or row.left_symbol or "").upper()
+            for row in eligible_rows
+            if (row.symbol or row.left_symbol)
+        }
+        spread_averages = await self._sample_average_bid_ask_spreads(
+            primary=primary,
+            secondary=secondary,
+            symbols=sampling_symbols,
+            duration_seconds=SPREAD_SAMPLING_DURATION_SECONDS,
+            interval_seconds=SPREAD_SAMPLING_INTERVAL_SECONDS,
+            progress_callback=progress_callback,
+        )
 
         semaphore = asyncio.Semaphore(MAX_PREDICTION_WORKERS)
+        total_rows = max(len(eligible_rows), 1)
+        progress_state = {"completed_rows": 0}
+        progress_lock = asyncio.Lock()
 
         async def _compute_row(row: MarketRow) -> None:
             async with semaphore:
@@ -638,12 +809,14 @@ class MarketDataService:
 
                 latest_time = dataset[-1].time
                 lookback_start = latest_time - PREDICTION_LOOKBACK_HOURS * MS_PER_HOUR
+                volatility_start = latest_time - PREDICTION_VOLATILITY_WINDOW_HOURS * MS_PER_HOUR
                 left_ewma: float | None = None
                 right_ewma: float | None = None
                 spread_ewma: float | None = None
                 left_count = 0
                 right_count = 0
                 spread_count = 0
+                spread_window_samples: list[float] = []
                 last_left_time: int | None = None
                 last_right_time: int | None = None
                 last_spread_time: int | None = None
@@ -678,9 +851,14 @@ class MarketDataService:
                             spread_ewma = point.spread * (1 - decay) + (spread_ewma or point.spread) * decay
                         last_spread_time = point.time
                         spread_count += 1
+                        if point.time >= volatility_start:
+                            spread_window_samples.append(point.spread)
 
                 if spread_count == 0:
                     failures.append({"symbol": symbol_label, "reason": "72 小时内有效样本不足"})
+                    return
+                if len(spread_window_samples) < 2:
+                    failures.append({"symbol": symbol_label, "reason": "24 小时波动率样本不足"})
                     return
 
                 average_left_hourly = left_ewma if left_count else None
@@ -699,6 +877,36 @@ class MarketDataService:
                 predicted_spread_24h = average_spread_hourly * PREDICTION_FORECAST_HOURS
                 total_decimal = abs(predicted_spread_24h) / 100.0
                 annualized_decimal = abs(average_spread_hourly) / 100.0 * PREDICTION_HOURS_PER_YEAR
+                spread_volatility_24h_pct = _compute_stddev(spread_window_samples) * math.sqrt(
+                    PREDICTION_FORECAST_HOURS,
+                )
+
+                left_best_bid = _parse_float(row.best_bid)
+                left_best_ask = _parse_float(row.best_ask)
+                right_best_bid = _parse_float(right_payload.get("best_bid"))
+                right_best_ask = _parse_float(right_payload.get("best_ask"))
+                spread_avg = spread_averages.get((row.symbol or row.left_symbol).upper())
+                if spread_avg is not None:
+                    left_bid_ask_spread_bps = spread_avg["left"]
+                    right_bid_ask_spread_bps = spread_avg["right"]
+                    combined_bid_ask_spread_bps = spread_avg["combined"]
+                    price_volatility_24h_pct = spread_avg.get(
+                        "price_volatility_24h_pct",
+                        DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
+                    )
+                else:
+                    left_bid_ask_spread_bps = _compute_bid_ask_spread_bps(
+                        left_best_bid,
+                        left_best_ask,
+                        default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
+                    )
+                    right_bid_ask_spread_bps = _compute_bid_ask_spread_bps(
+                        right_best_bid,
+                        right_best_ask,
+                        default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
+                    )
+                    combined_bid_ask_spread_bps = left_bid_ask_spread_bps + right_bid_ask_spread_bps
+                    price_volatility_24h_pct = DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT
 
                 direction = "unknown"
                 if average_spread_hourly > 0:
@@ -706,7 +914,7 @@ class MarketDataService:
                 elif average_spread_hourly < 0:
                     direction = "rightLong"
 
-                entries.append(
+                raw_entries.append(
                     {
                         "symbol": row.symbol or row.left_symbol,
                         "display_name": row.display_name or row.symbol or row.left_symbol,
@@ -722,22 +930,79 @@ class MarketDataService:
                         "average_spread_hourly": average_spread_hourly,
                         "total_decimal": total_decimal,
                         "annualized_decimal": annualized_decimal,
+                        "spread_volatility_24h_pct": spread_volatility_24h_pct,
+                        "price_volatility_24h_pct": price_volatility_24h_pct,
+                        "left_bid_ask_spread_bps": left_bid_ask_spread_bps,
+                        "right_bid_ask_spread_bps": right_bid_ask_spread_bps,
+                        "combined_bid_ask_spread_bps": combined_bid_ask_spread_bps,
                         "sample_count": spread_count,
                         "direction": direction,
                     }
                 )
 
+                async with progress_lock:
+                    progress_state["completed_rows"] += 1
+                    completed_rows_value = progress_state["completed_rows"]
+                await _invoke_progress_callback(
+                    progress_callback,
+                    90 + (completed_rows_value / total_rows) * 10,
+                    f"计算币种 {completed_rows_value}/{total_rows}",
+                )
+
         await asyncio.gather(*(_compute_row(row) for row in eligible_rows))
 
-        entries.sort(key=lambda entry: entry.get("annualized_decimal", 0), reverse=True)
+        apr_values = [float(entry.get("annualized_decimal") or 0.0) for entry in raw_entries]
+        funding_volatility_values = [
+            float(entry.get("spread_volatility_24h_pct") or 0.0)
+            for entry in raw_entries
+        ]
+        price_volatility_values = [
+            float(entry.get("price_volatility_24h_pct") or 0.0)
+            for entry in raw_entries
+        ]
+        final_entries: list[dict[str, Any]] = []
+        for entry in raw_entries:
+            apr_norm = _min_max_normalize(float(entry.get("annualized_decimal") or 0.0), apr_values)
+            funding_volatility_norm = _min_max_normalize(
+                float(entry.get("spread_volatility_24h_pct") or 0.0),
+                funding_volatility_values,
+            )
+            price_volatility_norm = _min_max_normalize(
+                float(entry.get("price_volatility_24h_pct") or 0.0),
+                price_volatility_values,
+            )
+            spread_acceptance_score = _compute_spread_acceptance_score(
+                float(entry.get("combined_bid_ask_spread_bps") or 0.0),
+                intolerable_bps=SPREAD_INTOLERABLE_BPS,
+                steepness_bps=SPREAD_STEEPNESS_BPS,
+            )
+            core_score = (
+                RECOMMENDATION_APR_WEIGHT * apr_norm
+                + RECOMMENDATION_FUNDING_VOLATILITY_WEIGHT * (1.0 - funding_volatility_norm)
+                + RECOMMENDATION_PRICE_VOLATILITY_WEIGHT * (1.0 - price_volatility_norm)
+            )
+            # Spread is a separate multiplicative gate to emphasize execution feasibility.
+            score = core_score * spread_acceptance_score * 100.0
+            normalized_entry = dict(entry)
+            normalized_entry["recommendation_score"] = round(score, 4)
+            final_entries.append(normalized_entry)
+
+        final_entries.sort(
+            key=lambda entry: (
+                float(entry.get("recommendation_score") or 0.0),
+                float(entry.get("annualized_decimal") or 0.0),
+            ),
+            reverse=True,
+        )
 
         response = FundingPredictionResponse(
-            entries=entries,
+            entries=final_entries,
             failures=failures,
             fetched_at=fetched_at,
             errors=snapshot.errors,
         )
         self._prediction_cache[cache_key] = (time(), response)
+        await _invoke_progress_callback(progress_callback, 100.0, "计算完成")
         return response
 
     async def get_arbitrage_snapshot(
@@ -768,7 +1033,7 @@ class MarketDataService:
             left_volume = _parse_float(row.day_notional_volume) or 0.0
             right_payload = row.right if isinstance(row.right, dict) else None
             right_volume = _parse_float(right_payload.get("volume_usd")) if right_payload else None
-            return left_volume >= volume_cutoff and (right_volume or 0.0) >= volume_cutoff
+            return left_volume + (right_volume or 0.0) >= volume_cutoff
 
         eligible_rows = [
             row
@@ -903,6 +1168,9 @@ class MarketDataService:
                     "funding_rate": matching_right.funding_rate_hourly,
                     "volume_usd": matching_right.volume_usd,
                     "funding_period_hours": matching_right.funding_period_hours,
+                    "mark_price": matching_right.mark_price,
+                    "best_bid": matching_right.best_bid,
+                    "best_ask": matching_right.best_ask,
                 }
 
             rows.append(
@@ -924,6 +1192,8 @@ class MarketDataService:
                     day_notional_volume=left_market.day_notional_volume,
                     open_interest=left_market.open_interest,
                     volume_usd=combined_volume,
+                    best_bid=left_market.best_bid,
+                    best_ask=left_market.best_ask,
                     right=right_payload,
                 )
             )
@@ -1015,6 +1285,160 @@ def _parse_lighter_leverage_markdown(markdown: str, overrides: dict[str, float])
     return leverage_map
 
 
+def _extract_best_bid_ask(payload: dict[str, Any]) -> tuple[float | None, float | None]:
+    best_bid = _parse_float(
+        payload.get("best_bid")
+        or payload.get("bestBid")
+        or payload.get("best_bid_price")
+        or payload.get("bid")
+        or payload.get("bid_price")
+    )
+    best_ask = _parse_float(
+        payload.get("best_ask")
+        or payload.get("bestAsk")
+        or payload.get("best_ask_price")
+        or payload.get("ask")
+        or payload.get("ask_price")
+    )
+
+    if best_bid is None:
+        bids = payload.get("bids")
+        if isinstance(bids, list) and bids:
+            best_bid = _extract_level_price(bids[0])
+
+    if best_ask is None:
+        asks = payload.get("asks")
+        if isinstance(asks, list) and asks:
+            best_ask = _extract_level_price(asks[0])
+
+    return best_bid, best_ask
+
+
+def _extract_level_price(level: Any) -> float | None:
+    if isinstance(level, dict):
+        return _parse_float(level.get("price") or level.get("p") or level.get("px"))
+    if isinstance(level, (list, tuple)) and level:
+        return _parse_float(level[0])
+    return None
+
+
+def _compute_stddev(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return math.sqrt(max(variance, 0.0))
+
+
+def _compute_bid_ask_spread_bps(
+    best_bid: float | None,
+    best_ask: float | None,
+    default_bps: float = DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
+) -> float:
+    if best_bid is None or best_ask is None:
+        return default_bps
+    if best_bid <= 0 or best_ask <= 0 or best_ask < best_bid:
+        return default_bps
+    mid = (best_bid + best_ask) / 2.0
+    if mid <= 0:
+        return default_bps
+    return (best_ask - best_bid) / mid * 10_000.0
+
+
+def _compute_mid_price(
+    best_bid: float | None,
+    best_ask: float | None,
+    fallback_price: float | None = None,
+) -> float | None:
+    if (
+        best_bid is not None
+        and best_ask is not None
+        and best_bid > 0
+        and best_ask > 0
+        and best_ask >= best_bid
+    ):
+        return (best_bid + best_ask) / 2.0
+    if fallback_price is not None and fallback_price > 0:
+        return fallback_price
+    return None
+
+
+def _combine_mid_prices(left_mid: float | None, right_mid: float | None) -> float | None:
+    if left_mid is not None and right_mid is not None and left_mid > 0 and right_mid > 0:
+        return (left_mid + right_mid) / 2.0
+    if left_mid is not None and left_mid > 0:
+        return left_mid
+    if right_mid is not None and right_mid > 0:
+        return right_mid
+    return None
+
+
+def _compute_price_volatility_24h_pct(
+    mid_samples: list[float],
+    interval_seconds: int,
+    default_value: float = DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
+) -> float:
+    if len(mid_samples) < 2:
+        return default_value
+
+    returns: list[float] = []
+    for idx in range(1, len(mid_samples)):
+        prev = mid_samples[idx - 1]
+        curr = mid_samples[idx]
+        if prev <= 0 or curr <= 0:
+            continue
+        returns.append(math.log(curr / prev))
+
+    if len(returns) < 2:
+        return default_value
+
+    per_step_vol = _compute_stddev(returns)
+    steps_per_24h = (24 * 60 * 60) / max(interval_seconds, 1)
+    return per_step_vol * math.sqrt(steps_per_24h) * 100.0
+
+
+def _compute_spread_acceptance_score(
+    spread_bps: float,
+    intolerable_bps: float = SPREAD_INTOLERABLE_BPS,
+    steepness_bps: float = SPREAD_STEEPNESS_BPS,
+) -> float:
+    """
+    Map spread to [0,1] with a steep sigmoid drop near the intolerable threshold.
+    <= threshold keeps high score; > threshold decays rapidly.
+    """
+    if not math.isfinite(spread_bps):
+        return 0.0
+    if steepness_bps <= 0:
+        steepness_bps = 1.0
+    x = (spread_bps - intolerable_bps) / steepness_bps
+    score = 1.0 / (1.0 + math.exp(x))
+    return min(max(score, 0.0), 1.0)
+
+
+def _min_max_normalize(value: float, population: list[float]) -> float:
+    if not population:
+        return 0.0
+    min_value = min(population)
+    max_value = max(population)
+    span = max_value - min_value
+    if span <= 1e-12:
+        return 0.5
+    return min(max((value - min_value) / span, 0.0), 1.0)
+
+
+async def _invoke_progress_callback(
+    callback: Callable[[float, str], Awaitable[None] | None] | None,
+    progress: float,
+    stage: str,
+) -> None:
+    if callback is None:
+        return
+    safe_progress = min(max(progress, 0.0), 100.0)
+    maybe_awaitable = callback(safe_progress, stage)
+    if maybe_awaitable is not None and asyncio.iscoroutine(maybe_awaitable):
+        await maybe_awaitable
+
+
 def _format_exception(exc: Exception) -> str:
     message = str(exc).strip()
     if message:
@@ -1032,6 +1456,13 @@ def _normalize_timestamp_to_hour(value: Any) -> int | None:
 
 def _normalize_lighter_symbol(value: str | None) -> str:
     return value.strip().upper() if value else ""
+
+
+def _normalize_lighter_symbol_for_book(value: str | None) -> str:
+    normalized = _normalize_lighter_symbol(value)
+    if normalized.endswith("-PERP"):
+        return normalized.removesuffix("-PERP")
+    return normalized
 
 
 def _normalize_grvt_base_symbol(symbol: str) -> str:

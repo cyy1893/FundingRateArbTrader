@@ -651,7 +651,7 @@ export function PerpTable({
             : 0;
         const meetsVolume =
           volumeThreshold <= 0 ||
-          (leftVolume >= volumeThreshold && externalVolume >= volumeThreshold);
+          (leftVolume + externalVolume >= volumeThreshold);
 
         return meetsVolume;
       },
@@ -664,8 +664,8 @@ export function PerpTable({
   const volumeThresholdLabel =
     volumeThreshold <= 0
       ? "不限"
-      : `${formatVolume(volumeThreshold)}（每端）`;
-  const externalFilterDescription = `显示资产：仅列出 ${leftSource.label} 与 ${rightSource.label} 均有的市场，且两端 24 小时成交量都 ${volumeThresholdLabel}`;
+      : `${formatVolume(volumeThreshold)}（两端合计）`;
+  const externalFilterDescription = `显示资产：仅列出 ${leftSource.label} 与 ${rightSource.label} 均有的市场，且两端 24 小时成交量合计 ${volumeThresholdLabel}`;
   const handlePageChange = (nextPage: number) => {
     if (nextPage >= 1 && nextPage <= pageCount) {
       setPage(nextPage);
@@ -1263,7 +1263,7 @@ export function PerpTable({
                 })
               }
             >
-              预测 24 小时套利 APR
+              推荐套利币种
             </Button>
 
             <Button

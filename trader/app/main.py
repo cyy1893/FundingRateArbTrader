@@ -7,7 +7,7 @@ import logging
 import secrets
 import string
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 from collections.abc import AsyncIterator
 from typing import Any, Dict
 from cachetools import TTLCache
@@ -40,6 +40,8 @@ from app.models import (
     FundingHistoryRequest,
     FundingHistoryResponse,
     FundingPredictionRequest,
+    FundingPredictionJobCreateResponse,
+    FundingPredictionJobStatusResponse,
     FundingPredictionResponse,
     GrvtOrderRequest,
     GrvtOrderResponse,
@@ -87,18 +89,17 @@ settings = get_settings()
 event_broadcaster = EventBroadcaster()
 lighter_service = LighterService(settings)
 grvt_service = GrvtService(settings)
-market_data_service = MarketDataService(settings)
+market_data_service = MarketDataService(settings, lighter_service=lighter_service)
 auth_scheme = HTTPBearer()
 _user_cache = TTLCache(maxsize=2048, ttl=settings.user_cache_ttl_seconds)
+_prediction_job_store: dict[str, dict[str, Any]] = {}
+_prediction_job_lock = asyncio.Lock()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await asyncio.gather(lighter_service.start(), grvt_service.start())
-    auto_close_task = asyncio.create_task(auto_close_worker())
     yield
-    auto_close_task.cancel()
-    await asyncio.gather(auto_close_task, return_exceptions=True)
     await asyncio.gather(lighter_service.stop(), grvt_service.stop(), market_data_service.close())
 
 
@@ -860,6 +861,109 @@ async def funding_prediction(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return snapshot
+
+
+async def _set_prediction_job_state(
+    job_id: str,
+    *,
+    status_value: str | None = None,
+    progress: float | None = None,
+    stage: str | None = None,
+    error: str | None = None,
+    result: FundingPredictionResponse | None = None,
+) -> None:
+    async with _prediction_job_lock:
+        job = _prediction_job_store.get(job_id)
+        if job is None:
+            return
+        if status_value is not None:
+            job["status"] = status_value
+        if progress is not None:
+            job["progress"] = min(max(float(progress), 0.0), 100.0)
+        if stage is not None:
+            job["stage"] = stage
+        if error is not None:
+            job["error"] = error
+        if result is not None:
+            job["result"] = result
+        job["updated_at"] = datetime.now(timezone.utc)
+
+
+@app.post("/funding-prediction/jobs", response_model=FundingPredictionJobCreateResponse)
+async def create_funding_prediction_job(
+    payload: FundingPredictionRequest,
+    service: MarketDataService = Depends(get_market_data_service),
+) -> FundingPredictionJobCreateResponse:
+    now = datetime.now(timezone.utc)
+    job_id = uuid4().hex
+    async with _prediction_job_lock:
+        _prediction_job_store[job_id] = {
+            "job_id": job_id,
+            "status": "pending",
+            "progress": 0.0,
+            "stage": "等待执行",
+            "error": None,
+            "result": None,
+            "created_at": now,
+            "updated_at": now,
+            "context": {
+                "primary_source": payload.primary_source,
+                "secondary_source": payload.secondary_source,
+                "volume_threshold": payload.volume_threshold,
+            },
+        }
+
+    async def _runner() -> None:
+        await _set_prediction_job_state(job_id, status_value="running", progress=1.0, stage="任务开始")
+
+        async def _progress(progress: float, stage: str) -> None:
+            await _set_prediction_job_state(job_id, progress=progress, stage=stage)
+
+        try:
+            result = await service.get_funding_prediction_snapshot(
+                primary=payload.primary_source,
+                secondary=payload.secondary_source,
+                volume_threshold=payload.volume_threshold,
+                force_refresh=payload.force_refresh,
+                progress_callback=_progress,
+            )
+            await _set_prediction_job_state(
+                job_id,
+                status_value="completed",
+                progress=100.0,
+                stage="任务完成",
+                result=result,
+            )
+        except Exception as exc:  # noqa: BLE001
+            await _set_prediction_job_state(
+                job_id,
+                status_value="failed",
+                progress=100.0,
+                stage="任务失败",
+                error=str(exc),
+            )
+
+    asyncio.create_task(_runner())
+    return FundingPredictionJobCreateResponse(job_id=job_id)
+
+
+@app.get("/funding-prediction/jobs/{job_id}", response_model=FundingPredictionJobStatusResponse)
+async def get_funding_prediction_job(job_id: str) -> FundingPredictionJobStatusResponse:
+    async with _prediction_job_lock:
+        job = _prediction_job_store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+        return FundingPredictionJobStatusResponse(
+            job_id=job["job_id"],
+            status=job["status"],
+            progress=job["progress"],
+            stage=job["stage"],
+            error=job["error"],
+            result=job["result"],
+            created_at=job["created_at"],
+            updated_at=job["updated_at"],
+            context=job.get("context"),
+        )
 
 
 @app.post("/arbitrage", response_model=ArbitrageSnapshotResponse)

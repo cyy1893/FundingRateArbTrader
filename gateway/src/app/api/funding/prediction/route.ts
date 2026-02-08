@@ -73,7 +73,7 @@ export async function GET(request: Request) {
     const volumeLabel =
       volumeThreshold <= 0
         ? "两端不限"
-        : `两端 ≥ ${formatVolume(volumeThreshold)}`;
+        : `两端合计 ≥ ${formatVolume(volumeThreshold)}`;
     const fetchedAt = predictionSnapshot.fetchedAt
       ? predictionSnapshot.fetchedAt.toISOString()
       : null;
@@ -93,7 +93,7 @@ export async function GET(request: Request) {
     const message =
       error instanceof Error
         ? error.message
-        : "无法计算资金费率预测。";
+        : "无法计算推荐套利结果。";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

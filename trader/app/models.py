@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -246,6 +246,8 @@ class ExchangeMarketMetrics(BaseModel):
     day_notional_volume: float | None = None
     open_interest: float | None = None
     volume_usd: float | None = None
+    best_bid: float | None = None
+    best_ask: float | None = None
 
 
 class ExchangeSnapshot(BaseModel):
@@ -271,6 +273,8 @@ class MarketRow(BaseModel):
     day_notional_volume: float | None = None
     open_interest: float | None = None
     volume_usd: float | None = None
+    best_bid: float | None = None
+    best_ask: float | None = None
     right: dict | None = None
 
 
@@ -338,6 +342,12 @@ class FundingPredictionEntry(BaseModel):
     average_spread_hourly: float
     total_decimal: float
     annualized_decimal: float
+    spread_volatility_24h_pct: float
+    price_volatility_24h_pct: float
+    left_bid_ask_spread_bps: float
+    right_bid_ask_spread_bps: float
+    combined_bid_ask_spread_bps: float
+    recommendation_score: float
     sample_count: int
     direction: Literal["leftLong", "rightLong", "unknown"]
 
@@ -359,6 +369,22 @@ class FundingPredictionResponse(BaseModel):
     failures: list[FundingPredictionFailure]
     fetched_at: datetime | None = None
     errors: list[ApiError] = Field(default_factory=list)
+
+
+class FundingPredictionJobCreateResponse(BaseModel):
+    job_id: str
+
+
+class FundingPredictionJobStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["pending", "running", "completed", "failed"]
+    progress: float
+    stage: str
+    error: str | None = None
+    result: FundingPredictionResponse | None = None
+    created_at: datetime
+    updated_at: datetime
+    context: dict[str, Any] | None = None
 
 
 class ArbitrageAnnualizedEntry(BaseModel):

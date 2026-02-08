@@ -850,7 +850,6 @@ function TradingPageContent() {
       leverage_left: activeSubscription.lighter_leverage,
       leverage_right: activeSubscription.grvt_leverage ?? 1,
       avoid_adverse_spread: activeSubscription.avoid_adverse_spread ?? false,
-      auto_close_after_ms: activeSubscription.auto_close_after_ms ?? null,
       liquidation_guard_enabled: activeSubscription.liquidation_guard_enabled ?? false,
       liquidation_guard_threshold_pct: activeSubscription.liquidation_guard_threshold_pct ?? null,
     });

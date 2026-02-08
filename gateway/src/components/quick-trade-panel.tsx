@@ -2,7 +2,7 @@ import { useRef, useState, useEffect, useMemo } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, ArrowUpRight, ArrowDownRight, Info, Search, Lock, Shield, Settings2, Clock } from "lucide-react";
+import { TrendingUp, ArrowUpRight, ArrowDownRight, Info, Search, Lock, Shield, Settings2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { OrderBookSubscription } from "@/hooks/use-order-book-websocket";
 import {
@@ -232,8 +232,6 @@ export function QuickTradePanel({
   const [grvtDirection, setGrvtDirection] = useState<"long" | "short">(defaultGrvtDirection ?? "short");
   const [notionalValue, setNotionalValue] = useState("");
   const [avoidAdverseSpread, setAvoidAdverseSpread] = useState(true);
-  const [customDays, setCustomDays] = useState("1");
-  const [customHours, setCustomHours] = useState("0");
   const [liquidationGuardEnabled, setLiquidationGuardEnabled] = useState(true);
   const [liquidationGuardPct, setLiquidationGuardPct] = useState("50");
 
@@ -323,12 +321,6 @@ export function QuickTradePanel({
   const safeNotional = Number.isFinite(notionalAmount) && notionalAmount > 0 ? notionalAmount : null;
   const lighterMargin = safeNotional ? safeNotional / Math.max(lighterLeverage, LEVERAGE_MIN) : null;
   const grvtMargin = safeNotional ? safeNotional / Math.max(grvtLeverage, LEVERAGE_MIN) : null;
-  const autoCloseAfterMs = useMemo(() => {
-    const d = parseInt(customDays, 10) || 0;
-    const h = parseInt(customHours, 10) || 0;
-    if (d === 0 && h === 0) return undefined;
-    return (d * 24 + h) * 60 * 60 * 1000;
-  }, [customDays, customHours]);
   const parsedLiquidationPct = Number(liquidationGuardPct);
   const liquidationGuardThresholdPct = Number.isFinite(parsedLiquidationPct)
     ? Math.min(100, Math.max(1, parsedLiquidationPct))
@@ -364,7 +356,6 @@ export function QuickTradePanel({
         depth: 10,
         throttle_ms: 100,
         avoid_adverse_spread: avoidAdverseSpread,
-        auto_close_after_ms: autoCloseAfterMs,
         liquidation_guard_enabled: liquidationGuardEnabled,
         liquidation_guard_threshold_pct: liquidationGuardThresholdPct,
       } : null);
@@ -382,7 +373,6 @@ export function QuickTradePanel({
       depth: 10,
       throttle_ms: 100,
       avoid_adverse_spread: avoidAdverseSpread,
-      auto_close_after_ms: autoCloseAfterMs,
       liquidation_guard_enabled: liquidationGuardEnabled,
       liquidation_guard_threshold_pct: liquidationGuardThresholdPct,
     };
@@ -397,7 +387,6 @@ export function QuickTradePanel({
     grvtDirection,
     safeNotional,
     avoidAdverseSpread,
-    autoCloseAfterMs,
     liquidationGuardEnabled,
     liquidationGuardThresholdPct,
     onConfigChange,
@@ -639,38 +628,6 @@ export function QuickTradePanel({
             </div>
             <div className={cn("h-4 w-7 rounded-full transition-colors relative", avoidAdverseSpread ? "bg-primary" : "bg-slate-200")}>
               <div className={cn("absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform", avoidAdverseSpread && "translate-x-3")} />
-            </div>
-          </div>
-
-          <div className="space-y-1.5 py-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-700">自动平仓</span>
-              <span className="text-[10px] font-black text-slate-400 uppercase">Custom</span>
-            </div>
-            <div className="flex items-center gap-2 mt-1.5 bg-slate-50 px-2 py-1.5 rounded border border-slate-100 animate-in slide-in-from-top-1">
-              <div className="flex items-center gap-1 flex-1">
-                <Input
-                  type="number"
-                  min="0"
-                  placeholder="D"
-                  value={customDays}
-                  onChange={(e) => setCustomDays(e.target.value)}
-                  className="h-6 w-full border-slate-200 text-[10px] font-black p-1 text-center"
-                />
-                <span className="text-[9px] font-bold text-slate-400">D</span>
-              </div>
-              <div className="flex items-center gap-1 flex-1">
-                <Input
-                  type="number"
-                  min="0"
-                  max="23"
-                  placeholder="H"
-                  value={customHours}
-                  onChange={(e) => setCustomHours(e.target.value)}
-                  className="h-6 w-full border-slate-200 text-[10px] font-black p-1 text-center"
-                />
-                <span className="text-[9px] font-bold text-slate-400">H</span>
-              </div>
             </div>
           </div>
 

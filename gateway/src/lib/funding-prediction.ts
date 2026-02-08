@@ -24,6 +24,12 @@ export type FundingPredictionEntry = {
   averageSpreadHourly: number;
   totalDecimal: number;
   annualizedDecimal: number;
+  spreadVolatility24hPct: number;
+  priceVolatility24hPct: number;
+  leftBidAskSpreadBps: number;
+  rightBidAskSpreadBps: number;
+  combinedBidAskSpreadBps: number;
+  recommendationScore: number;
   sampleCount: number;
   direction: FundingPredictionDirection;
 };
@@ -65,7 +71,7 @@ export async function fetchFundingPredictionSnapshot(
   };
 
   if (!response.ok || !payload.entries) {
-    const message = payload.error || "无法获取资金费率预测数据";
+    const message = payload.error || "无法获取推荐套利数据";
     throw new Error(message);
   }
 
@@ -100,6 +106,12 @@ export async function fetchFundingPredictionSnapshot(
       averageSpreadHourly: Number(entry.average_spread_hourly ?? 0),
       totalDecimal: Number(entry.total_decimal ?? 0),
       annualizedDecimal: Number(entry.annualized_decimal ?? 0),
+      spreadVolatility24hPct: Number(entry.spread_volatility_24h_pct ?? 0),
+      priceVolatility24hPct: Number(entry.price_volatility_24h_pct ?? 0),
+      leftBidAskSpreadBps: Number(entry.left_bid_ask_spread_bps ?? 0),
+      rightBidAskSpreadBps: Number(entry.right_bid_ask_spread_bps ?? 0),
+      combinedBidAskSpreadBps: Number(entry.combined_bid_ask_spread_bps ?? 0),
+      recommendationScore: Number(entry.recommendation_score ?? 0),
       sampleCount: Number(entry.sample_count ?? 0),
       direction: (entry.direction as FundingPredictionDirection) ?? "unknown",
     }),
