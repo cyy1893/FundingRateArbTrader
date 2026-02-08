@@ -22,7 +22,7 @@ export type MarketRow = {
   priceChange1h: number | null;
   priceChange24h: number | null;
   priceChange7d: number | null;
-  maxLeverage: number;
+  maxLeverage: number | null;
   fundingRate: number;
   dayNotionalVolume: number | null;
   openInterest: number;

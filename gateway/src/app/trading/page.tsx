@@ -450,15 +450,17 @@ function TradingPageContent() {
             continue;
           }
           const entry = caps[symbol] ?? {};
-          if (row.leftProvider === "lighter" && Number.isFinite(row.maxLeverage)) {
-            entry.lighter = row.maxLeverage;
-          } else if (row.leftProvider === "grvt" && Number.isFinite(row.maxLeverage)) {
-            entry.grvt = row.maxLeverage;
+          const leftMaxLeverage = row.maxLeverage;
+          if (row.leftProvider === "lighter" && typeof leftMaxLeverage === "number" && Number.isFinite(leftMaxLeverage)) {
+            entry.lighter = leftMaxLeverage;
+          } else if (row.leftProvider === "grvt" && typeof leftMaxLeverage === "number" && Number.isFinite(leftMaxLeverage)) {
+            entry.grvt = leftMaxLeverage;
           }
-          if (row.right?.source === "lighter" && Number.isFinite(row.right.maxLeverage)) {
-            entry.lighter = row.right.maxLeverage ?? entry.lighter;
-          } else if (row.right?.source === "grvt" && Number.isFinite(row.right.maxLeverage)) {
-            entry.grvt = row.right.maxLeverage ?? entry.grvt;
+          const rightMaxLeverage = row.right?.maxLeverage;
+          if (row.right?.source === "lighter" && typeof rightMaxLeverage === "number" && Number.isFinite(rightMaxLeverage)) {
+            entry.lighter = rightMaxLeverage;
+          } else if (row.right?.source === "grvt" && typeof rightMaxLeverage === "number" && Number.isFinite(rightMaxLeverage)) {
+            entry.grvt = rightMaxLeverage;
           }
           caps[symbol] = entry;
         }

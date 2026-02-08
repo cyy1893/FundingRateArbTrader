@@ -98,7 +98,7 @@ export async function getPerpetualSnapshot(
           ? row.price_change_7d
           : null,
       maxLeverage:
-        typeof row.max_leverage === "number" ? row.max_leverage : 0,
+        typeof row.max_leverage === "number" ? row.max_leverage : null,
       fundingRate:
         typeof row.funding_rate === "number" ? row.funding_rate : 0,
       dayNotionalVolume:

@@ -945,7 +945,7 @@ class MarketDataService:
         if self._lighter_leverage_map is not None:
             return self._lighter_leverage_map
 
-        url = "https://docs.lighter.xyz/perpetual-futures/contract-specifications.md"
+        url = "https://docs.lighter.xyz/trading/contract-specifications.md"
         overrides: dict[str, float] = {
             "MON": 5,
             "WLFI": 5,
