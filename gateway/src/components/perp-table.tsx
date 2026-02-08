@@ -49,7 +49,6 @@ import {
 } from "@/components/ui/table";
 import { formatVolume } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import { useArbitrageSidebar } from "@/components/arbitrage-sidebar";
 import { useFundingPredictionSidebar } from "@/components/funding-prediction-sidebar";
 import { persistComparisonSelection } from "@/lib/comparison-selection";
 import type { MarketRow } from "@/types/market";
@@ -426,7 +425,6 @@ export function PerpTable({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const arbitrageSidebar = useArbitrageSidebar();
   const predictionSidebar = useFundingPredictionSidebar();
 
   const handleVolumeThresholdChange = useCallback(
@@ -1253,20 +1251,6 @@ export function PerpTable({
                 </SelectContent>
               </Select>
             </div>
-
-            <Button
-              variant="outline"
-              className="whitespace-nowrap"
-              onClick={() =>
-                arbitrageSidebar.open({
-                  sourceA: leftSource.id,
-                  sourceB: rightSource.id,
-                  volumeThreshold,
-                })
-              }
-            >
-              过去 24 小时套利 APR
-            </Button>
 
             <Button
               variant="outline"

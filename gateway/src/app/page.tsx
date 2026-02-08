@@ -13,9 +13,6 @@ import { SettlementCountdown } from "@/components/settlement-countdown";
 import { SourceControls } from "@/components/source-controls";
 import { ErrorNotification } from "@/components/error-notification";
 import {
-  ArbitrageSidebarProvider,
-} from "@/components/arbitrage-sidebar";
-import {
   FundingPredictionSidebarProvider,
 } from "@/components/funding-prediction-sidebar";
 import { RightPanel } from "@/components/right-panel";
@@ -152,8 +149,7 @@ async function DashboardContent({
     targetIso: computeNextSettlementTimestamp(fetchedAt, hours),
   }));
   return (
-    <ArbitrageSidebarProvider>
-      <FundingPredictionSidebarProvider>
+    <FundingPredictionSidebarProvider>
         <ErrorNotification message={truncatedErrorMessage} />
         <Card className="shadow-sm">
           <CardHeader className="space-y-6 pb-6">
@@ -225,14 +221,9 @@ async function DashboardContent({
             />
           </CardContent>
         </Card>
-        <RightPanel
-          primarySourceId={primarySource.id}
-          secondarySourceId={secondarySource.id}
-          volumeThreshold={volumeThreshold}
-        />
+        <RightPanel />
 
-      </FundingPredictionSidebarProvider>
-    </ArbitrageSidebarProvider>
+    </FundingPredictionSidebarProvider>
   );
 }
 
