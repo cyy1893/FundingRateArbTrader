@@ -94,13 +94,25 @@ auth_scheme = HTTPBearer()
 _user_cache = TTLCache(maxsize=2048, ttl=settings.user_cache_ttl_seconds)
 _prediction_job_store: dict[str, dict[str, Any]] = {}
 _prediction_job_lock = asyncio.Lock()
+SETTLEMENT_GUARD_WINDOW_MINUTES = 5
+SETTLEMENT_GUARD_CHECK_INTERVAL_SECONDS = 15
+LIQUIDATION_GUARD_CHECK_INTERVAL_SECONDS = 60
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    workers: list[asyncio.Task[Any]] = []
     await asyncio.gather(lighter_service.start(), grvt_service.start())
-    yield
-    await asyncio.gather(lighter_service.stop(), grvt_service.stop(), market_data_service.close())
+    workers.append(asyncio.create_task(auto_close_worker()))
+    workers.append(asyncio.create_task(funding_settlement_guard_worker()))
+    workers.append(asyncio.create_task(liquidation_guard_worker()))
+    try:
+        yield
+    finally:
+        for worker in workers:
+            worker.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
+        await asyncio.gather(lighter_service.stop(), grvt_service.stop(), market_data_service.close())
 
 
 app = FastAPI(title="Funding Rate Arbitrage Trader", version="0.1.0", lifespan=lifespan)
@@ -182,7 +194,79 @@ async def _execute_auto_close_task(task_id: UUID) -> None:
             session.commit()
             return
 
-    symbol = position.symbol
+    close_result = await _close_position_with_reduce_only_orders(position.id)
+
+    with Session(engine) as session:
+        task = session.get(RiskTask, task_id)
+        if task is None:
+            return
+        task.triggered_at = datetime.utcnow()
+        if close_result["failed_reasons"]:
+            task.status = RiskTaskStatus.failed
+            task.trigger_reason = " | ".join(close_result["failed_reasons"])
+        else:
+            task.status = RiskTaskStatus.triggered
+            task.trigger_reason = "auto close orders placed"
+        session.add(task)
+        session.commit()
+
+
+async def auto_close_worker() -> None:
+    engine = get_engine()
+    while True:
+        await asyncio.sleep(2)
+        now = datetime.utcnow()
+        with Session(engine) as session:
+            task_ids = session.exec(
+                select(RiskTask.id)
+                .where(RiskTask.enabled.is_(True))
+                .where(RiskTask.task_type == RiskTaskType.auto_close)
+                .where(RiskTask.status == RiskTaskStatus.pending)
+                .where(RiskTask.execute_at.is_not(None))
+                .where(RiskTask.execute_at <= now)
+            ).all()
+        for task_id in task_ids:
+            await _execute_auto_close_task(task_id)
+
+
+def _funding_sign_for_side(side: str) -> float:
+    normalized = (side or "").lower()
+    if normalized == "buy":
+        return -1.0
+    if normalized == "sell":
+        return 1.0
+    return 0.0
+
+
+def _normalized_symbol_candidates(symbol: str) -> set[str]:
+    upper = (symbol or "").upper()
+    candidates = {upper}
+    if upper.endswith("-PERP"):
+        candidates.add(upper[:-5])
+    else:
+        candidates.add(f"{upper}-PERP")
+    return candidates
+
+
+def _match_grvt_position_symbol(symbol: str, instrument: str) -> bool:
+    base = (symbol or "").upper().replace("-PERP", "")
+    normalized_instrument = (instrument or "").upper()
+    return normalized_instrument.startswith(f"{base}_")
+
+
+async def _close_position_with_reduce_only_orders(position_id: UUID) -> dict[str, Any]:
+    engine = get_engine()
+    with Session(engine) as session:
+        position = session.get(ArbPosition, position_id)
+        if position is None:
+            return {"failed_reasons": ["position not found"], "closed": False}
+        if position.status in {ArbPositionStatus.closed, ArbPositionStatus.failed}:
+            return {"failed_reasons": ["position inactive"], "closed": False}
+        user = session.get(User, position.user_id)
+        if user is None:
+            return {"failed_reasons": ["user not found"], "closed": False}
+        symbol = position.symbol
+
     try:
         with Session(engine) as session:
             profile_user = session.get(User, user.id)
@@ -214,15 +298,7 @@ async def _execute_auto_close_task(task_id: UUID) -> None:
         )
         lighter_best_bid, lighter_best_ask = await _get_lighter_best_prices(symbol)
     except Exception as exc:  # noqa: BLE001
-        with Session(engine) as session:
-            task = session.get(RiskTask, task_id)
-            if task is not None:
-                task.status = RiskTaskStatus.failed
-                task.trigger_reason = f"snapshot error: {exc}"
-                task.triggered_at = datetime.utcnow()
-                session.add(task)
-                session.commit()
-        return
+        return {"failed_reasons": [f"snapshot error: {exc}"], "closed": False}
 
     lighter_position = next(
         (pos for pos in lighter_snapshot.positions if pos.symbol.upper() == symbol.upper()),
@@ -273,15 +349,7 @@ async def _execute_auto_close_task(task_id: UUID) -> None:
             )
 
     if not orders:
-        with Session(engine) as session:
-            task = session.get(RiskTask, task_id)
-            if task is not None:
-                task.status = RiskTaskStatus.failed
-                task.trigger_reason = "no positions or price"
-                task.triggered_at = datetime.utcnow()
-                session.add(task)
-                session.commit()
-        return
+        return {"failed_reasons": ["no positions or price"], "closed": False}
 
     async def _place_order(venue: str, payload: dict[str, Any]) -> tuple[str, bool, str | None]:
         try:
@@ -306,39 +374,228 @@ async def _execute_auto_close_task(task_id: UUID) -> None:
             return venue, False, str(exc)
 
     results = await asyncio.gather(*(_place_order(venue, payload) for venue, payload in orders))
-    failed = [result for result in results if not result[1]]
+    failed_reasons = [f"{venue}: {err}" for venue, ok, err in results if not ok and err]
+    if failed_reasons:
+        return {"failed_reasons": failed_reasons, "closed": False}
 
     with Session(engine) as session:
-        task = session.get(RiskTask, task_id)
-        if task is None:
-            return
-        task.triggered_at = datetime.utcnow()
-        if failed:
-            task.status = RiskTaskStatus.failed
-            task.trigger_reason = " | ".join(f"{venue}: {err}" for venue, _, err in failed if err)
-        else:
-            task.status = RiskTaskStatus.triggered
-            task.trigger_reason = "auto close orders placed"
-        session.add(task)
-        session.commit()
+        position = session.get(ArbPosition, position_id)
+        if position is not None and position.status not in {ArbPositionStatus.closed, ArbPositionStatus.failed}:
+            position.status = ArbPositionStatus.exiting
+            position.updated_at = datetime.utcnow()
+            session.add(position)
+            session.commit()
+    return {"failed_reasons": [], "closed": True}
 
 
-async def auto_close_worker() -> None:
+def _is_settlement_guard_window(now: datetime) -> bool:
+    return now.minute >= (60 - SETTLEMENT_GUARD_WINDOW_MINUTES)
+
+
+async def funding_settlement_guard_worker() -> None:
     engine = get_engine()
     while True:
-        await asyncio.sleep(2)
+        await asyncio.sleep(SETTLEMENT_GUARD_CHECK_INTERVAL_SECONDS)
         now = datetime.utcnow()
+        if not _is_settlement_guard_window(now):
+            continue
+
         with Session(engine) as session:
-            task_ids = session.exec(
-                select(RiskTask.id)
-                .where(RiskTask.enabled.is_(True))
-                .where(RiskTask.task_type == RiskTaskType.auto_close)
-                .where(RiskTask.status == RiskTaskStatus.pending)
-                .where(RiskTask.execute_at.is_not(None))
-                .where(RiskTask.execute_at <= now)
+            positions = session.exec(
+                select(ArbPosition)
+                .where(ArbPosition.deleted_at.is_(None))
+                .where(
+                    ArbPosition.status.in_(
+                        [
+                            ArbPositionStatus.pending,
+                            ArbPositionStatus.partially_filled,
+                            ArbPositionStatus.hedged,
+                        ]
+                    )
+                )
             ).all()
-        for task_id in task_ids:
-            await _execute_auto_close_task(task_id)
+
+        if not positions:
+            continue
+
+        grouped: dict[tuple[str, str], list[ArbPosition]] = {}
+        for position in positions:
+            grouped.setdefault((position.left_venue, position.right_venue), []).append(position)
+
+        for (left_venue, right_venue), venue_positions in grouped.items():
+            try:
+                snapshot = await market_data_service.get_perp_snapshot(left_venue, right_venue)
+            except Exception as exc:  # noqa: BLE001
+                logging.warning(
+                    "settlement guard snapshot failed left=%s right=%s error=%s",
+                    left_venue,
+                    right_venue,
+                    exc,
+                )
+                continue
+
+            funding_by_symbol: dict[str, tuple[float | None, float | None]] = {}
+            for row in snapshot.rows:
+                right_payload = row.right if isinstance(row.right, dict) else {}
+                left_rate = row.funding_rate
+                right_rate = right_payload.get("funding_rate")
+                symbol_keys = set()
+                if row.symbol:
+                    symbol_keys |= _normalized_symbol_candidates(row.symbol)
+                if row.left_symbol:
+                    symbol_keys |= _normalized_symbol_candidates(row.left_symbol)
+                for key in symbol_keys:
+                    funding_by_symbol[key] = (left_rate, right_rate)
+
+            for position in venue_positions:
+                symbol_key = (position.symbol or "").upper()
+                rates = funding_by_symbol.get(symbol_key)
+                if rates is None:
+                    continue
+                left_rate, right_rate = rates
+                if left_rate is None or right_rate is None:
+                    continue
+                net_hourly_rate = (
+                    _funding_sign_for_side(position.left_side) * left_rate
+                    + _funding_sign_for_side(position.right_side) * right_rate
+                )
+                expected_hourly_pnl = position.notional * (net_hourly_rate / 100.0)
+                if expected_hourly_pnl > 0:
+                    continue
+
+                close_result = await _close_position_with_reduce_only_orders(position.id)
+                if close_result["failed_reasons"]:
+                    logging.warning(
+                        "settlement guard close failed position_id=%s symbol=%s reasons=%s",
+                        position.id,
+                        position.symbol,
+                        close_result["failed_reasons"],
+                    )
+                else:
+                    logging.info(
+                        "settlement guard close triggered position_id=%s symbol=%s pnl_estimate=%s",
+                        position.id,
+                        position.symbol,
+                        expected_hourly_pnl,
+                    )
+
+
+async def liquidation_guard_worker() -> None:
+    engine = get_engine()
+    while True:
+        await asyncio.sleep(LIQUIDATION_GUARD_CHECK_INTERVAL_SECONDS)
+        with Session(engine) as session:
+            guard_tasks = session.exec(
+                select(RiskTask)
+                .where(RiskTask.deleted_at.is_(None))
+                .where(RiskTask.enabled.is_(True))
+                .where(RiskTask.task_type == RiskTaskType.liquidation_guard)
+                .where(RiskTask.status == RiskTaskStatus.pending)
+            ).all()
+            if not guard_tasks:
+                continue
+            position_ids = [task.arb_position_id for task in guard_tasks]
+            positions = session.exec(
+                select(ArbPosition)
+                .where(ArbPosition.id.in_(position_ids))
+                .where(ArbPosition.deleted_at.is_(None))
+                .where(
+                    ArbPosition.status.in_(
+                        [
+                            ArbPositionStatus.pending,
+                            ArbPositionStatus.partially_filled,
+                            ArbPositionStatus.hedged,
+                        ]
+                    )
+                )
+            ).all()
+
+        position_by_id = {position.id: position for position in positions}
+        for task in guard_tasks:
+            position = position_by_id.get(task.arb_position_id)
+            if position is None:
+                continue
+
+            threshold_pct = float(task.threshold_pct or 50.0)
+            if position.notional <= 0:
+                continue
+
+            try:
+                with Session(engine) as session:
+                    user = session.get(User, position.user_id)
+                    if user is None:
+                        continue
+                    lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(
+                        session,
+                        user,
+                    )
+                    grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(
+                        session,
+                        user,
+                    )
+                lighter_snapshot, grvt_snapshot = await asyncio.gather(
+                    lighter_service.get_balances_with_credentials(
+                        lighter_account_index,
+                        lighter_api_key_index,
+                        lighter_private_key,
+                    ),
+                    grvt_service.get_balances_with_credentials(
+                        grvt_api_key,
+                        grvt_private_key,
+                        grvt_trading_account_id,
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logging.warning(
+                    "liquidation guard snapshot failed task_id=%s position_id=%s error=%s",
+                    task.id,
+                    position.id,
+                    exc,
+                )
+                continue
+
+            symbol = (position.symbol or "").upper()
+            lighter_position = next(
+                (pos for pos in lighter_snapshot.positions if pos.symbol.upper() in _normalized_symbol_candidates(symbol)),
+                None,
+            )
+            grvt_position = next(
+                (
+                    pos
+                    for pos in grvt_snapshot.positions
+                    if _match_grvt_position_symbol(symbol, pos.instrument)
+                ),
+                None,
+            )
+
+            lighter_unrealized = lighter_position.unrealized_pnl if lighter_position else 0.0
+            grvt_unrealized = grvt_position.unrealized_pnl if grvt_position else 0.0
+            net_unrealized = lighter_unrealized + grvt_unrealized
+            pnl_ratio_pct = abs(net_unrealized) / position.notional * 100.0
+
+            if pnl_ratio_pct < threshold_pct:
+                continue
+
+            close_result = await _close_position_with_reduce_only_orders(position.id)
+            if close_result["failed_reasons"]:
+                logging.warning(
+                    "liquidation guard close failed task_id=%s position_id=%s reasons=%s",
+                    task.id,
+                    position.id,
+                    close_result["failed_reasons"],
+                )
+                continue
+
+            with Session(engine) as session:
+                db_task = session.get(RiskTask, task.id)
+                if db_task is not None and db_task.status == RiskTaskStatus.pending:
+                    db_task.status = RiskTaskStatus.triggered
+                    db_task.triggered_at = datetime.utcnow()
+                    db_task.trigger_reason = (
+                        f"unrealized pnl ratio {pnl_ratio_pct:.2f}% reached threshold {threshold_pct:.2f}%"
+                    )
+                    session.add(db_task)
+                    session.commit()
 
 
 def get_current_user(
