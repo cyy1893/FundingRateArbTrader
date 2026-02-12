@@ -76,8 +76,20 @@ export function FundingPredictionSidebarProvider({
       lastRequest.sourceB === request.sourceB &&
       lastRequest.volumeThreshold === request.volumeThreshold;
 
-    if (sameRequest && isOpen && !request.forceRefresh) {
-      setIsOpen(false);
+    setIsOpen(true);
+
+    // Reuse in-flight run and existing result for the same request unless force refresh is required.
+    if (!request.forceRefresh && sameRequest) {
+      if (loading) {
+        return;
+      }
+      if (data || error || progress > 0) {
+        return;
+      }
+    }
+
+    // Prevent accidental duplicate run creation while a task is already executing.
+    if (loading && !request.forceRefresh) {
       return;
     }
 
@@ -91,7 +103,6 @@ export function FundingPredictionSidebarProvider({
       params.set("refresh", "1");
     }
 
-    setIsOpen(true);
     setLoading(true);
     setProgress(1);
     setStage("创建任务…");
@@ -162,7 +173,7 @@ export function FundingPredictionSidebarProvider({
     } finally {
       setLoading(false);
     }
-  }, [data, isOpen, lastRequest]);
+  }, [data, error, lastRequest, loading, progress]);
 
   const refresh = useCallback(() => {
     if (!lastRequest) {
@@ -173,10 +184,6 @@ export function FundingPredictionSidebarProvider({
 
   const close = useCallback(() => {
     setIsOpen(false);
-    setLoading(false);
-    setProgress(0);
-    setStage("准备请求…");
-    setError(null);
   }, []);
 
   const value = useMemo(
@@ -211,7 +218,7 @@ export function useFundingPredictionSidebar() {
 }
 
 export function FundingPredictionContent() {
-  const { loading, progress, stage, error, data, refresh, lastRequest } = useFundingPredictionSidebar();
+  const { loading, stage, error, data, refresh, lastRequest } = useFundingPredictionSidebar();
   const hasContent = Boolean(data && data.entries.length > 0);
 
   return (
@@ -247,22 +254,13 @@ export function FundingPredictionContent() {
       <div className="flex-1 overflow-y-auto p-6">
         {loading ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
-            <div className="w-full max-w-md space-y-4">
-              <div className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>{stage}</span>
-                </div>
-                <span className="tabular-nums text-xs">{Math.round(progress)}%</span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-primary transition-all duration-200 ease-out"
-                  style={{ width: `${Math.max(0, Math.min(progress, 100))}%` }}
-                />
+            <div className="w-full max-w-md space-y-3 text-center text-sm">
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>正在计算推荐结果…</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                进度由后端实时上报，反映实际完成比例。
+                当前阶段：{stage || "处理中"}
               </p>
             </div>
           </div>
@@ -284,7 +282,7 @@ export function FundingPredictionContent() {
 }
 
 export function FundingPredictionSidebar() {
-  const { isOpen } = useFundingPredictionSidebar();
+  useFundingPredictionSidebar();
   return null;
 }
 
@@ -295,7 +293,7 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
     <div className="space-y-4">
       <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
         <div>
-          注：评分偏好高 APR、低资金费率波动、低价格波动、低盘口价差；盘口价差使用近 10 秒均值。仅显示 {payload.metadata.volumeLabel} 的币种。
+          注：预测年化 APR 采用“沿当前有利方向持有，直到不再盈利”为口径；评分偏好高 APR、低资金费率波动、低价格波动、低点差。仅显示 {payload.metadata.volumeLabel} 的币种。
         </div>
         {payload.failures.length > 0 ? (
           <div className="mt-2">
@@ -311,8 +309,8 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
             <TableHead className="text-right">预测年化 APR</TableHead>
             <TableHead className="text-right">资金费率波动率(24h)</TableHead>
             <TableHead className="text-right">价格波动率(24h估算)</TableHead>
-            <TableHead className="text-right">Lighter 买卖价差(10s均值)</TableHead>
-            <TableHead className="text-right">GRVT 买卖价差(10s均值)</TableHead>
+            <TableHead className="text-right">3秒平均点差(Lighter)</TableHead>
+            <TableHead className="text-right">3秒平均点差(GRVT)</TableHead>
             <TableHead className="text-right">综合分</TableHead>
             <TableHead className="text-right">去交易</TableHead>
           </TableRow>

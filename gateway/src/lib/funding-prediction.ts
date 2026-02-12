@@ -29,6 +29,9 @@ export type FundingPredictionEntry = {
   leftBidAskSpreadBps: number;
   rightBidAskSpreadBps: number;
   combinedBidAskSpreadBps: number;
+  leftSpreadSamplesBps: number[];
+  rightSpreadSamplesBps: number[];
+  combinedSpreadSamplesBps: number[];
   recommendationScore: number;
   sampleCount: number;
   direction: FundingPredictionDirection;
@@ -111,6 +114,15 @@ export async function fetchFundingPredictionSnapshot(
       leftBidAskSpreadBps: Number(entry.left_bid_ask_spread_bps ?? 0),
       rightBidAskSpreadBps: Number(entry.right_bid_ask_spread_bps ?? 0),
       combinedBidAskSpreadBps: Number(entry.combined_bid_ask_spread_bps ?? 0),
+      leftSpreadSamplesBps: Array.isArray(entry.left_spread_samples_bps)
+        ? entry.left_spread_samples_bps.map((value) => Number(value))
+        : [],
+      rightSpreadSamplesBps: Array.isArray(entry.right_spread_samples_bps)
+        ? entry.right_spread_samples_bps.map((value) => Number(value))
+        : [],
+      combinedSpreadSamplesBps: Array.isArray(entry.combined_spread_samples_bps)
+        ? entry.combined_spread_samples_bps.map((value) => Number(value))
+        : [],
       recommendationScore: Number(entry.recommendation_score ?? 0),
       sampleCount: Number(entry.sample_count ?? 0),
       direction: (entry.direction as FundingPredictionDirection) ?? "unknown",

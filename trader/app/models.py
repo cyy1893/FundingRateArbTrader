@@ -327,6 +327,27 @@ class AvailableSymbolsResponse(BaseModel):
     fetched_at: datetime | None = None
 
 
+class CoinGeckoRequest(BaseModel):
+    symbols: list[str] = Field(default_factory=list)
+
+
+class CoinGeckoMarketSnapshot(BaseModel):
+    id: str
+    name: str
+    image: str | None = None
+    symbol: str
+    current_price: float | None = None
+    volume_usd: float | None = None
+    price_change_1h: float | None = None
+    price_change_24h: float | None = None
+    price_change_7d: float | None = None
+
+
+class CoinGeckoResponse(BaseModel):
+    markets: list[CoinGeckoMarketSnapshot] = Field(default_factory=list)
+    errors: list[ApiError] = Field(default_factory=list)
+
+
 class FundingPredictionEntry(BaseModel):
     symbol: str
     display_name: str
@@ -344,9 +365,13 @@ class FundingPredictionEntry(BaseModel):
     annualized_decimal: float
     spread_volatility_24h_pct: float
     price_volatility_24h_pct: float
+    coingecko_volume_24h: float | None = None
     left_bid_ask_spread_bps: float
     right_bid_ask_spread_bps: float
     combined_bid_ask_spread_bps: float
+    left_spread_samples_bps: list[float] = Field(default_factory=list)
+    right_spread_samples_bps: list[float] = Field(default_factory=list)
+    combined_spread_samples_bps: list[float] = Field(default_factory=list)
     recommendation_score: float
     sample_count: int
     direction: Literal["leftLong", "rightLong", "unknown"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import asyncio
 import re
+from collections import defaultdict
 from datetime import datetime, timezone
 from time import time
 from typing import Any, Awaitable, Callable
@@ -41,23 +42,38 @@ PREDICTION_HOURS_PER_YEAR = 24 * 365
 MAX_PREDICTION_WORKERS = 5
 PREDICTION_HALF_LIFE_HOURS = 16.0
 PREDICTION_VOLATILITY_WINDOW_HOURS = 24
-RECOMMENDATION_APR_WEIGHT = 0.75
-RECOMMENDATION_FUNDING_VOLATILITY_WEIGHT = 0.125
-RECOMMENDATION_PRICE_VOLATILITY_WEIGHT = 0.125
-SPREAD_INTOLERABLE_BPS = 10.0
+RECOMMENDATION_APR_WEIGHT = 0.70
+RECOMMENDATION_FUNDING_VOLATILITY_WEIGHT = 0.10
+RECOMMENDATION_PRICE_VOLATILITY_WEIGHT = 0.10
+SPREAD_INTOLERABLE_BPS = 15.0
 SPREAD_STEEPNESS_BPS = 1.5
 DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS = 12.0
 DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT = 5.0
-SPREAD_SAMPLING_DURATION_SECONDS = 10
+MAX_ACCEPTABLE_PRICE_VOLATILITY_PCT = 10.0
+# Spread sampling window for recommendation scoring/details.
+SPREAD_SAMPLING_DURATION_SECONDS = 3
 SPREAD_SAMPLING_INTERVAL_SECONDS = 1
 LIGHTER_SPREAD_FETCH_CONCURRENCY = 8
 CACHE_TTL_SECONDS = 10 * 60
 PREDICTION_CACHE_TTL_SECONDS = 5 * 60
 AVAILABLE_SYMBOLS_CACHE_TTL_SECONDS = 60 * 60
+COINGECKO_MARKET_CACHE_TTL_SECONDS = 5 * 60
+COINGECKO_ID_CACHE_TTL_SECONDS = 6 * 60 * 60
+COINGECKO_ID_NEGATIVE_CACHE_TTL_SECONDS = 5 * 60
+COINGECKO_API_KEY = "CG-Bk4Hk2fWnGqa372fums79HvT"
 SYMBOL_RENAMES: dict[str, str] = {
     "1000PEPE": "kPEPE",
     "1000SHIB": "kSHIB",
     "1000BONK": "kBONK",
+}
+COINGECKO_MANUAL_OVERRIDES: dict[str, str] = {
+    "FXS": "frax-share",
+    "PUMP": "pump-fun",
+    "HYPE": "hyperliquid",
+    "KPEPE": "pepe",
+    "KSHIB": "shiba-inu",
+    "KBONK": "bonk",
+    "PNUT": "peanut-the-squirrel",
 }
 
 
@@ -71,6 +87,8 @@ class MarketDataService:
         self._arbitrage_cache: dict[tuple[str, str, float], tuple[float, ArbitrageSnapshotResponse]] = {}
         self._prediction_cache: dict[tuple[str, str, float], tuple[float, FundingPredictionResponse]] = {}
         self._available_symbols_cache: dict[tuple[str, str], tuple[float, list[AvailableSymbolEntry], datetime]] = {}
+        self._coingecko_id_cache: dict[str, tuple[float, str | None]] = {}
+        self._coingecko_market_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -598,7 +616,7 @@ class MarketDataService:
         duration_seconds: int,
         interval_seconds: int,
         progress_callback: Callable[[float, str], Awaitable[None] | None] | None = None,
-    ) -> dict[str, dict[str, float]]:
+    ) -> dict[str, dict[str, Any]]:
         if not symbols:
             return {}
 
@@ -606,6 +624,9 @@ class MarketDataService:
         sums: dict[str, dict[str, float]] = {}
         counts: dict[str, int] = {}
         mid_samples: dict[str, list[float]] = {}
+        spread_samples: dict[str, dict[str, list[float]]] = defaultdict(
+            lambda: {"left": [], "right": [], "combined": []}
+        )
 
         for index in range(sample_count):
             try:
@@ -663,6 +684,9 @@ class MarketDataService:
                 bucket["right"] += right_spread_bps
                 bucket["combined"] += left_spread_bps + right_spread_bps
                 counts[symbol_key] = counts.get(symbol_key, 0) + 1
+                spread_samples[symbol_key]["left"].append(left_spread_bps)
+                spread_samples[symbol_key]["right"].append(right_spread_bps)
+                spread_samples[symbol_key]["combined"].append(left_spread_bps + right_spread_bps)
 
                 left_mid = _compute_mid_price(left_bid, left_ask, _parse_float(row.mark_price))
                 right_mid = _compute_mid_price(
@@ -683,7 +707,7 @@ class MarketDataService:
                 f"盘口采样 {index + 1}/{sample_count}",
             )
 
-        averages: dict[str, dict[str, float]] = {}
+        averages: dict[str, dict[str, Any]] = {}
         for symbol_key, total_values in sums.items():
             count = counts.get(symbol_key, 0)
             if count <= 0:
@@ -697,6 +721,9 @@ class MarketDataService:
                     interval_seconds=interval_seconds,
                     default_value=DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
                 ),
+                "left_spread_samples_bps": spread_samples[symbol_key]["left"],
+                "right_spread_samples_bps": spread_samples[symbol_key]["right"],
+                "combined_spread_samples_bps": spread_samples[symbol_key]["combined"],
             }
         return averages
 
@@ -721,6 +748,229 @@ class MarketDataService:
 
         await asyncio.gather(*(_fetch_one(symbol_key) for symbol_key in symbols))
         return results
+
+    async def get_coingecko_market_snapshots(self, symbols: set[str]) -> tuple[dict[str, dict[str, Any]], list[ApiError]]:
+        normalized_symbols = {symbol.upper() for symbol in symbols if symbol}
+        if not normalized_symbols:
+            return {}, []
+
+        now_ts = time()
+        snapshots: dict[str, dict[str, Any]] = {}
+        missing_symbols: set[str] = set()
+        for symbol in normalized_symbols:
+            cached = self._coingecko_market_cache.get(symbol)
+            if cached and now_ts - cached[0] < COINGECKO_MARKET_CACHE_TTL_SECONDS:
+                snapshots[symbol] = cached[1]
+            else:
+                missing_symbols.add(symbol)
+
+        errors: list[ApiError] = []
+        if not missing_symbols:
+            return snapshots, errors
+
+        symbol_to_id = await self._resolve_coingecko_ids_bulk(missing_symbols)
+        if not symbol_to_id:
+            errors.append(ApiError(source="CoinGecko Mapping", message="No symbol mappings available"))
+            return snapshots, errors
+
+        id_to_symbol: dict[str, str] = {}
+        for symbol_key, coin_id in symbol_to_id.items():
+            id_to_symbol[coin_id] = symbol_key
+        ids = list(id_to_symbol.keys())
+
+        for i in range(0, len(ids), 250):
+            chunk = ids[i : i + 250]
+            try:
+                response = await self._coingecko_get(
+                    "https://api.coingecko.com/api/v3/coins/markets",
+                    params={
+                        "vs_currency": "usd",
+                        "per_page": "250",
+                        "sparkline": "false",
+                        "price_change_percentage": "1h,24h,7d",
+                        "ids": ",".join(chunk),
+                    },
+                )
+                payload = response.json()
+                if not isinstance(payload, list):
+                    continue
+                for item in payload:
+                    if not isinstance(item, dict):
+                        continue
+                    coin_id = str(item.get("id") or "")
+                    symbol_key = id_to_symbol.get(coin_id)
+                    if not symbol_key:
+                        continue
+                    market = {
+                        "id": coin_id or symbol_key.lower(),
+                        "name": str(item.get("name") or symbol_key),
+                        "image": item.get("image"),
+                        "symbol": symbol_key,
+                        "current_price": _parse_float(item.get("current_price")),
+                        "volume_usd": _parse_float(item.get("total_volume")),
+                        "price_change_1h": _parse_float(item.get("price_change_percentage_1h_in_currency")),
+                        "price_change_24h": _parse_float(item.get("price_change_percentage_24h_in_currency")),
+                        "price_change_7d": _parse_float(item.get("price_change_percentage_7d_in_currency")),
+                    }
+                    self._coingecko_market_cache[symbol_key] = (time(), market)
+                    snapshots[symbol_key] = market
+            except Exception as exc:  # noqa: BLE001
+                errors.append(ApiError(source="CoinGecko API", message=_format_exception(exc)))
+
+        unresolved = sorted(missing_symbols - set(snapshots.keys()))
+        if unresolved:
+            errors.append(ApiError(source="CoinGecko API", message=f"Missing symbols: {', '.join(unresolved)}"))
+        return snapshots, errors
+
+    async def _resolve_coingecko_ids_bulk(self, symbols: set[str]) -> dict[str, str]:
+        symbol_to_id: dict[str, str] = {}
+        unresolved_by_normalized: dict[str, set[str]] = defaultdict(set)
+        now_ts = time()
+
+        for symbol in symbols:
+            normalized_symbol = _normalize_symbol_for_coingecko(symbol)
+            if not normalized_symbol:
+                continue
+            cached = self._coingecko_id_cache.get(normalized_symbol)
+            if cached is not None:
+                cached_at, cached_id = cached
+                ttl = COINGECKO_ID_CACHE_TTL_SECONDS if cached_id else COINGECKO_ID_NEGATIVE_CACHE_TTL_SECONDS
+                if now_ts - cached_at < ttl:
+                    if cached_id:
+                        symbol_to_id[symbol] = cached_id
+                    continue
+            unresolved_by_normalized[normalized_symbol].add(symbol)
+
+        if not unresolved_by_normalized:
+            return symbol_to_id
+
+        for normalized_symbol, raw_symbols in unresolved_by_normalized.items():
+            for raw_symbol in raw_symbols:
+                override = COINGECKO_MANUAL_OVERRIDES.get(raw_symbol.upper())
+                if override:
+                    symbol_to_id[raw_symbol] = override
+                    self._coingecko_id_cache[normalized_symbol] = (now_ts, override)
+
+        unresolved_by_normalized = defaultdict(
+            set,
+            {
+                normalized: raws
+                for normalized, raws in unresolved_by_normalized.items()
+                if not any(raw in symbol_to_id for raw in raws)
+            },
+        )
+        if not unresolved_by_normalized:
+            return symbol_to_id
+
+        try:
+            response = await self._coingecko_get(
+                "https://api.coingecko.com/api/v3/coins/list",
+                params={"include_platform": "false"},
+            )
+            payload = response.json()
+            if not isinstance(payload, list):
+                return symbol_to_id
+
+            by_symbol: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for entry in payload:
+                if not isinstance(entry, dict):
+                    continue
+                symbol_key = _normalize_alphanumeric(str(entry.get("symbol") or ""))
+                if symbol_key:
+                    by_symbol[symbol_key].append(entry)
+
+            candidate_map: dict[str, list[dict[str, Any]]] = {}
+            for normalized_symbol in unresolved_by_normalized.keys():
+                variants = _build_symbol_variants(normalized_symbol)
+                candidates: list[dict[str, Any]] = []
+                seen_ids: set[str] = set()
+                for variant in variants:
+                    for item in by_symbol.get(variant, []):
+                        item_id = str(item.get("id") or "")
+                        if not item_id or item_id in seen_ids:
+                            continue
+                        seen_ids.add(item_id)
+                        candidates.append(item)
+                candidate_map[normalized_symbol] = candidates
+
+            all_candidate_ids = sorted(
+                {
+                    str(item.get("id") or "")
+                    for items in candidate_map.values()
+                    for item in items
+                    if str(item.get("id") or "")
+                }
+            )
+            market_rank: dict[str, float] = {}
+            for i in range(0, len(all_candidate_ids), 250):
+                chunk = all_candidate_ids[i : i + 250]
+                if not chunk:
+                    continue
+                try:
+                    markets_resp = await self._coingecko_get(
+                        "https://api.coingecko.com/api/v3/coins/markets",
+                        params={
+                            "vs_currency": "usd",
+                            "per_page": "250",
+                            "sparkline": "false",
+                            "ids": ",".join(chunk),
+                        },
+                    )
+                    markets_payload = markets_resp.json()
+                    if isinstance(markets_payload, list):
+                        for item in markets_payload:
+                            if not isinstance(item, dict):
+                                continue
+                            coin_id = str(item.get("id") or "")
+                            rank = _parse_float(item.get("market_cap_rank"))
+                            market_rank[coin_id] = rank if rank is not None else float("inf")
+                except Exception:
+                    continue
+
+            for normalized_symbol, raw_symbols in unresolved_by_normalized.items():
+                candidates = candidate_map.get(normalized_symbol, [])
+                chosen_id: str | None = None
+                if candidates:
+                    candidates.sort(
+                        key=lambda item: market_rank.get(str(item.get("id") or ""), float("inf"))
+                    )
+                    chosen_id = str(candidates[0].get("id") or "") or None
+                self._coingecko_id_cache[normalized_symbol] = (now_ts, chosen_id)
+                if chosen_id:
+                    for raw_symbol in raw_symbols:
+                        symbol_to_id[raw_symbol] = chosen_id
+        except Exception:
+            for normalized_symbol in unresolved_by_normalized.keys():
+                self._coingecko_id_cache[normalized_symbol] = (now_ts, None)
+        return symbol_to_id
+
+    async def _coingecko_get(self, url: str, params: dict[str, Any]) -> httpx.Response:
+        last_exc: Exception | None = None
+        for attempt in range(4):
+            try:
+                response = await self._client.get(
+                    url,
+                    params=params,
+                    headers={
+                        "Accept": "application/json",
+                        "User-Agent": "FundingRateArbTrader/1.0",
+                        "x-cg-demo-api-key": COINGECKO_API_KEY,
+                    },
+                )
+                response.raise_for_status()
+                return response
+            except httpx.HTTPStatusError as exc:
+                last_exc = exc
+                status_code = exc.response.status_code
+                if status_code not in {429, 500, 502, 503, 504}:
+                    raise
+            except httpx.RequestError as exc:
+                last_exc = exc
+            if attempt < 3:
+                await asyncio.sleep(0.4 * (2**attempt))
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("CoinGecko request failed")
 
     async def get_funding_prediction_snapshot(
         self,
@@ -774,6 +1024,10 @@ class MarketDataService:
             interval_seconds=SPREAD_SAMPLING_INTERVAL_SECONDS,
             progress_callback=progress_callback,
         )
+        await _invoke_progress_callback(progress_callback, 90.0, "拉取 CoinGecko 波动率缓存")
+        coingecko_snapshots, coingecko_errors = await self.get_coingecko_market_snapshots(sampling_symbols)
+        if coingecko_errors:
+            snapshot.errors.extend(coingecko_errors)
 
         semaphore = asyncio.Semaphore(MAX_PREDICTION_WORKERS)
         total_rows = max(len(eligible_rows), 1)
@@ -874,9 +1128,19 @@ class MarketDataService:
                     if average_right_hourly is not None
                     else None
                 )
-                predicted_spread_24h = average_spread_hourly * PREDICTION_FORECAST_HOURS
-                total_decimal = abs(predicted_spread_24h) / 100.0
-                annualized_decimal = abs(average_spread_hourly) / 100.0 * PREDICTION_HOURS_PER_YEAR
+                run_spread_samples = [
+                    point.spread
+                    for point in dataset
+                    if point.time >= lookback_start and point.spread is not None and math.isfinite(point.spread)
+                ]
+                (
+                    predicted_spread_24h,
+                    total_decimal,
+                    annualized_decimal,
+                ) = _compute_run_until_unprofitable_metrics(
+                    average_spread_hourly=average_spread_hourly,
+                    spread_samples=run_spread_samples,
+                )
                 spread_volatility_24h_pct = _compute_stddev(spread_window_samples) * math.sqrt(
                     PREDICTION_FORECAST_HOURS,
                 )
@@ -886,14 +1150,26 @@ class MarketDataService:
                 right_best_bid = _parse_float(right_payload.get("best_bid"))
                 right_best_ask = _parse_float(right_payload.get("best_ask"))
                 spread_avg = spread_averages.get((row.symbol or row.left_symbol).upper())
+                coingecko_market = coingecko_snapshots.get((row.symbol or row.left_symbol).upper())
+                coingecko_change_24h = (
+                    _parse_float(coingecko_market.get("price_change_24h")) if coingecko_market else None
+                )
+                coingecko_price_vol = abs(coingecko_change_24h) if coingecko_change_24h is not None else None
+                coingecko_volume_24h = (
+                    _parse_float(coingecko_market.get("volume_usd")) if coingecko_market else None
+                )
                 if spread_avg is not None:
                     left_bid_ask_spread_bps = spread_avg["left"]
                     right_bid_ask_spread_bps = spread_avg["right"]
                     combined_bid_ask_spread_bps = spread_avg["combined"]
-                    price_volatility_24h_pct = spread_avg.get(
+                    spread_sample_price_volatility = spread_avg.get(
                         "price_volatility_24h_pct",
                         DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
                     )
+                    price_volatility_24h_pct = coingecko_price_vol or spread_sample_price_volatility
+                    left_spread_samples_bps = list(spread_avg.get("left_spread_samples_bps", []))
+                    right_spread_samples_bps = list(spread_avg.get("right_spread_samples_bps", []))
+                    combined_spread_samples_bps = list(spread_avg.get("combined_spread_samples_bps", []))
                 else:
                     left_bid_ask_spread_bps = _compute_bid_ask_spread_bps(
                         left_best_bid,
@@ -906,7 +1182,19 @@ class MarketDataService:
                         default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
                     )
                     combined_bid_ask_spread_bps = left_bid_ask_spread_bps + right_bid_ask_spread_bps
-                    price_volatility_24h_pct = DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT
+                    price_volatility_24h_pct = coingecko_price_vol or DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT
+                    left_spread_samples_bps = [left_bid_ask_spread_bps]
+                    right_spread_samples_bps = [right_bid_ask_spread_bps]
+                    combined_spread_samples_bps = [combined_bid_ask_spread_bps]
+
+                if price_volatility_24h_pct > MAX_ACCEPTABLE_PRICE_VOLATILITY_PCT:
+                    failures.append(
+                        {
+                            "symbol": symbol_label,
+                            "reason": f"价格波动率过高（>{MAX_ACCEPTABLE_PRICE_VOLATILITY_PCT:.1f}%）",
+                        }
+                    )
+                    return
 
                 direction = "unknown"
                 if average_spread_hourly > 0:
@@ -932,9 +1220,13 @@ class MarketDataService:
                         "annualized_decimal": annualized_decimal,
                         "spread_volatility_24h_pct": spread_volatility_24h_pct,
                         "price_volatility_24h_pct": price_volatility_24h_pct,
+                        "coingecko_volume_24h": coingecko_volume_24h,
                         "left_bid_ask_spread_bps": left_bid_ask_spread_bps,
                         "right_bid_ask_spread_bps": right_bid_ask_spread_bps,
                         "combined_bid_ask_spread_bps": combined_bid_ask_spread_bps,
+                        "left_spread_samples_bps": left_spread_samples_bps,
+                        "right_spread_samples_bps": right_spread_samples_bps,
+                        "combined_spread_samples_bps": combined_spread_samples_bps,
                         "sample_count": spread_count,
                         "direction": direction,
                     }
@@ -971,17 +1263,18 @@ class MarketDataService:
                 float(entry.get("price_volatility_24h_pct") or 0.0),
                 price_volatility_values,
             )
-            spread_acceptance_score = _compute_spread_acceptance_score(
-                float(entry.get("combined_bid_ask_spread_bps") or 0.0),
-                intolerable_bps=SPREAD_INTOLERABLE_BPS,
-                steepness_bps=SPREAD_STEEPNESS_BPS,
+            left_spread_acceptance_score = _compute_spread_acceptance_score(
+                float(entry.get("left_bid_ask_spread_bps") or 0.0)
             )
+            right_spread_acceptance_score = _compute_spread_acceptance_score(
+                float(entry.get("right_bid_ask_spread_bps") or 0.0)
+            )
+            spread_acceptance_score = left_spread_acceptance_score * right_spread_acceptance_score
             core_score = (
                 RECOMMENDATION_APR_WEIGHT * apr_norm
                 + RECOMMENDATION_FUNDING_VOLATILITY_WEIGHT * (1.0 - funding_volatility_norm)
                 + RECOMMENDATION_PRICE_VOLATILITY_WEIGHT * (1.0 - price_volatility_norm)
             )
-            # Spread is a separate multiplicative gate to emphasize execution feasibility.
             score = core_score * spread_acceptance_score * 100.0
             normalized_entry = dict(entry)
             normalized_entry["recommendation_score"] = round(score, 4)
@@ -1397,6 +1690,55 @@ def _compute_price_volatility_24h_pct(
     return per_step_vol * math.sqrt(steps_per_24h) * 100.0
 
 
+def _compute_run_until_unprofitable_metrics(
+    average_spread_hourly: float,
+    spread_samples: list[float],
+) -> tuple[float, float, float]:
+    """
+    Estimate return profile for: enter on current favorable direction, hold until spread loses sign.
+    Returns:
+    - predicted_spread_24h (%)
+    - total_decimal (expected cycle return as decimal)
+    - annualized_decimal (cycle return / cycle time annualized)
+    """
+    if not spread_samples or not math.isfinite(average_spread_hourly) or average_spread_hourly == 0:
+        return 0.0, 0.0, 0.0
+
+    current_sign = 1 if average_spread_hourly > 0 else -1
+    runs: list[tuple[int, float]] = []
+    run_hours = 0
+    run_abs_sum_pct = 0.0
+
+    for spread in spread_samples:
+        if not math.isfinite(spread) or spread == 0:
+            continue
+        sign = 1 if spread > 0 else -1
+        if sign == current_sign:
+            run_hours += 1
+            run_abs_sum_pct += abs(spread)
+            continue
+        if run_hours > 0:
+            runs.append((run_hours, run_abs_sum_pct))
+            run_hours = 0
+            run_abs_sum_pct = 0.0
+
+    if run_hours > 0:
+        runs.append((run_hours, run_abs_sum_pct))
+
+    if not runs:
+        run_hours = 1
+        run_abs_sum_pct = abs(average_spread_hourly)
+    else:
+        run_hours = max(int(round(sum(hours for hours, _ in runs) / len(runs))), 1)
+        run_abs_sum_pct = max(sum(abs_sum for _, abs_sum in runs) / len(runs), 0.0)
+
+    cycle_return_decimal = run_abs_sum_pct / 100.0
+    average_hourly_decimal = cycle_return_decimal / run_hours if run_hours > 0 else 0.0
+    annualized_decimal = average_hourly_decimal * PREDICTION_HOURS_PER_YEAR
+    predicted_spread_24h = average_hourly_decimal * 100.0 * PREDICTION_FORECAST_HOURS
+    return predicted_spread_24h, cycle_return_decimal, annualized_decimal
+
+
 def _compute_spread_acceptance_score(
     spread_bps: float,
     intolerable_bps: float = SPREAD_INTOLERABLE_BPS,
@@ -1469,6 +1811,39 @@ def _normalize_grvt_base_symbol(symbol: str) -> str:
     if not symbol:
         return ""
     return re.sub(r"[-_]PERP$", "", symbol.upper())
+
+
+def _normalize_symbol_for_coingecko(symbol: str) -> str:
+    normalized = (symbol or "").upper().removesuffix("-PERP")
+    if not normalized:
+        return ""
+    reverse_renames = {value.upper(): key.upper() for key, value in SYMBOL_RENAMES.items()}
+    if normalized in reverse_renames:
+        restored = reverse_renames[normalized]
+        if restored.startswith("1000") and len(restored) > 4:
+            return restored[4:]
+        return restored
+    if normalized.startswith("K") and len(normalized) > 2 and normalized[1:].isalpha():
+        return normalized[1:]
+    return normalized
+
+
+def _normalize_alphanumeric(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (value or "").lower())
+
+
+def _build_symbol_variants(symbol: str) -> list[str]:
+    normalized = _normalize_alphanumeric(symbol)
+    variants: set[str] = {normalized}
+    if normalized.startswith("k") and len(normalized) > 1:
+        variants.add(normalized[1:])
+    if normalized.startswith("1000") and len(normalized) > 4:
+        variants.add(normalized[4:])
+    if normalized.endswith("perp") and len(normalized) > 4:
+        variants.add(normalized[:-4])
+    if normalized.startswith("perp") and len(normalized) > 4:
+        variants.add(normalized[4:])
+    return [variant for variant in variants if variant]
 
 
 def _parse_float(value: Any) -> float | None:

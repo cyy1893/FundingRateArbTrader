@@ -564,7 +564,18 @@ export function PerpTable({
   }, [initialRows, coinGeckoSnapshots]);
   const coinGeckoAlerts = useMemo(
     () =>
-      coinGeckoErrors.map((message, index) => ({
+      coinGeckoErrors
+        .filter((message) => {
+          const normalized = message.toLowerCase();
+          if (normalized.includes("missing symbols")) {
+            return false;
+          }
+          if (normalized.includes("no symbol mappings available")) {
+            return false;
+          }
+          return true;
+        })
+        .map((message, index) => ({
         key: `coingecko-${index}`,
         title: "CoinGecko API",
         message,
