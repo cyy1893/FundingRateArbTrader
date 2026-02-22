@@ -28,6 +28,7 @@ services:
       - "3000:3000"
 
   admin:
+    profiles: ["admin"]
     build:
       context: ./admin
       dockerfile: Dockerfile

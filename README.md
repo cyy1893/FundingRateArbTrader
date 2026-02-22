@@ -6,9 +6,9 @@ This repository now bundles both sides of the Funding Rate Arbitrage stack:
 - `gateway/`: the Next.js frontend (original FundingRateArb app) that consumes the backend APIs and websocket feed.
 - `admin/`: a dedicated Next.js admin console for listing users and creating users.
 
-### Run Everything with Docker Compose
+### Run with Docker Compose
 
-Build and start all services together:
+Default (without admin):
 
 ```bash
 docker compose up --build
@@ -16,6 +16,13 @@ docker compose up --build
 
 - Backend is exposed on `http://localhost:8080`.
 - Gateway frontend is served on `http://localhost:3000` and communicates with the backend via the internal `trader` hostname.
+
+Start with admin enabled:
+
+```bash
+docker compose --profile admin up --build
+```
+
 - Admin frontend is served on `http://localhost:3002` and communicates with the backend via the internal `trader` hostname.
 
 Backend-specific environment variables still live in `trader/.env` and are mounted automatically by Compose. Frontend environment can be managed through `gateway/.env.local` / `admin/.env.local` (if needed) or via Compose `environment` entries.
