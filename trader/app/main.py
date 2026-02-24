@@ -37,8 +37,6 @@ from app.models import (
     BalancesResponse,
     AvailableSymbolsRequest,
     AvailableSymbolsResponse,
-    CoinGeckoRequest,
-    CoinGeckoResponse,
     FundingHistoryRequest,
     FundingHistoryResponse,
     FundingPredictionRequest,
@@ -1079,19 +1077,6 @@ async def available_symbols(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return AvailableSymbolsResponse(symbols=symbols, fetched_at=fetched_at)
-
-
-@app.post("/coingecko", response_model=CoinGeckoResponse)
-async def coingecko_markets(
-    payload: CoinGeckoRequest,
-    service: MarketDataService = Depends(get_market_data_service),
-) -> CoinGeckoResponse:
-    try:
-        snapshots, errors = await service.get_coingecko_market_snapshots(set(payload.symbols))
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    markets = [snapshots[key] for key in sorted(snapshots.keys())]
-    return CoinGeckoResponse(markets=markets, errors=errors)
 
 
 @app.post("/funding-history", response_model=FundingHistoryResponse)

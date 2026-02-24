@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { memo } from "react";
+import { memo, useMemo, useState } from "react";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -30,6 +30,7 @@ import {
   formatVolume,
   computeAnnualizedPercent,
 } from "@/lib/formatters";
+import { buildTokenIconCandidates, makeFallbackSvgDataUrl } from "@/lib/token-icons";
 import type { MarketRow } from "@/types/market";
 import type { SourceProvider } from "@/lib/external";
 import { cn } from "@/lib/utils";
@@ -167,17 +168,20 @@ function PerpTableRowComponent({
   rightSourceLabel,
   loadingPrices = false,
 }: PerpTableRowProps) {
+  const iconCandidates = useMemo(
+    () => buildTokenIconCandidates(row.symbol, row.iconUrl),
+    [row.symbol, row.iconUrl],
+  );
+  const [iconCandidateIndex, setIconCandidateIndex] = useState(0);
+  const iconSrc =
+    iconCandidates[iconCandidateIndex] ?? makeFallbackSvgDataUrl(row.symbol);
+
   const leftHourly =
     liveFunding.left[row.leftSymbol] ?? row.fundingRate;
   const aggregatedFunding = leftHourly * displayPeriodHours;
   const leftEightHourFunding =
     leftHourly * ARBITRAGE_COLOR_WINDOW_HOURS;
   const marketUrl = buildMarketUrl(row.leftProvider, row.leftSymbol);
-  const coingeckoUrl = row.coingeckoId
-    ? `https://www.coingecko.com/en/coins/${encodeURIComponent(
-        row.coingeckoId,
-      )}`
-    : null;
   const externalHourly =
     row.right?.symbol != null
       ? liveFunding.right[row.right.symbol] ??
@@ -255,47 +259,23 @@ function PerpTableRowComponent({
             <div className="flex h-7 w-7 items-center justify-center rounded-full border border-border/30 bg-muted/60">
               <span className="sr-only">加载中</span>
             </div>
-          ) : coingeckoUrl ? (
-            <a
-              href={coingeckoUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-border/30 bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
-            >
-              {row.iconUrl ? (
-                <img
-                  src={row.iconUrl}
-                  alt={`${row.displayName} 图标`}
-                  className="h-full w-full rounded-full object-contain"
-                  loading="lazy"
-                />
-              ) : (
-                <span className="text-[10px] font-medium uppercase text-muted-foreground">
-                  {row.symbol.slice(0, 3)}
-                </span>
-              )}
-            </a>
-          ) : row.iconUrl ? (
+          ) : (
             <img
-              src={row.iconUrl}
+              src={iconSrc}
               alt={`${row.displayName} 图标`}
               className="h-7 w-7 flex-shrink-0 rounded-full border border-border/30 bg-background object-contain"
               loading="lazy"
+              onError={() => {
+                setIconCandidateIndex((prev) =>
+                  prev + 1 < iconCandidates.length ? prev + 1 : prev,
+                );
+              }}
             />
-          ) : (
-            <div className="flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-muted text-[10px] font-medium uppercase text-muted-foreground">
-              {row.symbol.slice(0, 3)}
-            </div>
           )}
           <div className="flex flex-col overflow-hidden">
-            <a
-              href={coingeckoUrl ?? undefined}
-              target={coingeckoUrl ? "_blank" : undefined}
-              rel={coingeckoUrl ? "noreferrer" : undefined}
-              className="truncate text-sm font-semibold text-foreground transition hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            >
+            <span className="truncate text-sm font-semibold text-foreground">
               {row.displayName}
-            </a>
+            </span>
             <span className="truncate text-[11px] uppercase text-muted-foreground">
               {row.symbol}
             </span>

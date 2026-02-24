@@ -82,7 +82,6 @@ export async function getPerpetualSnapshot(
       symbol: String(row.symbol ?? ""),
       displayName: String(row.display_name ?? row.symbol ?? ""),
       iconUrl: (row.icon_url as string | null) ?? null,
-      coingeckoId: (row.coingecko_id as string | null) ?? null,
       markPrice:
         typeof row.mark_price === "number" ? row.mark_price : Number(row.mark_price ?? 0),
       priceChange1h:

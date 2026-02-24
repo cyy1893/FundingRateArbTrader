@@ -17,7 +17,6 @@ export type MarketRow = {
   symbol: string;
   displayName: string;
   iconUrl: string | null;
-  coingeckoId: string | null;
   markPrice: number;
   priceChange1h: number | null;
   priceChange24h: number | null;

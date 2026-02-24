@@ -12,7 +12,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp, Loader2, Search, RefreshCw } from "lucide-react";
 
 import { PerpTableRow } from "@/components/perp-table-row";
-import { FailureAlertsOverlay } from "@/components/failure-alerts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -78,23 +77,6 @@ type PerpTableProps = {
   rightSource: SourceConfig;
   volumeThreshold: number;
   headerControls?: React.ReactNode;
-};
-
-type CoinGeckoSnapshot = {
-  id: string;
-  name: string;
-  image: string | null;
-  symbol: string;
-  currentPrice: number | null;
-  volumeUsd: number | null;
-  priceChange1h: number | null;
-  priceChange24h: number | null;
-  priceChange7d: number | null;
-};
-
-type CoinGeckoApiResponse = {
-  markets: CoinGeckoSnapshot[];
-  errors?: Array<{ source: string; message: string }>;
 };
 
 const DEFAULT_PAGE_SIZE = 15;
@@ -386,10 +368,6 @@ export function PerpTable({
   const [page, setPage] = useState(1);
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<"desc" | "asc">("desc");
-  const [coinGeckoSnapshots, setCoinGeckoSnapshots] = useState<
-    Map<string, CoinGeckoSnapshot>
-  >(new Map());
-  const [coinGeckoErrors, setCoinGeckoErrors] = useState<string[]>([]);
   const [liveFunding, setLiveFunding] = useState<{
     left: Record<string, number>;
     right: Record<string, number>;
@@ -444,146 +422,8 @@ export function PerpTable({
     [pathname, router, searchParams],
   );
   const historyRangeDurationMs = historyRangeDays * 24 * MS_PER_HOUR;
-  const coinGeckoSymbols = useMemo(() => {
-    const unique = new Set(initialRows.map((row) => row.symbol.toUpperCase()));
-    return Array.from(unique).sort();
-  }, [initialRows]);
-  useEffect(() => {
-    if (coinGeckoSymbols.length === 0) {
-      setCoinGeckoSnapshots(new Map());
-      setCoinGeckoErrors([]);
-      return;
-    }
-
-    let cancelled = false;
-    const controller = new AbortController();
-
-    async function loadCoinGeckoData() {
-      try {
-        setCoinGeckoErrors([]);
-        const response = await fetch("/api/coingecko", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ symbols: coinGeckoSymbols }),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          let message = "无法获取 CoinGecko 数据，请稍后重试。";
-          try {
-            const text = await response.text();
-            if (text) {
-              message = text.length > 200 ? `${text.slice(0, 197)}...` : text;
-            }
-          } catch {
-            // ignore body read errors
-          }
-          throw new Error(message);
-        }
-
-        const payload = (await response.json()) as CoinGeckoApiResponse;
-        if (cancelled) {
-          return;
-        }
-        const nextSnapshots = new Map<string, CoinGeckoSnapshot>();
-        payload.markets?.forEach((snapshot) => {
-          const symbolUpper = snapshot.symbol?.toUpperCase();
-          if (!symbolUpper) {
-            return;
-          }
-          nextSnapshots.set(symbolUpper, snapshot);
-        });
-        setCoinGeckoSnapshots(nextSnapshots);
-        const payloadErrors =
-          payload.errors?.map(
-            (error) => `${error.source}: ${error.message}`,
-          ) ?? [];
-        setCoinGeckoErrors(payloadErrors);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        setCoinGeckoSnapshots(new Map());
-        setCoinGeckoErrors([
-          error instanceof Error ? error.message : "无法获取 CoinGecko 数据。",
-        ]);
-      }
-    }
-
-    loadCoinGeckoData();
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [coinGeckoSymbols]);
-  const rows = useMemo(() => {
-    if (coinGeckoSnapshots.size === 0) {
-      return initialRows;
-    }
-    return initialRows.map((row) => {
-      const snapshot = coinGeckoSnapshots.get(row.symbol.toUpperCase());
-      if (!snapshot) {
-        return row;
-      }
-      const priceChange1h =
-        typeof snapshot.priceChange1h === "number" &&
-        Number.isFinite(snapshot.priceChange1h)
-          ? snapshot.priceChange1h
-          : row.priceChange1h;
-      const priceChange24h =
-        typeof snapshot.priceChange24h === "number" &&
-        Number.isFinite(snapshot.priceChange24h)
-          ? snapshot.priceChange24h
-          : row.priceChange24h;
-      const priceChange7d =
-        typeof snapshot.priceChange7d === "number" &&
-        Number.isFinite(snapshot.priceChange7d)
-          ? snapshot.priceChange7d
-          : row.priceChange7d;
-      const markPrice =
-        row.markPrice && Number.isFinite(row.markPrice) && row.markPrice > 0
-          ? row.markPrice
-          : snapshot.currentPrice ?? row.markPrice;
-      return {
-        ...row,
-        displayName: snapshot.name ?? row.displayName,
-        iconUrl: snapshot.image ?? row.iconUrl,
-        coingeckoId: snapshot.id ?? row.coingeckoId,
-        markPrice,
-        priceChange1h,
-        priceChange24h,
-        priceChange7d,
-      };
-    });
-  }, [initialRows, coinGeckoSnapshots]);
-  const coinGeckoAlerts = useMemo(
-    () =>
-      coinGeckoErrors
-        .filter((message) => {
-          const normalized = message.toLowerCase();
-          if (normalized.includes("missing symbols")) {
-            return false;
-          }
-          if (normalized.includes("no symbol mappings available")) {
-            return false;
-          }
-          return true;
-        })
-        .map((message, index) => ({
-        key: `coingecko-${index}`,
-        title: "CoinGecko API",
-        message,
-      })),
-    [coinGeckoErrors],
-  );
-  const isPriceDataLoading =
-    coinGeckoSymbols.length > 0 && coinGeckoSnapshots.size === 0;
+  const rows = useMemo(() => initialRows, [initialRows]);
+  const isPriceDataLoading = false;
   const [historyViewport, setHistoryViewport] = useState<[number, number] | null>(
     null,
   );
@@ -1226,7 +1066,6 @@ export function PerpTable({
 
   return (
     <>
-      <FailureAlertsOverlay alerts={coinGeckoAlerts} />
       <TooltipProvider delayDuration={150}>
       <div className="space-y-4">
         <div className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-sm md:flex-row md:items-center">

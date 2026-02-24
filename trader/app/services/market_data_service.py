@@ -57,23 +57,11 @@ LIGHTER_SPREAD_FETCH_CONCURRENCY = 8
 CACHE_TTL_SECONDS = 10 * 60
 PREDICTION_CACHE_TTL_SECONDS = 5 * 60
 AVAILABLE_SYMBOLS_CACHE_TTL_SECONDS = 60 * 60
-COINGECKO_MARKET_CACHE_TTL_SECONDS = 5 * 60
-COINGECKO_ID_CACHE_TTL_SECONDS = 6 * 60 * 60
-COINGECKO_ID_NEGATIVE_CACHE_TTL_SECONDS = 5 * 60
-COINGECKO_API_KEY = "CG-Bk4Hk2fWnGqa372fums79HvT"
+BINANCE_PRICE_CACHE_TTL_SECONDS = 5 * 60
 SYMBOL_RENAMES: dict[str, str] = {
     "1000PEPE": "kPEPE",
     "1000SHIB": "kSHIB",
     "1000BONK": "kBONK",
-}
-COINGECKO_MANUAL_OVERRIDES: dict[str, str] = {
-    "FXS": "frax-share",
-    "PUMP": "pump-fun",
-    "HYPE": "hyperliquid",
-    "KPEPE": "pepe",
-    "KSHIB": "shiba-inu",
-    "KBONK": "bonk",
-    "PNUT": "peanut-the-squirrel",
 }
 
 
@@ -87,8 +75,7 @@ class MarketDataService:
         self._arbitrage_cache: dict[tuple[str, str, float], tuple[float, ArbitrageSnapshotResponse]] = {}
         self._prediction_cache: dict[tuple[str, str, float], tuple[float, FundingPredictionResponse]] = {}
         self._available_symbols_cache: dict[tuple[str, str], tuple[float, list[AvailableSymbolEntry], datetime]] = {}
-        self._coingecko_id_cache: dict[str, tuple[float, str | None]] = {}
-        self._coingecko_market_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._binance_price_cache: dict[str, tuple[float, dict[str, float | None]]] = {}
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -204,6 +191,7 @@ class MarketDataService:
             exchange_stats = stats_result
 
         volume_by_symbol: dict[str, float] = {}
+        price_changes_by_symbol: dict[str, tuple[float | None, float | None, float | None]] = {}
         markets: list[ExchangeMarketMetrics] = []
 
         if isinstance(order_books, dict):
@@ -255,6 +243,7 @@ class MarketDataService:
                 volume_usd = _parse_float(entry.get("daily_quote_token_volume"))
                 if volume_usd is not None:
                     volume_by_symbol[symbol] = volume_usd
+                price_changes_by_symbol[symbol] = _extract_price_change_fields(entry)
 
         # Merge funding + volume into markets list
         symbol_to_market = {m.symbol: m for m in markets}
@@ -267,6 +256,12 @@ class MarketDataService:
             if market:
                 market.volume_usd = volume
                 market.day_notional_volume = volume
+        for symbol, changes in price_changes_by_symbol.items():
+            market = symbol_to_market.get(symbol) or symbol_to_market.get(f"{symbol}-PERP")
+            if market:
+                market.price_change_1h = changes[0]
+                market.price_change_24h = changes[1]
+                market.price_change_7d = changes[2]
         for symbol, leverage in leverage_map.items():
             market = symbol_to_market.get(symbol) or symbol_to_market.get(f"{symbol}-PERP")
             if market and leverage is not None:
@@ -277,7 +272,7 @@ class MarketDataService:
             return ExchangeSnapshot(markets=[], errors=errors)
         return ExchangeSnapshot(markets=markets_result, errors=errors)
 
-    async def _fetch_grvt_markets(self) -> ExchangeSnapshot:
+    async def _fetch_grvt_markets(self, candidate_bases: set[str] | None = None) -> ExchangeSnapshot:
         errors: list[ApiError] = []
         instruments: list[dict[str, Any]] = []
         try:
@@ -292,8 +287,15 @@ class MarketDataService:
             errors.append(ApiError(source="GRVT API", message=_format_exception(exc)))
             return ExchangeSnapshot(markets=[], errors=errors)
 
-        # Filter perpetual instruments
+        # Filter perpetual instruments.
         perp_instruments = [inst for inst in instruments if isinstance(inst, dict) and inst.get("kind") == "PERPETUAL"]
+        if candidate_bases:
+            normalized_candidates = {symbol.upper() for symbol in candidate_bases if symbol}
+            perp_instruments = [
+                inst
+                for inst in perp_instruments
+                if str(inst.get("base", "")).upper() in normalized_candidates
+            ]
         tickers: dict[str, dict[str, Any]] = {}
 
         async def fetch_ticker(instrument: str) -> None:
@@ -327,6 +329,10 @@ class MarketDataService:
             ticker = tickers.get(inst.get("instrument", ""))
             mark_price = _parse_float(ticker.get("mark_price")) if ticker else None
             best_bid, best_ask = _extract_best_bid_ask(ticker if isinstance(ticker, dict) else {})
+            price_change_1h, price_change_24h, price_change_7d = _extract_price_change_fields(
+                ticker if isinstance(ticker, dict) else {},
+                mark_price=mark_price,
+            )
             funding_rate_pct = (
                 _parse_float(ticker.get("funding_rate_8h_curr") or ticker.get("funding_rate"))
                 if ticker
@@ -347,9 +353,9 @@ class MarketDataService:
                     symbol=f"{base_symbol}-PERP" if base_symbol else symbol,
                     display_name=base_symbol or symbol,
                     mark_price=mark_price,
-                    price_change_1h=None,
-                    price_change_24h=None,
-                    price_change_7d=None,
+                    price_change_1h=price_change_1h,
+                    price_change_24h=price_change_24h,
+                    price_change_7d=price_change_7d,
                     max_leverage=50.0,
                     funding_rate_hourly=funding_rate_hourly,
                     funding_period_hours=interval_hours,
@@ -749,229 +755,6 @@ class MarketDataService:
         await asyncio.gather(*(_fetch_one(symbol_key) for symbol_key in symbols))
         return results
 
-    async def get_coingecko_market_snapshots(self, symbols: set[str]) -> tuple[dict[str, dict[str, Any]], list[ApiError]]:
-        normalized_symbols = {symbol.upper() for symbol in symbols if symbol}
-        if not normalized_symbols:
-            return {}, []
-
-        now_ts = time()
-        snapshots: dict[str, dict[str, Any]] = {}
-        missing_symbols: set[str] = set()
-        for symbol in normalized_symbols:
-            cached = self._coingecko_market_cache.get(symbol)
-            if cached and now_ts - cached[0] < COINGECKO_MARKET_CACHE_TTL_SECONDS:
-                snapshots[symbol] = cached[1]
-            else:
-                missing_symbols.add(symbol)
-
-        errors: list[ApiError] = []
-        if not missing_symbols:
-            return snapshots, errors
-
-        symbol_to_id = await self._resolve_coingecko_ids_bulk(missing_symbols)
-        if not symbol_to_id:
-            errors.append(ApiError(source="CoinGecko Mapping", message="No symbol mappings available"))
-            return snapshots, errors
-
-        id_to_symbol: dict[str, str] = {}
-        for symbol_key, coin_id in symbol_to_id.items():
-            id_to_symbol[coin_id] = symbol_key
-        ids = list(id_to_symbol.keys())
-
-        for i in range(0, len(ids), 250):
-            chunk = ids[i : i + 250]
-            try:
-                response = await self._coingecko_get(
-                    "https://api.coingecko.com/api/v3/coins/markets",
-                    params={
-                        "vs_currency": "usd",
-                        "per_page": "250",
-                        "sparkline": "false",
-                        "price_change_percentage": "1h,24h,7d",
-                        "ids": ",".join(chunk),
-                    },
-                )
-                payload = response.json()
-                if not isinstance(payload, list):
-                    continue
-                for item in payload:
-                    if not isinstance(item, dict):
-                        continue
-                    coin_id = str(item.get("id") or "")
-                    symbol_key = id_to_symbol.get(coin_id)
-                    if not symbol_key:
-                        continue
-                    market = {
-                        "id": coin_id or symbol_key.lower(),
-                        "name": str(item.get("name") or symbol_key),
-                        "image": item.get("image"),
-                        "symbol": symbol_key,
-                        "current_price": _parse_float(item.get("current_price")),
-                        "volume_usd": _parse_float(item.get("total_volume")),
-                        "price_change_1h": _parse_float(item.get("price_change_percentage_1h_in_currency")),
-                        "price_change_24h": _parse_float(item.get("price_change_percentage_24h_in_currency")),
-                        "price_change_7d": _parse_float(item.get("price_change_percentage_7d_in_currency")),
-                    }
-                    self._coingecko_market_cache[symbol_key] = (time(), market)
-                    snapshots[symbol_key] = market
-            except Exception as exc:  # noqa: BLE001
-                errors.append(ApiError(source="CoinGecko API", message=_format_exception(exc)))
-
-        unresolved = sorted(missing_symbols - set(snapshots.keys()))
-        if unresolved:
-            errors.append(ApiError(source="CoinGecko API", message=f"Missing symbols: {', '.join(unresolved)}"))
-        return snapshots, errors
-
-    async def _resolve_coingecko_ids_bulk(self, symbols: set[str]) -> dict[str, str]:
-        symbol_to_id: dict[str, str] = {}
-        unresolved_by_normalized: dict[str, set[str]] = defaultdict(set)
-        now_ts = time()
-
-        for symbol in symbols:
-            normalized_symbol = _normalize_symbol_for_coingecko(symbol)
-            if not normalized_symbol:
-                continue
-            cached = self._coingecko_id_cache.get(normalized_symbol)
-            if cached is not None:
-                cached_at, cached_id = cached
-                ttl = COINGECKO_ID_CACHE_TTL_SECONDS if cached_id else COINGECKO_ID_NEGATIVE_CACHE_TTL_SECONDS
-                if now_ts - cached_at < ttl:
-                    if cached_id:
-                        symbol_to_id[symbol] = cached_id
-                    continue
-            unresolved_by_normalized[normalized_symbol].add(symbol)
-
-        if not unresolved_by_normalized:
-            return symbol_to_id
-
-        for normalized_symbol, raw_symbols in unresolved_by_normalized.items():
-            for raw_symbol in raw_symbols:
-                override = COINGECKO_MANUAL_OVERRIDES.get(raw_symbol.upper())
-                if override:
-                    symbol_to_id[raw_symbol] = override
-                    self._coingecko_id_cache[normalized_symbol] = (now_ts, override)
-
-        unresolved_by_normalized = defaultdict(
-            set,
-            {
-                normalized: raws
-                for normalized, raws in unresolved_by_normalized.items()
-                if not any(raw in symbol_to_id for raw in raws)
-            },
-        )
-        if not unresolved_by_normalized:
-            return symbol_to_id
-
-        try:
-            response = await self._coingecko_get(
-                "https://api.coingecko.com/api/v3/coins/list",
-                params={"include_platform": "false"},
-            )
-            payload = response.json()
-            if not isinstance(payload, list):
-                return symbol_to_id
-
-            by_symbol: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            for entry in payload:
-                if not isinstance(entry, dict):
-                    continue
-                symbol_key = _normalize_alphanumeric(str(entry.get("symbol") or ""))
-                if symbol_key:
-                    by_symbol[symbol_key].append(entry)
-
-            candidate_map: dict[str, list[dict[str, Any]]] = {}
-            for normalized_symbol in unresolved_by_normalized.keys():
-                variants = _build_symbol_variants(normalized_symbol)
-                candidates: list[dict[str, Any]] = []
-                seen_ids: set[str] = set()
-                for variant in variants:
-                    for item in by_symbol.get(variant, []):
-                        item_id = str(item.get("id") or "")
-                        if not item_id or item_id in seen_ids:
-                            continue
-                        seen_ids.add(item_id)
-                        candidates.append(item)
-                candidate_map[normalized_symbol] = candidates
-
-            all_candidate_ids = sorted(
-                {
-                    str(item.get("id") or "")
-                    for items in candidate_map.values()
-                    for item in items
-                    if str(item.get("id") or "")
-                }
-            )
-            market_rank: dict[str, float] = {}
-            for i in range(0, len(all_candidate_ids), 250):
-                chunk = all_candidate_ids[i : i + 250]
-                if not chunk:
-                    continue
-                try:
-                    markets_resp = await self._coingecko_get(
-                        "https://api.coingecko.com/api/v3/coins/markets",
-                        params={
-                            "vs_currency": "usd",
-                            "per_page": "250",
-                            "sparkline": "false",
-                            "ids": ",".join(chunk),
-                        },
-                    )
-                    markets_payload = markets_resp.json()
-                    if isinstance(markets_payload, list):
-                        for item in markets_payload:
-                            if not isinstance(item, dict):
-                                continue
-                            coin_id = str(item.get("id") or "")
-                            rank = _parse_float(item.get("market_cap_rank"))
-                            market_rank[coin_id] = rank if rank is not None else float("inf")
-                except Exception:
-                    continue
-
-            for normalized_symbol, raw_symbols in unresolved_by_normalized.items():
-                candidates = candidate_map.get(normalized_symbol, [])
-                chosen_id: str | None = None
-                if candidates:
-                    candidates.sort(
-                        key=lambda item: market_rank.get(str(item.get("id") or ""), float("inf"))
-                    )
-                    chosen_id = str(candidates[0].get("id") or "") or None
-                self._coingecko_id_cache[normalized_symbol] = (now_ts, chosen_id)
-                if chosen_id:
-                    for raw_symbol in raw_symbols:
-                        symbol_to_id[raw_symbol] = chosen_id
-        except Exception:
-            for normalized_symbol in unresolved_by_normalized.keys():
-                self._coingecko_id_cache[normalized_symbol] = (now_ts, None)
-        return symbol_to_id
-
-    async def _coingecko_get(self, url: str, params: dict[str, Any]) -> httpx.Response:
-        last_exc: Exception | None = None
-        for attempt in range(4):
-            try:
-                response = await self._client.get(
-                    url,
-                    params=params,
-                    headers={
-                        "Accept": "application/json",
-                        "User-Agent": "FundingRateArbTrader/1.0",
-                        "x-cg-demo-api-key": COINGECKO_API_KEY,
-                    },
-                )
-                response.raise_for_status()
-                return response
-            except httpx.HTTPStatusError as exc:
-                last_exc = exc
-                status_code = exc.response.status_code
-                if status_code not in {429, 500, 502, 503, 504}:
-                    raise
-            except httpx.RequestError as exc:
-                last_exc = exc
-            if attempt < 3:
-                await asyncio.sleep(0.4 * (2**attempt))
-        if last_exc is not None:
-            raise last_exc
-        raise RuntimeError("CoinGecko request failed")
-
     async def get_funding_prediction_snapshot(
         self,
         primary: str,
@@ -1024,10 +807,7 @@ class MarketDataService:
             interval_seconds=SPREAD_SAMPLING_INTERVAL_SECONDS,
             progress_callback=progress_callback,
         )
-        await _invoke_progress_callback(progress_callback, 90.0, "拉取 CoinGecko 波动率缓存")
-        coingecko_snapshots, coingecko_errors = await self.get_coingecko_market_snapshots(sampling_symbols)
-        if coingecko_errors:
-            snapshot.errors.extend(coingecko_errors)
+        await _invoke_progress_callback(progress_callback, 90.0, "完成盘口采样，开始计算")
 
         semaphore = asyncio.Semaphore(MAX_PREDICTION_WORKERS)
         total_rows = max(len(eligible_rows), 1)
@@ -1150,14 +930,6 @@ class MarketDataService:
                 right_best_bid = _parse_float(right_payload.get("best_bid"))
                 right_best_ask = _parse_float(right_payload.get("best_ask"))
                 spread_avg = spread_averages.get((row.symbol or row.left_symbol).upper())
-                coingecko_market = coingecko_snapshots.get((row.symbol or row.left_symbol).upper())
-                coingecko_change_24h = (
-                    _parse_float(coingecko_market.get("price_change_24h")) if coingecko_market else None
-                )
-                coingecko_price_vol = abs(coingecko_change_24h) if coingecko_change_24h is not None else None
-                coingecko_volume_24h = (
-                    _parse_float(coingecko_market.get("volume_usd")) if coingecko_market else None
-                )
                 if spread_avg is not None:
                     left_bid_ask_spread_bps = spread_avg["left"]
                     right_bid_ask_spread_bps = spread_avg["right"]
@@ -1166,7 +938,7 @@ class MarketDataService:
                         "price_volatility_24h_pct",
                         DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
                     )
-                    price_volatility_24h_pct = coingecko_price_vol or spread_sample_price_volatility
+                    price_volatility_24h_pct = spread_sample_price_volatility
                     left_spread_samples_bps = list(spread_avg.get("left_spread_samples_bps", []))
                     right_spread_samples_bps = list(spread_avg.get("right_spread_samples_bps", []))
                     combined_spread_samples_bps = list(spread_avg.get("combined_spread_samples_bps", []))
@@ -1182,7 +954,7 @@ class MarketDataService:
                         default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
                     )
                     combined_bid_ask_spread_bps = left_bid_ask_spread_bps + right_bid_ask_spread_bps
-                    price_volatility_24h_pct = coingecko_price_vol or DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT
+                    price_volatility_24h_pct = DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT
                     left_spread_samples_bps = [left_bid_ask_spread_bps]
                     right_spread_samples_bps = [right_bid_ask_spread_bps]
                     combined_spread_samples_bps = [combined_bid_ask_spread_bps]
@@ -1220,7 +992,6 @@ class MarketDataService:
                         "annualized_decimal": annualized_decimal,
                         "spread_volatility_24h_pct": spread_volatility_24h_pct,
                         "price_volatility_24h_pct": price_volatility_24h_pct,
-                        "coingecko_volume_24h": coingecko_volume_24h,
                         "left_bid_ask_spread_bps": left_bid_ask_spread_bps,
                         "right_bid_ask_spread_bps": right_bid_ask_spread_bps,
                         "combined_bid_ask_spread_bps": combined_bid_ask_spread_bps,
@@ -1420,23 +1191,64 @@ class MarketDataService:
         self._arbitrage_cache[cache_key] = (time(), response)
         return response
 
-    async def fetch_exchange_snapshot(self, source: str) -> ExchangeSnapshot:
+    async def fetch_exchange_snapshot(
+        self,
+        source: str,
+        candidate_bases: set[str] | None = None,
+    ) -> ExchangeSnapshot:
         provider = source.lower()
         if provider == "hyperliquid":
             return await self._fetch_hyperliquid_markets()
         if provider == "lighter":
             return await self._fetch_lighter_markets()
         if provider == "grvt":
-            return await self._fetch_grvt_markets()
+            return await self._fetch_grvt_markets(candidate_bases=candidate_bases)
         return ExchangeSnapshot(markets=[], errors=[ApiError(source=source, message="Unsupported provider")])
 
     async def get_perp_snapshot(self, primary: str, secondary: str) -> PerpSnapshot:
-        primary_snapshot, secondary_snapshot = await asyncio.gather(
-            self.fetch_exchange_snapshot(primary),
-            self.fetch_exchange_snapshot(secondary),
-        )
+        primary_provider = primary.lower()
+        secondary_provider = secondary.lower()
+
+        # Prefer candidate-based GRVT snapshot to avoid full-universe ticker calls.
+        if secondary_provider == "grvt" and primary_provider != "grvt":
+            primary_snapshot = await self.fetch_exchange_snapshot(primary)
+            candidate_bases = {
+                market.base_symbol.upper()
+                for market in primary_snapshot.markets
+                if market.base_symbol
+            }
+            secondary_snapshot = await self.fetch_exchange_snapshot(
+                secondary,
+                candidate_bases=candidate_bases,
+            )
+        elif primary_provider == "grvt" and secondary_provider != "grvt":
+            secondary_snapshot = await self.fetch_exchange_snapshot(secondary)
+            candidate_bases = {
+                market.base_symbol.upper()
+                for market in secondary_snapshot.markets
+                if market.base_symbol
+            }
+            primary_snapshot = await self.fetch_exchange_snapshot(
+                primary,
+                candidate_bases=candidate_bases,
+            )
+        else:
+            primary_snapshot, secondary_snapshot = await asyncio.gather(
+                self.fetch_exchange_snapshot(primary),
+                self.fetch_exchange_snapshot(secondary),
+            )
 
         api_errors = [*primary_snapshot.errors, *secondary_snapshot.errors]
+        candidate_symbols: set[str] = set()
+        for market in primary_snapshot.markets:
+            symbol = (market.base_symbol or market.symbol or "").upper()
+            if symbol:
+                candidate_symbols.add(_normalize_derivatives_base(symbol))
+        for market in secondary_snapshot.markets:
+            symbol = (market.base_symbol or market.symbol or "").upper()
+            if symbol:
+                candidate_symbols.add(_normalize_derivatives_base(symbol))
+        price_change_fallbacks = await self._fetch_binance_price_change_fallbacks(candidate_symbols)
         secondary_by_base: dict[str, ExchangeMarketMetrics] = {}
         for market in secondary_snapshot.markets:
             if market.base_symbol:
@@ -1462,9 +1274,17 @@ class MarketDataService:
                     "volume_usd": matching_right.volume_usd,
                     "funding_period_hours": matching_right.funding_period_hours,
                     "mark_price": matching_right.mark_price,
+                    "price_change_1h": matching_right.price_change_1h,
+                    "price_change_24h": matching_right.price_change_24h,
+                    "price_change_7d": matching_right.price_change_7d,
                     "best_bid": matching_right.best_bid,
                     "best_ask": matching_right.best_ask,
                 }
+            fallback = price_change_fallbacks.get((base_symbol or "").upper(), {})
+            fallback_mark_price = _parse_float(fallback.get("mark_price"))
+            fallback_change_1h = _parse_float(fallback.get("price_change_1h"))
+            fallback_change_24h = _parse_float(fallback.get("price_change_24h"))
+            fallback_change_7d = _parse_float(fallback.get("price_change_7d"))
 
             rows.append(
                 MarketRow(
@@ -1475,11 +1295,30 @@ class MarketDataService:
                     symbol=base_symbol,
                     display_name=left_market.display_name or base_symbol,
                     icon_url=None,
-                    coingecko_id=None,
-                    mark_price=left_market.mark_price,
-                    price_change_1h=left_market.price_change_1h,
-                    price_change_24h=left_market.price_change_24h,
-                    price_change_7d=left_market.price_change_7d,
+                    mark_price=(
+                        left_market.mark_price
+                        if left_market.mark_price is not None
+                        else (
+                            matching_right.mark_price
+                            if matching_right and matching_right.mark_price is not None
+                            else fallback_mark_price
+                        )
+                    ),
+                    price_change_1h=left_market.price_change_1h if left_market.price_change_1h is not None else (
+                        matching_right.price_change_1h
+                        if matching_right and matching_right.price_change_1h is not None
+                        else fallback_change_1h
+                    ),
+                    price_change_24h=left_market.price_change_24h if left_market.price_change_24h is not None else (
+                        matching_right.price_change_24h
+                        if matching_right and matching_right.price_change_24h is not None
+                        else fallback_change_24h
+                    ),
+                    price_change_7d=left_market.price_change_7d if left_market.price_change_7d is not None else (
+                        matching_right.price_change_7d
+                        if matching_right and matching_right.price_change_7d is not None
+                        else fallback_change_7d
+                    ),
                     max_leverage=left_market.max_leverage,
                     funding_rate=left_market.funding_rate_hourly,
                     day_notional_volume=left_market.day_notional_volume,
@@ -1503,6 +1342,94 @@ class MarketDataService:
         )
 
         return PerpSnapshot(rows=rows, fetched_at=datetime.now(tz=timezone.utc), errors=api_errors)
+
+    async def _fetch_binance_price_change_fallbacks(
+        self,
+        symbols: set[str],
+    ) -> dict[str, dict[str, float | None]]:
+        normalized_symbols = {_normalize_derivatives_base(symbol) for symbol in symbols if symbol}
+        if not normalized_symbols:
+            return {}
+
+        now = time()
+        result: dict[str, dict[str, float | None]] = {}
+        missing: set[str] = set()
+        for symbol in normalized_symbols:
+            cached = self._binance_price_cache.get(symbol)
+            if cached and now - cached[0] < BINANCE_PRICE_CACHE_TTL_SECONDS:
+                result[symbol] = dict(cached[1])
+            else:
+                missing.add(symbol)
+
+        if not missing:
+            return result
+
+        ticker_24h_map: dict[str, tuple[float | None, float | None]] = {}
+        try:
+            resp = await self._client.get("https://fapi.binance.com/fapi/v1/ticker/24hr")
+            resp.raise_for_status()
+            payload = resp.json()
+            if isinstance(payload, list):
+                for entry in payload:
+                    if not isinstance(entry, dict):
+                        continue
+                    symbol = str(entry.get("symbol") or "").upper()
+                    if not symbol.endswith("USDT"):
+                        continue
+                    base = symbol.removesuffix("USDT")
+                    if base not in missing:
+                        continue
+                    ticker_24h_map[base] = (
+                        _parse_float(entry.get("lastPrice")),
+                        _parse_float(entry.get("priceChangePercent")),
+                    )
+        except Exception:
+            ticker_24h_map = {}
+
+        semaphore = asyncio.Semaphore(8)
+
+        async def _fetch_kline_change(base_symbol: str, interval: str, limit: int) -> float | None:
+            symbol = f"{base_symbol}USDT"
+            try:
+                async with semaphore:
+                    resp = await self._client.get(
+                        "https://fapi.binance.com/fapi/v1/klines",
+                        params={"symbol": symbol, "interval": interval, "limit": str(limit)},
+                    )
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception:
+                return None
+
+            if not isinstance(data, list) or len(data) < 2:
+                return None
+            first = data[0]
+            last = data[-1]
+            if not isinstance(first, list) or not isinstance(last, list) or len(first) < 5 or len(last) < 5:
+                return None
+            open_price = _parse_float(first[1])
+            close_price = _parse_float(last[4])
+            if open_price is None or close_price is None or open_price <= 0:
+                return None
+            return ((close_price - open_price) / open_price) * 100.0
+
+        async def _fill_symbol(base_symbol: str) -> None:
+            mark_price, change_24h = ticker_24h_map.get(base_symbol, (None, None))
+            change_1h, change_7d = await asyncio.gather(
+                _fetch_kline_change(base_symbol, "1h", 2),
+                _fetch_kline_change(base_symbol, "1d", 8),
+            )
+            value = {
+                "mark_price": mark_price,
+                "price_change_1h": change_1h,
+                "price_change_24h": change_24h,
+                "price_change_7d": change_7d,
+            }
+            self._binance_price_cache[base_symbol] = (time(), value)
+            result[base_symbol] = value
+
+        await asyncio.gather(*(_fill_symbol(base_symbol) for base_symbol in missing))
+        return result
 
     async def _get_lighter_leverage_map(self) -> dict[str, float]:
         if self._lighter_leverage_map is not None:
@@ -1605,6 +1532,86 @@ def _extract_best_bid_ask(payload: dict[str, Any]) -> tuple[float | None, float 
             best_ask = _extract_level_price(asks[0])
 
     return best_bid, best_ask
+
+
+def _extract_price_change_fields(
+    payload: dict[str, Any],
+    mark_price: float | None = None,
+) -> tuple[float | None, float | None, float | None]:
+    current_price = mark_price
+    if current_price is None:
+        current_price = _parse_float(
+            payload.get("mark_price")
+            or payload.get("markPrice")
+            or payload.get("last_price")
+            or payload.get("lastPrice")
+            or payload.get("index_price")
+            or payload.get("indexPrice")
+            or payload.get("price")
+        )
+
+    change_1h = _extract_pct_value(
+        payload,
+        ["price_change_1h", "price_change_1h_pct", "price_change_percent_1h", "change_1h", "change_1h_pct"],
+    )
+    change_24h = _extract_pct_value(
+        payload,
+        ["price_change_24h", "price_change_24h_pct", "price_change_percent_24h", "change_24h", "change_24h_pct"],
+    )
+    change_7d = _extract_pct_value(
+        payload,
+        ["price_change_7d", "price_change_7d_pct", "price_change_percent_7d", "change_7d", "change_7d_pct"],
+    )
+
+    if change_1h is None:
+        open_1h = _parse_float(payload.get("open_price_1h") or payload.get("open_1h"))
+        change_1h = _compute_change_pct_from_open(current_price, open_1h)
+    if change_24h is None:
+        open_24h = _parse_float(
+            payload.get("open_price_24h")
+            or payload.get("open_24h")
+            or payload.get("open_price")
+            or payload.get("day_open_price")
+        )
+        change_24h = _compute_change_pct_from_open(current_price, open_24h)
+    if change_7d is None:
+        open_7d = _parse_float(payload.get("open_price_7d") or payload.get("open_7d"))
+        change_7d = _compute_change_pct_from_open(current_price, open_7d)
+
+    return change_1h, change_24h, change_7d
+
+
+def _extract_pct_value(payload: dict[str, Any], keys: list[str]) -> float | None:
+    for key in keys:
+        if key not in payload:
+            continue
+        value = _parse_float(payload.get(key))
+        if value is None:
+            continue
+        normalized = _normalize_pct_value(value, key)
+        if normalized is not None:
+            return normalized
+    return None
+
+
+def _normalize_pct_value(value: float, key: str) -> float | None:
+    if not math.isfinite(value):
+        return None
+    lower_key = key.lower()
+    if ("pct" in lower_key or "percent" in lower_key or "percentage" in lower_key) and abs(value) > 1.0:
+        return value
+    # Non-explicit fields are often decimal ratios; convert tiny absolute values to percentage points.
+    if abs(value) <= 1.0 and "pct" not in lower_key and "percent" not in lower_key and "percentage" not in lower_key:
+        return value * 100.0
+    return value
+
+
+def _compute_change_pct_from_open(current_price: float | None, open_price: float | None) -> float | None:
+    if current_price is None or open_price is None:
+        return None
+    if current_price <= 0 or open_price <= 0:
+        return None
+    return ((current_price - open_price) / open_price) * 100.0
 
 
 def _extract_level_price(level: Any) -> float | None:
@@ -1811,39 +1818,6 @@ def _normalize_grvt_base_symbol(symbol: str) -> str:
     if not symbol:
         return ""
     return re.sub(r"[-_]PERP$", "", symbol.upper())
-
-
-def _normalize_symbol_for_coingecko(symbol: str) -> str:
-    normalized = (symbol or "").upper().removesuffix("-PERP")
-    if not normalized:
-        return ""
-    reverse_renames = {value.upper(): key.upper() for key, value in SYMBOL_RENAMES.items()}
-    if normalized in reverse_renames:
-        restored = reverse_renames[normalized]
-        if restored.startswith("1000") and len(restored) > 4:
-            return restored[4:]
-        return restored
-    if normalized.startswith("K") and len(normalized) > 2 and normalized[1:].isalpha():
-        return normalized[1:]
-    return normalized
-
-
-def _normalize_alphanumeric(value: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", (value or "").lower())
-
-
-def _build_symbol_variants(symbol: str) -> list[str]:
-    normalized = _normalize_alphanumeric(symbol)
-    variants: set[str] = {normalized}
-    if normalized.startswith("k") and len(normalized) > 1:
-        variants.add(normalized[1:])
-    if normalized.startswith("1000") and len(normalized) > 4:
-        variants.add(normalized[4:])
-    if normalized.endswith("perp") and len(normalized) > 4:
-        variants.add(normalized[:-4])
-    if normalized.startswith("perp") and len(normalized) > 4:
-        variants.add(normalized[4:])
-    return [variant for variant in variants if variant]
 
 
 def _parse_float(value: Any) -> float | None:
