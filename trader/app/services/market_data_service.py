@@ -9,8 +9,11 @@ from time import time
 from typing import Any, Awaitable, Callable
 
 import httpx
+from sqlmodel import Session, select
 
 from app.config import Settings
+from app.db_models import AssetIcon
+from app.db_session import get_engine
 from app.services.lighter_service import LighterService
 from app.models import (
     ArbitrageSnapshotResponse,
@@ -58,6 +61,8 @@ CACHE_TTL_SECONDS = 10 * 60
 PREDICTION_CACHE_TTL_SECONDS = 5 * 60
 AVAILABLE_SYMBOLS_CACHE_TTL_SECONDS = 60 * 60
 BINANCE_PRICE_CACHE_TTL_SECONDS = 5 * 60
+ICON_URL_CACHE_TTL_SECONDS = 60 * 60
+ICON_DISCOVERY_CONCURRENCY = 8
 SYMBOL_RENAMES: dict[str, str] = {
     "1000PEPE": "kPEPE",
     "1000SHIB": "kSHIB",
@@ -76,6 +81,7 @@ class MarketDataService:
         self._prediction_cache: dict[tuple[str, str, float], tuple[float, FundingPredictionResponse]] = {}
         self._available_symbols_cache: dict[tuple[str, str], tuple[float, list[AvailableSymbolEntry], datetime]] = {}
         self._binance_price_cache: dict[str, tuple[float, dict[str, float | None]]] = {}
+        self._icon_url_cache: dict[str, tuple[float, str | None]] = {}
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -1340,8 +1346,152 @@ class MarketDataService:
                 )
             )
         )
+        icon_map = await self._resolve_symbol_icon_urls(
+            {
+                _normalize_icon_symbol(row.symbol or row.left_symbol)
+                for row in rows
+                if (row.symbol or row.left_symbol)
+            }
+        )
+        for row in rows:
+            symbol_key = _normalize_icon_symbol(row.symbol or row.left_symbol)
+            row.icon_url = icon_map.get(symbol_key)
 
         return PerpSnapshot(rows=rows, fetched_at=datetime.now(tz=timezone.utc), errors=api_errors)
+
+    async def _resolve_symbol_icon_urls(self, symbols: set[str]) -> dict[str, str | None]:
+        normalized_symbols = {symbol for symbol in symbols if symbol}
+        if not normalized_symbols:
+            return {}
+
+        now = time()
+        result: dict[str, str | None] = {}
+        missing: set[str] = set()
+        for symbol in normalized_symbols:
+            cached = self._icon_url_cache.get(symbol)
+            if cached and now - cached[0] < ICON_URL_CACHE_TTL_SECONDS:
+                result[symbol] = cached[1]
+            else:
+                missing.add(symbol)
+
+        if not missing:
+            return result
+
+        db_rows_by_symbol = self._load_asset_icons_from_db(missing)
+        unresolved: set[str] = set()
+        for symbol in missing:
+            if symbol in db_rows_by_symbol:
+                icon_url = db_rows_by_symbol[symbol]
+                result[symbol] = icon_url
+                self._icon_url_cache[symbol] = (time(), icon_url)
+            else:
+                unresolved.add(symbol)
+
+        if not unresolved:
+            return result
+
+        semaphore = asyncio.Semaphore(ICON_DISCOVERY_CONCURRENCY)
+        discovered: dict[str, tuple[str | None, str | None]] = {}
+
+        async def _discover_one(symbol: str) -> None:
+            async with semaphore:
+                icon_url, source = await self._discover_icon_url(symbol)
+            discovered[symbol] = (icon_url, source)
+            result[symbol] = icon_url
+            self._icon_url_cache[symbol] = (time(), icon_url)
+
+        await asyncio.gather(*(_discover_one(symbol) for symbol in unresolved))
+        self._persist_asset_icons_to_db(discovered)
+        return result
+
+    def _load_asset_icons_from_db(self, symbols: set[str]) -> dict[str, str | None]:
+        if not symbols:
+            return {}
+        try:
+            engine = get_engine()
+        except Exception:
+            return {}
+
+        with Session(engine) as session:
+            records = session.exec(
+                select(AssetIcon).where(
+                    AssetIcon.symbol.in_(symbols),
+                    AssetIcon.deleted_at.is_(None),
+                )
+            ).all()
+            return {record.symbol.upper(): record.icon_url for record in records}
+
+    def _persist_asset_icons_to_db(self, discovered: dict[str, tuple[str | None, str | None]]) -> None:
+        if not discovered:
+            return
+        try:
+            engine = get_engine()
+        except Exception:
+            return
+
+        now = datetime.utcnow()
+        with Session(engine) as session:
+            existing_rows = session.exec(
+                select(AssetIcon).where(
+                    AssetIcon.symbol.in_(set(discovered.keys())),
+                )
+            ).all()
+            existing_by_symbol = {row.symbol.upper(): row for row in existing_rows}
+
+            for symbol, (icon_url, source) in discovered.items():
+                existing = existing_by_symbol.get(symbol)
+                if existing is not None:
+                    existing.icon_url = icon_url
+                    existing.source = source
+                    existing.last_checked_at = now
+                    existing.updated_at = now
+                    if existing.deleted_at is not None:
+                        existing.deleted_at = None
+                    session.add(existing)
+                    continue
+
+                session.add(
+                    AssetIcon(
+                        symbol=symbol,
+                        icon_url=icon_url,
+                        source=source,
+                        last_checked_at=now,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            session.commit()
+
+    async def _discover_icon_url(self, symbol: str) -> tuple[str | None, str | None]:
+        for url in _build_icon_candidate_urls(symbol):
+            if await self._is_icon_url_reachable(url):
+                return url, _infer_icon_source(url)
+        return None, None
+
+    async def _is_icon_url_reachable(self, url: str) -> bool:
+        try:
+            response = await self._client.head(url, follow_redirects=True, timeout=5.0)
+            if response.status_code == 200:
+                content_type = response.headers.get("content-type", "").lower()
+                if content_type.startswith("image/") or "octet-stream" in content_type:
+                    return True
+                # Some providers do not return content-type on HEAD.
+                if not content_type:
+                    return True
+        except Exception:
+            pass
+
+        try:
+            response = await self._client.get(url, follow_redirects=True, timeout=5.0)
+            if response.status_code != 200:
+                return False
+            content_type = response.headers.get("content-type", "").lower()
+            if content_type.startswith("image/") or "octet-stream" in content_type:
+                return True
+            # Fallback for providers returning ambiguous content-types.
+            return bool(response.content)
+        except Exception:
+            return False
 
     async def _fetch_binance_price_change_fallbacks(
         self,
@@ -1812,6 +1962,52 @@ def _normalize_lighter_symbol_for_book(value: str | None) -> str:
     if normalized.endswith("-PERP"):
         return normalized.removesuffix("-PERP")
     return normalized
+
+
+def _normalize_icon_symbol(symbol: str | None) -> str:
+    if not symbol:
+        return ""
+    normalized = symbol.upper().strip()
+    normalized = re.sub(r"[-_/]?PERP$", "", normalized)
+    normalized = re.split(r"[-_/]", normalized)[0]
+    aliases = {
+        "XBT": "BTC",
+        "WBTC": "BTC",
+        "WETH": "ETH",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _build_icon_candidate_urls(symbol: str) -> list[str]:
+    normalized = _normalize_icon_symbol(symbol)
+    if not normalized:
+        return []
+    lower = normalized.lower()
+    # Multi-source dynamic discovery; do not rely on static per-symbol mappings.
+    urls = [
+        f"https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/{lower}.png",
+        f"https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/{lower}.png",
+        f"https://assets.coincap.io/assets/icons/{lower}@2x.png",
+        f"https://coinicons-api.vercel.app/api/icon/{lower}",
+    ]
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for url in urls:
+        if url not in seen:
+            seen.add(url)
+            deduped.append(url)
+    return deduped
+
+
+def _infer_icon_source(url: str) -> str | None:
+    lowered = url.lower()
+    if "spothq" in lowered:
+        return "spothq"
+    if "coincap" in lowered:
+        return "coincap"
+    if "coinicons-api" in lowered:
+        return "coinicons-api"
+    return None
 
 
 def _normalize_grvt_base_symbol(symbol: str) -> str:

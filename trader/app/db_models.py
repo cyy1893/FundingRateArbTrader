@@ -163,3 +163,19 @@ class TradingProfile(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     deleted_at: Optional[datetime] = Field(default=None, index=True)
+
+
+class AssetIcon(SQLModel, table=True):
+    __tablename__ = "asset_icons"
+
+    id: uuid.UUID = Field(
+        default_factory=uuid7,
+        sa_column=Column(PGUUID(as_uuid=True), primary_key=True, nullable=False),
+    )
+    symbol: str = Field(index=True, unique=True)
+    icon_url: Optional[str] = None
+    source: Optional[str] = None
+    last_checked_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    deleted_at: Optional[datetime] = Field(default=None, index=True)
