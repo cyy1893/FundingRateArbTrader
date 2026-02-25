@@ -286,13 +286,7 @@ function PerpTableRowComponent({
         {loadingPrices ? <PriceSkeleton width="w-20" /> : formatPrice(row.markPrice)}
       </TableCell>
       <TableCell className="text-xs font-medium">
-        {renderPriceChange(row.priceChange1h, loadingPrices)}
-      </TableCell>
-      <TableCell className="text-xs font-medium">
         {renderPriceChange(row.priceChange24h, loadingPrices)}
-      </TableCell>
-      <TableCell className="text-xs font-medium">
-        {renderPriceChange(row.priceChange7d, loadingPrices)}
       </TableCell>
       <TableCell className="font-medium tabular-nums text-sm">
         {row.maxLeverage ?? "—"}

@@ -1164,13 +1164,7 @@ export function PerpTable({
                   </button>
                 </TableHead>
                 <TableHead className="text-left font-semibold text-[11px] text-muted-foreground">
-                  1 小时
-                </TableHead>
-                <TableHead className="text-left font-semibold text-[11px] text-muted-foreground">
-                  24 小时
-                </TableHead>
-                <TableHead className="text-left font-semibold text-[11px] text-muted-foreground">
-                  7 天
+                  24小时价格变动
                 </TableHead>
                 <TableHead className="text-left font-semibold text-[11px] text-muted-foreground">
                   {leftSource.label} 最大杠杆
@@ -1243,7 +1237,7 @@ export function PerpTable({
               {currentRows.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={15}
+                    colSpan={13}
                     className="py-12 text-center text-sm text-muted-foreground"
                   >
                     未找到匹配的资产。

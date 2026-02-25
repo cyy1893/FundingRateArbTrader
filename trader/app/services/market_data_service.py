@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import asyncio
+import os
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -63,6 +64,7 @@ AVAILABLE_SYMBOLS_CACHE_TTL_SECONDS = 60 * 60
 BINANCE_PRICE_CACHE_TTL_SECONDS = 5 * 60
 ICON_URL_CACHE_TTL_SECONDS = 60 * 60
 ICON_DISCOVERY_CONCURRENCY = 8
+COINGECKO_SYMBOL_MAP_TTL_SECONDS = 6 * 60 * 60
 SYMBOL_RENAMES: dict[str, str] = {
     "1000PEPE": "kPEPE",
     "1000SHIB": "kSHIB",
@@ -82,6 +84,8 @@ class MarketDataService:
         self._available_symbols_cache: dict[tuple[str, str], tuple[float, list[AvailableSymbolEntry], datetime]] = {}
         self._binance_price_cache: dict[str, tuple[float, dict[str, float | None]]] = {}
         self._icon_url_cache: dict[str, tuple[float, str | None]] = {}
+        self._coingecko_symbol_to_ids_cache: tuple[float, dict[str, list[str]]] | None = None
+        self._coingecko_api_key = os.getenv("COINGECKO_API_KEY", "").strip()
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -1463,10 +1467,121 @@ class MarketDataService:
             session.commit()
 
     async def _discover_icon_url(self, symbol: str) -> tuple[str | None, str | None]:
+        tasks: list[asyncio.Task[tuple[str | None, str | None]]] = []
         for url in _build_icon_candidate_urls(symbol):
-            if await self._is_icon_url_reachable(url):
-                return url, _infer_icon_source(url)
+            tasks.append(asyncio.create_task(self._probe_icon_url_candidate(url, _infer_icon_source(url))))
+        tasks.append(asyncio.create_task(self._probe_coingecko_icon_candidate(symbol)))
+
+        if not tasks:
+            return None, None
+
+        try:
+            for done in asyncio.as_completed(tasks):
+                icon_url, source = await done
+                if icon_url:
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    return icon_url, source
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
         return None, None
+
+    async def _probe_icon_url_candidate(self, url: str, source: str | None) -> tuple[str | None, str | None]:
+        if await self._is_icon_url_reachable(url):
+            return url, source
+        return None, None
+
+    async def _probe_coingecko_icon_candidate(self, symbol: str) -> tuple[str | None, str | None]:
+        coingecko_icon = await self._resolve_coingecko_icon_url(symbol)
+        if coingecko_icon and await self._is_icon_url_reachable(coingecko_icon):
+            return coingecko_icon, "coingecko"
+        return None, None
+
+    async def _resolve_coingecko_icon_url(self, symbol: str) -> str | None:
+        normalized = _normalize_icon_symbol(symbol).lower()
+        if not normalized:
+            return None
+        symbol_map = await self._get_coingecko_symbol_map()
+        coin_ids = symbol_map.get(normalized, [])
+        if not coin_ids:
+            return None
+
+        headers: dict[str, str] = {}
+        if self._coingecko_api_key:
+            headers["x-cg-demo-api-key"] = self._coingecko_api_key
+
+        # Try a few candidates for ambiguous symbols, then stop.
+        for coin_id in coin_ids[:3]:
+            try:
+                response = await self._client.get(
+                    f"https://api.coingecko.com/api/v3/coins/{coin_id}",
+                    params={
+                        "localization": "false",
+                        "tickers": "false",
+                        "market_data": "false",
+                        "community_data": "false",
+                        "developer_data": "false",
+                        "sparkline": "false",
+                    },
+                    headers=headers,
+                )
+                if response.status_code != 200:
+                    continue
+                payload = response.json()
+                image = payload.get("image") if isinstance(payload, dict) else None
+                if not isinstance(image, dict):
+                    continue
+                icon_url = (
+                    image.get("large")
+                    or image.get("small")
+                    or image.get("thumb")
+                )
+                if isinstance(icon_url, str) and icon_url:
+                    return icon_url
+            except Exception:
+                continue
+        return None
+
+    async def _get_coingecko_symbol_map(self) -> dict[str, list[str]]:
+        now = time()
+        if (
+            self._coingecko_symbol_to_ids_cache is not None
+            and now - self._coingecko_symbol_to_ids_cache[0] < COINGECKO_SYMBOL_MAP_TTL_SECONDS
+        ):
+            return self._coingecko_symbol_to_ids_cache[1]
+
+        headers: dict[str, str] = {}
+        if self._coingecko_api_key:
+            headers["x-cg-demo-api-key"] = self._coingecko_api_key
+
+        try:
+            response = await self._client.get(
+                "https://api.coingecko.com/api/v3/coins/list",
+                params={"include_platform": "false"},
+                headers=headers,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            return {}
+
+        symbol_map: dict[str, list[str]] = defaultdict(list)
+        if isinstance(payload, list):
+            for entry in payload:
+                if not isinstance(entry, dict):
+                    continue
+                symbol = str(entry.get("symbol") or "").strip().lower()
+                coin_id = str(entry.get("id") or "").strip()
+                if not symbol or not coin_id:
+                    continue
+                symbol_map[symbol].append(coin_id)
+
+        normalized_map = {key: value for key, value in symbol_map.items()}
+        self._coingecko_symbol_to_ids_cache = (now, normalized_map)
+        return normalized_map
 
     async def _is_icon_url_reachable(self, url: str) -> bool:
         try:
@@ -1536,44 +1651,13 @@ class MarketDataService:
         except Exception:
             ticker_24h_map = {}
 
-        semaphore = asyncio.Semaphore(8)
-
-        async def _fetch_kline_change(base_symbol: str, interval: str, limit: int) -> float | None:
-            symbol = f"{base_symbol}USDT"
-            try:
-                async with semaphore:
-                    resp = await self._client.get(
-                        "https://fapi.binance.com/fapi/v1/klines",
-                        params={"symbol": symbol, "interval": interval, "limit": str(limit)},
-                    )
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception:
-                return None
-
-            if not isinstance(data, list) or len(data) < 2:
-                return None
-            first = data[0]
-            last = data[-1]
-            if not isinstance(first, list) or not isinstance(last, list) or len(first) < 5 or len(last) < 5:
-                return None
-            open_price = _parse_float(first[1])
-            close_price = _parse_float(last[4])
-            if open_price is None or close_price is None or open_price <= 0:
-                return None
-            return ((close_price - open_price) / open_price) * 100.0
-
         async def _fill_symbol(base_symbol: str) -> None:
             mark_price, change_24h = ticker_24h_map.get(base_symbol, (None, None))
-            change_1h, change_7d = await asyncio.gather(
-                _fetch_kline_change(base_symbol, "1h", 2),
-                _fetch_kline_change(base_symbol, "1d", 8),
-            )
             value = {
                 "mark_price": mark_price,
-                "price_change_1h": change_1h,
+                "price_change_1h": None,
                 "price_change_24h": change_24h,
-                "price_change_7d": change_7d,
+                "price_change_7d": None,
             }
             self._binance_price_cache[base_symbol] = (time(), value)
             result[base_symbol] = value
