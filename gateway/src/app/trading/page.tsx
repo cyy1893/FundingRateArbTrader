@@ -941,7 +941,7 @@ function TradingPageContent() {
             defaultSymbol={searchParams.get("symbol") ?? undefined}
             defaultLighterDirection={(searchParams.get("lighterDir") as "long" | "short" | null) ?? undefined}
             defaultGrvtDirection={(searchParams.get("grvtDir") as "long" | "short" | null) ?? undefined}
-            lockSymbol={Boolean(searchParams.get("symbol"))}
+            lockSymbol={true}
             lockDirections={Boolean(searchParams.get("lighterDir")) && Boolean(searchParams.get("grvtDir"))}
           />
         </div>
@@ -972,9 +972,9 @@ function TradingPageContent() {
             ) : (
               <div className="flex-1 flex items-center justify-center">
                 <div className="text-center">
-                  <p className="text-gray-600 text-sm mb-2">选择币种并开始监控查看订单簿</p>
+                  <p className="text-gray-600 text-sm mb-2">请从首页推荐套利币种进入并开始监控查看订单簿</p>
                   <p className="text-gray-500 text-xs">
-                    在左侧面板配置参数后点击"开始监控"
+                    在左侧面板配置参数后点击&quot;开始监控&quot;
                   </p>
                 </div>
               </div>

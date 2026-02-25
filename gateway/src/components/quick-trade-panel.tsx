@@ -1,8 +1,8 @@
-import { useRef, useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, ArrowUpRight, ArrowDownRight, Info, Search, Lock, Shield, Settings2 } from "lucide-react";
+import { TrendingUp, ArrowUpRight, ArrowDownRight, Info, Lock, Shield, Settings2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { OrderBookSubscription } from "@/hooks/use-order-book-websocket";
 import {
@@ -11,13 +11,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 
 type SymbolOption = { symbol: string; displayName: string };
@@ -202,9 +195,6 @@ function LeverageSlider({
   );
 }
 
-const formatSymbolLabel = (option: SymbolOption) =>
-  `${option.displayName} (${option.symbol})`;
-
 export function QuickTradePanel({
   onExecuteArbitrage,
   onConfigChange,
@@ -222,10 +212,7 @@ export function QuickTradePanel({
   lockSymbol = false,
   lockDirections = false,
 }: QuickTradePanelProps) {
-  const [symbol, setSymbol] = useState(defaultSymbol ?? "");
-  const [symbolQuery, setSymbolQuery] = useState("");
-  const [isSymbolMenuOpen, setIsSymbolMenuOpen] = useState(false);
-  const symbolBlurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [symbol, setSymbol] = useState((defaultSymbol ?? "").trim().toUpperCase());
   const [lighterLeverage, setLighterLeverage] = useState(1);
   const [lighterDirection, setLighterDirection] = useState<"long" | "short">(defaultLighterDirection ?? "long");
   const [grvtLeverage, setGrvtLeverage] = useState(1);
@@ -243,44 +230,6 @@ export function QuickTradePanel({
   const grvtMax =
     Number.isFinite(caps?.grvt) && (caps?.grvt ?? 0) > 0 ? Number(caps?.grvt) : LEVERAGE_MAX;
   const sharedMax = Math.min(lighterMax, grvtMax);
-
-  useEffect(() => {
-    if (!hasSymbols) {
-      if (!defaultSymbol) {
-        setSymbol("");
-        setSymbolQuery("");
-      }
-      return;
-    }
-
-    const currentSymbol = symbol || defaultSymbol;
-    if (currentSymbol) {
-      const exists = availableSymbols.some((option) => option.symbol === currentSymbol);
-      if (exists) {
-        // If we haven't set the query yet (initial load with default), do it now
-        if (symbolQuery === "") {
-          const selected = availableSymbols.find((option) => option.symbol === currentSymbol);
-          if (selected) {
-            setSymbol(selected.symbol);
-            setSymbolQuery(formatSymbolLabel(selected));
-          }
-        }
-      } else {
-        // Symbol from URL or current state not found in available symbols 
-        if (symbol && !exists) {
-          setSymbol("");
-        }
-      }
-    }
-  }, [availableSymbols, hasSymbols, symbol, symbolQuery, defaultSymbol]);
-
-  useEffect(() => {
-    return () => {
-      if (symbolBlurTimeout.current) {
-        clearTimeout(symbolBlurTimeout.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (lighterLeverage > sharedMax) {
@@ -325,24 +274,10 @@ export function QuickTradePanel({
   const liquidationGuardThresholdPct = Number.isFinite(parsedLiquidationPct)
     ? Math.min(100, Math.max(1, parsedLiquidationPct))
     : 50;
-  const sortedSymbols = [...availableSymbols].sort((a, b) =>
-    a.displayName.localeCompare(b.displayName),
+  const selectedSymbol = useMemo(
+    () => availableSymbols.find((option) => option.symbol === symbol),
+    [availableSymbols, symbol],
   );
-  const normalizedQuery = symbolQuery.trim().toLowerCase();
-  const filteredSymbols = normalizedQuery
-    ? sortedSymbols.filter(
-      (option) =>
-        option.symbol.toLowerCase().includes(normalizedQuery) ||
-        option.displayName.toLowerCase().includes(normalizedQuery),
-    )
-    : sortedSymbols;
-  const suggestedSymbols = filteredSymbols.slice(0, 12);
-
-  const handleSymbolSelect = (option: SymbolOption) => {
-    setSymbol(option.symbol);
-    setSymbolQuery(formatSymbolLabel(option));
-    setIsSymbolMenuOpen(false);
-  };
 
   useEffect(() => {
     if (!symbol || !safeNotional) {
@@ -431,73 +366,26 @@ export function QuickTradePanel({
           <Label htmlFor="symbol" className="text-[10px] font-bold text-slate-400 uppercase tracking-tight ml-0.5">
             交易币种
           </Label>
-          <div className="relative group">
-            <div className="relative">
-              <Input
-                id="symbol"
-                name="symbol-search"
-                value={symbolQuery}
-                disabled={!hasSymbols || lockSymbol}
-                placeholder="搜索币种 (如 BTC, ETH)"
-                autoComplete="off"
-                onChange={(event) => {
-                  if (lockSymbol) return;
-                  if (symbolBlurTimeout.current) clearTimeout(symbolBlurTimeout.current);
-                  const next = event.target.value;
-                  setSymbolQuery(next);
-                  setIsSymbolMenuOpen(true);
-                  const exact = availableSymbols.find(
-                    (option) =>
-                      option.symbol.toLowerCase() === next.trim().toLowerCase() ||
-                      option.displayName.toLowerCase() === next.trim().toLowerCase(),
-                  );
-                  if (exact) setSymbol(exact.symbol);
-                  else setSymbol("");
-                }}
-                onFocus={() => {
-                  if (!lockSymbol) setIsSymbolMenuOpen(true);
-                }}
-                onBlur={() => {
-                  symbolBlurTimeout.current = setTimeout(() => setIsSymbolMenuOpen(false), 150);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && suggestedSymbols[0]) {
-                    event.preventDefault();
-                    handleSymbolSelect(suggestedSymbols[0]);
-                  }
-                }}
-                className={cn(
-                  "h-8 border-slate-200 bg-slate-50 font-bold text-xs focus:bg-white focus:ring-0 transition-all",
-                  lockSymbol && "opacity-60 cursor-not-allowed bg-slate-100 pr-8"
-                )}
-              />
-              <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-300 pointer-events-none" />
-              {lockSymbol && (
-                <Lock className="absolute right-8 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-300" />
-              )}
-            </div>
-            {isSymbolMenuOpen && hasSymbols && !lockSymbol && (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded border border-slate-200 bg-white shadow-lg animate-in fade-in duration-75">
-                <div className="py-0.5">
-                  {suggestedSymbols.length > 0 ? (
-                    suggestedSymbols.map((option) => (
-                      <button
-                        key={option.symbol}
-                        type="button"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => handleSymbolSelect(option)}
-                        className="flex w-full items-center justify-between px-2.5 py-1.5 text-left hover:bg-slate-50 transition-colors"
-                      >
-                        <span className="text-[11px] font-bold text-slate-700">{option.displayName}</span>
-                        <span className="text-[9px] font-mono text-slate-400">{option.symbol}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="px-2 py-2 text-[10px] text-slate-400 text-center">未找到</div>
-                  )}
-                </div>
-              </div>
+          <div
+            id="symbol"
+            className={cn(
+              "flex h-8 items-center justify-between rounded border border-slate-200 bg-slate-100 px-2.5 text-xs",
+              !symbol && "border-amber-200 bg-amber-50",
             )}
+          >
+            {symbol ? (
+              <>
+                <span className="font-bold text-slate-800">
+                  {selectedSymbol?.displayName ?? symbol}
+                </span>
+                <span className="font-mono text-[10px] text-slate-500">{symbol}</span>
+              </>
+            ) : (
+              <span className="text-[10px] font-semibold text-amber-700">
+                请从首页“推荐套利币种”点击“去交易”进入
+              </span>
+            )}
+            <Lock className="ml-2 h-3 w-3 shrink-0 text-slate-400" />
           </div>
         </div>
 
