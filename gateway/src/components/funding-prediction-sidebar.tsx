@@ -309,8 +309,8 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
             <TableHead className="text-right">预测年化 APR</TableHead>
             <TableHead className="text-right">资金费率波动率(24h)</TableHead>
             <TableHead className="text-right">价格波动率(24h估算)</TableHead>
-            <TableHead className="text-right">3秒平均点差(Lighter)</TableHead>
-            <TableHead className="text-right">3秒平均点差(GRVT)</TableHead>
+            <TableHead className="text-right">点差(Lighter)</TableHead>
+            <TableHead className="text-right">点差(GRVT)</TableHead>
             <TableHead className="text-right">综合分</TableHead>
             <TableHead className="text-right">去交易</TableHead>
           </TableRow>

@@ -46,6 +46,13 @@ PREDICTION_HOURS_PER_YEAR = 24 * 365
 MAX_PREDICTION_WORKERS = 5
 PREDICTION_HALF_LIFE_HOURS = 16.0
 PREDICTION_VOLATILITY_WINDOW_HOURS = 24
+PREDICTION_EWMA_LAMBDA = 0.90
+PREDICTION_ROUND_TRIP_FEE_PCT = 0.04  # 4 bps total round-trip cost proxy.
+PREDICTION_RISK_ALPHA = 0.30
+PREDICTION_REVERSAL_BASE_PROB = 0.05
+PREDICTION_SURVIVAL_MAX_STEPS = 45
+PREDICTION_MARGIN_BUFFER = 0.20
+PREDICTION_MIN_SIGMA = 1e-6
 RECOMMENDATION_APR_WEIGHT = 0.70
 RECOMMENDATION_FUNDING_VOLATILITY_WEIGHT = 0.10
 RECOMMENDATION_PRICE_VOLATILITY_WEIGHT = 0.10
@@ -54,9 +61,6 @@ SPREAD_STEEPNESS_BPS = 1.5
 DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS = 12.0
 DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT = 5.0
 MAX_ACCEPTABLE_PRICE_VOLATILITY_PCT = 10.0
-# Spread sampling window for recommendation scoring/details.
-SPREAD_SAMPLING_DURATION_SECONDS = 3
-SPREAD_SAMPLING_INTERVAL_SECONDS = 1
 LIGHTER_SPREAD_FETCH_CONCURRENCY = 8
 CACHE_TTL_SECONDS = 10 * 60
 PREDICTION_CACHE_TTL_SECONDS = 10 * 60
@@ -624,124 +628,78 @@ class MarketDataService:
         self._available_symbols_cache[cache_key] = (time(), symbols, snapshot.fetched_at)
         return symbols, snapshot.fetched_at
 
-    async def _sample_average_bid_ask_spreads(
+    async def _fetch_current_bid_ask_spreads(
         self,
         primary: str,
         secondary: str,
         symbols: set[str],
-        duration_seconds: int,
-        interval_seconds: int,
         progress_callback: Callable[[float, str], Awaitable[None] | None] | None = None,
     ) -> dict[str, dict[str, Any]]:
         if not symbols:
             return {}
 
-        sample_count = max(duration_seconds // max(interval_seconds, 1), 1)
-        sums: dict[str, dict[str, float]] = {}
-        counts: dict[str, int] = {}
-        mid_samples: dict[str, list[float]] = {}
-        spread_samples: dict[str, dict[str, list[float]]] = defaultdict(
-            lambda: {"left": [], "right": [], "combined": []}
-        )
+        await _invoke_progress_callback(progress_callback, 30.0, "拉取当前盘口")
 
-        for index in range(sample_count):
-            try:
-                snapshot = await self.get_perp_snapshot(primary, secondary)
-            except Exception:  # noqa: BLE001
-                if index + 1 < sample_count:
-                    await asyncio.sleep(interval_seconds)
+        try:
+            snapshot = await self.get_perp_snapshot(primary, secondary)
+        except Exception:  # noqa: BLE001
+            return {}
+
+        snapshot_by_symbol = {
+            (row.symbol or row.left_symbol or "").upper(): row
+            for row in snapshot.rows
+            if (row.symbol or row.left_symbol)
+        }
+
+        primary_lighter_map: dict[str, tuple[float | None, float | None]] = {}
+        secondary_lighter_map: dict[str, tuple[float | None, float | None]] = {}
+        if primary.lower() == "lighter":
+            primary_lighter_map = await self._fetch_lighter_best_prices_map(symbols)
+        if secondary.lower() == "lighter":
+            secondary_lighter_map = await self._fetch_lighter_best_prices_map(symbols)
+
+        spreads: dict[str, dict[str, Any]] = {}
+        for symbol_key in symbols:
+            row = snapshot_by_symbol.get(symbol_key)
+            if row is None:
+                continue
+            right_payload = row.right if isinstance(row.right, dict) else {}
+            if not right_payload:
                 continue
 
-            snapshot_by_symbol = {
-                (row.symbol or row.left_symbol or "").upper(): row
-                for row in snapshot.rows
-                if (row.symbol or row.left_symbol)
-            }
-
-            primary_lighter_map: dict[str, tuple[float | None, float | None]] = {}
-            secondary_lighter_map: dict[str, tuple[float | None, float | None]] = {}
             if primary.lower() == "lighter":
-                primary_lighter_map = await self._fetch_lighter_best_prices_map(symbols)
+                left_bid, left_ask = primary_lighter_map.get(symbol_key, (None, None))
+            else:
+                left_bid = _parse_float(row.best_bid)
+                left_ask = _parse_float(row.best_ask)
+
             if secondary.lower() == "lighter":
-                secondary_lighter_map = await self._fetch_lighter_best_prices_map(symbols)
+                right_bid, right_ask = secondary_lighter_map.get(symbol_key, (None, None))
+            else:
+                right_bid = _parse_float(right_payload.get("best_bid"))
+                right_ask = _parse_float(right_payload.get("best_ask"))
 
-            for symbol_key in symbols:
-                row = snapshot_by_symbol.get(symbol_key)
-                if row is None:
-                    continue
-                right_payload = row.right if isinstance(row.right, dict) else {}
-                if not right_payload:
-                    continue
-
-                if primary.lower() == "lighter":
-                    left_bid, left_ask = primary_lighter_map.get(symbol_key, (None, None))
-                else:
-                    left_bid = _parse_float(row.best_bid)
-                    left_ask = _parse_float(row.best_ask)
-
-                if secondary.lower() == "lighter":
-                    right_bid, right_ask = secondary_lighter_map.get(symbol_key, (None, None))
-                else:
-                    right_bid = _parse_float(right_payload.get("best_bid"))
-                    right_ask = _parse_float(right_payload.get("best_ask"))
-
-                left_spread_bps = _compute_bid_ask_spread_bps(
-                    left_bid,
-                    left_ask,
-                    default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
-                )
-                right_spread_bps = _compute_bid_ask_spread_bps(
-                    right_bid,
-                    right_ask,
-                    default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
-                )
-                bucket = sums.setdefault(symbol_key, {"left": 0.0, "right": 0.0, "combined": 0.0})
-                bucket["left"] += left_spread_bps
-                bucket["right"] += right_spread_bps
-                bucket["combined"] += left_spread_bps + right_spread_bps
-                counts[symbol_key] = counts.get(symbol_key, 0) + 1
-                spread_samples[symbol_key]["left"].append(left_spread_bps)
-                spread_samples[symbol_key]["right"].append(right_spread_bps)
-                spread_samples[symbol_key]["combined"].append(left_spread_bps + right_spread_bps)
-
-                left_mid = _compute_mid_price(left_bid, left_ask, _parse_float(row.mark_price))
-                right_mid = _compute_mid_price(
-                    right_bid,
-                    right_ask,
-                    _parse_float(right_payload.get("mark_price")),
-                )
-                combined_mid = _combine_mid_prices(left_mid, right_mid)
-                if combined_mid is not None and combined_mid > 0:
-                    mid_samples.setdefault(symbol_key, []).append(combined_mid)
-
-            if index + 1 < sample_count:
-                await asyncio.sleep(interval_seconds)
-
-            await _invoke_progress_callback(
-                progress_callback,
-                5 + ((index + 1) / max(sample_count, 1)) * 85,
-                f"盘口采样 {index + 1}/{sample_count}",
+            left_spread_bps = _compute_bid_ask_spread_bps(
+                left_bid,
+                left_ask,
+                default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
+            )
+            right_spread_bps = _compute_bid_ask_spread_bps(
+                right_bid,
+                right_ask,
+                default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
             )
 
-        averages: dict[str, dict[str, Any]] = {}
-        for symbol_key, total_values in sums.items():
-            count = counts.get(symbol_key, 0)
-            if count <= 0:
-                continue
-            averages[symbol_key] = {
-                "left": total_values["left"] / count,
-                "right": total_values["right"] / count,
-                "combined": total_values["combined"] / count,
-                "price_volatility_24h_pct": _compute_price_volatility_24h_pct(
-                    mid_samples.get(symbol_key, []),
-                    interval_seconds=interval_seconds,
-                    default_value=DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
-                ),
-                "left_spread_samples_bps": spread_samples[symbol_key]["left"],
-                "right_spread_samples_bps": spread_samples[symbol_key]["right"],
-                "combined_spread_samples_bps": spread_samples[symbol_key]["combined"],
+            spreads[symbol_key] = {
+                "left": left_spread_bps,
+                "right": right_spread_bps,
+                "combined": left_spread_bps + right_spread_bps,
+                "price_volatility_24h_pct": DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
+                "left_spread_samples_bps": [left_spread_bps],
+                "right_spread_samples_bps": [right_spread_bps],
+                "combined_spread_samples_bps": [left_spread_bps + right_spread_bps],
             }
-        return averages
+        return spreads
 
     async def _fetch_lighter_best_prices_map(
         self,
@@ -809,15 +767,13 @@ class MarketDataService:
             for row in eligible_rows
             if (row.symbol or row.left_symbol)
         }
-        spread_averages = await self._sample_average_bid_ask_spreads(
+        spread_averages = await self._fetch_current_bid_ask_spreads(
             primary=primary,
             secondary=secondary,
             symbols=sampling_symbols,
-            duration_seconds=SPREAD_SAMPLING_DURATION_SECONDS,
-            interval_seconds=SPREAD_SAMPLING_INTERVAL_SECONDS,
             progress_callback=progress_callback,
         )
-        await _invoke_progress_callback(progress_callback, 90.0, "完成盘口采样，开始计算")
+        await _invoke_progress_callback(progress_callback, 90.0, "完成盘口读取，开始计算")
 
         semaphore = asyncio.Semaphore(MAX_PREDICTION_WORKERS)
         total_rows = max(len(eligible_rows), 1)
@@ -923,13 +879,21 @@ class MarketDataService:
                     for point in dataset
                     if point.time >= lookback_start and point.spread is not None and math.isfinite(point.spread)
                 ]
+                run_spread_times = [
+                    point.time
+                    for point in dataset
+                    if point.time >= lookback_start and point.spread is not None and math.isfinite(point.spread)
+                ]
                 (
                     predicted_spread_24h,
                     total_decimal,
                     annualized_decimal,
-                ) = _compute_run_until_unprofitable_metrics(
-                    average_spread_hourly=average_spread_hourly,
+                    projected_direction,
+                ) = _compute_theta_reversal_apr_metrics(
                     spread_samples=run_spread_samples,
+                    spread_times_ms=run_spread_times,
+                    left_max_leverage=_parse_float(row.max_leverage),
+                    right_max_leverage=_parse_float(right_payload.get("max_leverage")),
                 )
                 spread_volatility_24h_pct = _compute_stddev(spread_window_samples) * math.sqrt(
                     PREDICTION_FORECAST_HOURS,
@@ -978,11 +942,20 @@ class MarketDataService:
                     )
                     return
 
-                direction = "unknown"
-                if average_spread_hourly > 0:
-                    direction = "leftLong"
-                elif average_spread_hourly < 0:
-                    direction = "rightLong"
+                direction = projected_direction
+                if direction == "unknown":
+                    # Fallback: keep symbols visible even when threshold model deems edge too weak.
+                    if average_spread_hourly > 0:
+                        direction = "leftLong"
+                    elif average_spread_hourly < 0:
+                        direction = "rightLong"
+                    else:
+                        failures.append({"symbol": symbol_label, "reason": "当前资金费率差接近中性"})
+                        return
+                    conservative_hourly_decimal = abs(average_spread_hourly) / 100.0
+                    total_decimal = conservative_hourly_decimal
+                    annualized_decimal = conservative_hourly_decimal * PREDICTION_HOURS_PER_YEAR
+                    predicted_spread_24h = abs(average_spread_hourly) * PREDICTION_FORECAST_HOURS
 
                 raw_entries.append(
                     {
@@ -1931,53 +1904,97 @@ def _compute_price_volatility_24h_pct(
     return per_step_vol * math.sqrt(steps_per_24h) * 100.0
 
 
-def _compute_run_until_unprofitable_metrics(
-    average_spread_hourly: float,
+def _compute_theta_reversal_apr_metrics(
     spread_samples: list[float],
-) -> tuple[float, float, float]:
+    spread_times_ms: list[int],
+    left_max_leverage: float | None,
+    right_max_leverage: float | None,
+) -> tuple[float, float, float, str]:
     """
-    Estimate return profile for: enter on current favorable direction, hold until spread loses sign.
+    Funding spread APR projection with net-threshold + reversal probability.
     Returns:
     - predicted_spread_24h (%)
-    - total_decimal (expected cycle return as decimal)
-    - annualized_decimal (cycle return / cycle time annualized)
+    - total_decimal (expected cumulative return over projected hold, decimal on notional)
+    - annualized_decimal (APR decimal on margin usage)
+    - direction (leftLong/rightLong/unknown)
     """
-    if not spread_samples or not math.isfinite(average_spread_hourly) or average_spread_hourly == 0:
-        return 0.0, 0.0, 0.0
+    if len(spread_samples) < 2:
+        return 0.0, 0.0, 0.0, "unknown"
 
-    current_sign = 1 if average_spread_hourly > 0 else -1
-    runs: list[tuple[int, float]] = []
-    run_hours = 0
-    run_abs_sum_pct = 0.0
+    latest_spread = spread_samples[-1]
+    if not math.isfinite(latest_spread):
+        return 0.0, 0.0, 0.0, "unknown"
 
-    for spread in spread_samples:
-        if not math.isfinite(spread) or spread == 0:
+    step_days = _estimate_average_step_days(spread_times_ms)
+    if step_days <= 0:
+        step_days = 1.0 / 24.0
+
+    # A-layer: EWMA forecast for future spread drift
+    pred = spread_samples[0]
+    for spread in spread_samples[1:]:
+        pred = (1.0 - PREDICTION_EWMA_LAMBDA) * spread + PREDICTION_EWMA_LAMBDA * pred
+
+    # B-layer: rolling stats and dynamic threshold
+    window = spread_samples[-min(len(spread_samples), 30 * 24):]
+    mu = sum(window) / len(window)
+    sigma = max(_compute_stddev(window), PREDICTION_MIN_SIGMA)
+    theta = PREDICTION_ROUND_TRIP_FEE_PCT + PREDICTION_RISK_ALPHA * sigma
+
+    direction = "unknown"
+    dir_sign = 0
+    if latest_spread > theta:
+        direction = "leftLong"
+        dir_sign = 1
+    elif latest_spread < -theta:
+        direction = "rightLong"
+        dir_sign = -1
+    if dir_sign == 0:
+        return 0.0, 0.0, 0.0, direction
+
+    z = (latest_spread - mu) / sigma
+    ds = spread_samples[-1] - spread_samples[-2]
+
+    p = PREDICTION_REVERSAL_BASE_PROB
+    p += 0.15 * abs(z)
+    p += 0.20 * max(0.0, -ds * dir_sign)
+    p = min(max(p, 0.01), 0.90)
+
+    survival = 1.0
+    expected_holding_steps = 0.0
+    expected_return_pct = 0.0
+    periods_per_24h = max(1.0 / (24.0 * step_days), 1e-6)
+    pred_future = pred
+    predicted_spread_24h = pred_future * periods_per_24h * dir_sign
+
+    for _ in range(PREDICTION_SURVIVAL_MAX_STEPS):
+        survival *= (1.0 - p)
+        expected_holding_steps += survival
+        expected_return_pct += survival * (pred_future * dir_sign)
+
+    holding_days = max(expected_holding_steps * step_days, PREDICTION_MIN_SIGMA)
+    total_decimal = max(expected_return_pct, 0.0) / 100.0
+
+    left_lev = left_max_leverage if left_max_leverage and left_max_leverage > 0 else 1.0
+    right_lev = right_max_leverage if right_max_leverage and right_max_leverage > 0 else 1.0
+    margin_usage = (1.0 / left_lev + 1.0 / right_lev) * (1.0 + PREDICTION_MARGIN_BUFFER)
+    margin_usage = max(margin_usage, PREDICTION_MIN_SIGMA)
+    roi = total_decimal / margin_usage
+    annualized_decimal = roi * 365.0 / holding_days
+    return predicted_spread_24h, total_decimal, annualized_decimal, direction
+
+
+def _estimate_average_step_days(times_ms: list[int]) -> float:
+    if len(times_ms) < 2:
+        return 0.0
+    deltas_days: list[float] = []
+    for idx in range(1, len(times_ms)):
+        delta_ms = times_ms[idx] - times_ms[idx - 1]
+        if delta_ms <= 0:
             continue
-        sign = 1 if spread > 0 else -1
-        if sign == current_sign:
-            run_hours += 1
-            run_abs_sum_pct += abs(spread)
-            continue
-        if run_hours > 0:
-            runs.append((run_hours, run_abs_sum_pct))
-            run_hours = 0
-            run_abs_sum_pct = 0.0
-
-    if run_hours > 0:
-        runs.append((run_hours, run_abs_sum_pct))
-
-    if not runs:
-        run_hours = 1
-        run_abs_sum_pct = abs(average_spread_hourly)
-    else:
-        run_hours = max(int(round(sum(hours for hours, _ in runs) / len(runs))), 1)
-        run_abs_sum_pct = max(sum(abs_sum for _, abs_sum in runs) / len(runs), 0.0)
-
-    cycle_return_decimal = run_abs_sum_pct / 100.0
-    average_hourly_decimal = cycle_return_decimal / run_hours if run_hours > 0 else 0.0
-    annualized_decimal = average_hourly_decimal * PREDICTION_HOURS_PER_YEAR
-    predicted_spread_24h = average_hourly_decimal * 100.0 * PREDICTION_FORECAST_HOURS
-    return predicted_spread_24h, cycle_return_decimal, annualized_decimal
+        deltas_days.append(delta_ms / (24 * 60 * 60 * 1000))
+    if not deltas_days:
+        return 0.0
+    return sum(deltas_days) / len(deltas_days)
 
 
 def _compute_spread_acceptance_score(
