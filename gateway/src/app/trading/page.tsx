@@ -852,6 +852,8 @@ function TradingPageContent() {
       avoid_adverse_spread: activeSubscription.avoid_adverse_spread ?? false,
       liquidation_guard_enabled: activeSubscription.liquidation_guard_enabled ?? false,
       liquidation_guard_threshold_pct: activeSubscription.liquidation_guard_threshold_pct ?? null,
+      drawdown_guard_enabled: activeSubscription.drawdown_guard_enabled ?? false,
+      drawdown_guard_threshold_pct: activeSubscription.drawdown_guard_threshold_pct ?? null,
     });
     if (!openResult.ok) {
       setArbStatus("error");

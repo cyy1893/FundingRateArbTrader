@@ -97,6 +97,7 @@ _prediction_job_lock = asyncio.Lock()
 SETTLEMENT_GUARD_WINDOW_MINUTES = 5
 SETTLEMENT_GUARD_CHECK_INTERVAL_SECONDS = 15
 LIQUIDATION_GUARD_CHECK_INTERVAL_SECONDS = 60
+DEFAULT_DRAWDOWN_CLOSE_THRESHOLD_PCT = 50.0
 
 
 @asynccontextmanager
@@ -106,6 +107,7 @@ async def lifespan(app: FastAPI):
     workers.append(asyncio.create_task(auto_close_worker()))
     workers.append(asyncio.create_task(funding_settlement_guard_worker()))
     workers.append(asyncio.create_task(liquidation_guard_worker()))
+    workers.append(asyncio.create_task(drawdown_guard_worker()))
     try:
         yield
     finally:
@@ -236,6 +238,57 @@ def _funding_sign_for_side(side: str) -> float:
     if normalized == "sell":
         return 1.0
     return 0.0
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_drawdown_threshold_pct(position: ArbPosition, task_threshold_pct: float | None = None) -> float:
+    if task_threshold_pct is not None and task_threshold_pct > 0:
+        return float(task_threshold_pct)
+    meta = position.meta if isinstance(position.meta, dict) else {}
+    candidate = _safe_float(meta.get("drawdown_guard_threshold_pct"))
+    if candidate is not None and candidate > 0:
+        return candidate
+    return DEFAULT_DRAWDOWN_CLOSE_THRESHOLD_PCT
+
+
+def _update_drawdown_state(position: ArbPosition, net_unrealized: float) -> tuple[float, float, float]:
+    """
+    Update running peak PnL and current drawdown metrics on position.meta.
+    """
+    if position.notional <= 0:
+        return 0.0, max(net_unrealized, 0.0), net_unrealized
+
+    meta = dict(position.meta or {})
+    state = dict(meta.get("drawdown_guard_state") or {})
+    previous_peak = _safe_float(state.get("peak_unrealized_pnl"))
+    peak_unrealized = max(previous_peak if previous_peak is not None else 0.0, net_unrealized, 0.0)
+    drawdown_value = max(0.0, peak_unrealized - net_unrealized)
+    drawdown_ratio_pct = drawdown_value / position.notional * 100.0
+    now_iso = datetime.utcnow().isoformat()
+
+    state.update(
+        {
+            "peak_unrealized_pnl": peak_unrealized,
+            "latest_unrealized_pnl": net_unrealized,
+            "drawdown_value": drawdown_value,
+            "drawdown_ratio_pct": drawdown_ratio_pct,
+            "last_updated_at": now_iso,
+            "peak_updated_at": now_iso
+            if previous_peak is None or peak_unrealized > previous_peak
+            else state.get("peak_updated_at"),
+        }
+    )
+    meta["drawdown_guard_state"] = state
+    position.meta = meta
+    return drawdown_ratio_pct, peak_unrealized, net_unrealized
 
 
 def _normalized_symbol_candidates(symbol: str) -> set[str]:
@@ -463,6 +516,29 @@ async def funding_settlement_guard_worker() -> None:
                 if expected_hourly_pnl > 0:
                     continue
 
+                meta = position.meta if isinstance(position.meta, dict) else {}
+                if not bool(meta.get("drawdown_guard_enabled")):
+                    continue
+                drawdown_threshold_pct = _resolve_drawdown_threshold_pct(position)
+                guard_state = (
+                    position.meta.get("drawdown_guard_state")
+                    if isinstance(position.meta, dict)
+                    else None
+                )
+                drawdown_ratio_pct = _safe_float(
+                    guard_state.get("drawdown_ratio_pct") if isinstance(guard_state, dict) else None
+                )
+                if drawdown_ratio_pct is None or drawdown_ratio_pct < drawdown_threshold_pct:
+                    logging.info(
+                        "settlement guard skipped close position_id=%s symbol=%s hourly_pnl=%s drawdown=%.4f%% threshold=%.4f%%",
+                        position.id,
+                        position.symbol,
+                        expected_hourly_pnl,
+                        drawdown_ratio_pct or 0.0,
+                        drawdown_threshold_pct,
+                    )
+                    continue
+
                 close_result = await _close_position_with_reduce_only_orders(position.id)
                 if close_result["failed_reasons"]:
                     logging.warning(
@@ -473,10 +549,12 @@ async def funding_settlement_guard_worker() -> None:
                     )
                 else:
                     logging.info(
-                        "settlement guard close triggered position_id=%s symbol=%s pnl_estimate=%s",
+                        "settlement guard close triggered position_id=%s symbol=%s pnl_estimate=%s drawdown=%.4f%% threshold=%.4f%%",
                         position.id,
                         position.symbol,
                         expected_hourly_pnl,
+                        drawdown_ratio_pct or 0.0,
+                        drawdown_threshold_pct,
                     )
 
 
@@ -572,7 +650,6 @@ async def liquidation_guard_worker() -> None:
             grvt_unrealized = grvt_position.unrealized_pnl if grvt_position else 0.0
             net_unrealized = lighter_unrealized + grvt_unrealized
             pnl_ratio_pct = abs(net_unrealized) / position.notional * 100.0
-
             if pnl_ratio_pct < threshold_pct:
                 continue
 
@@ -596,6 +673,126 @@ async def liquidation_guard_worker() -> None:
                     )
                     session.add(db_task)
                     session.commit()
+
+
+async def drawdown_guard_worker() -> None:
+    engine = get_engine()
+    while True:
+        await asyncio.sleep(LIQUIDATION_GUARD_CHECK_INTERVAL_SECONDS)
+        with Session(engine) as session:
+            positions = session.exec(
+                select(ArbPosition)
+                .where(ArbPosition.deleted_at.is_(None))
+                .where(
+                    ArbPosition.status.in_(
+                        [
+                            ArbPositionStatus.pending,
+                            ArbPositionStatus.partially_filled,
+                            ArbPositionStatus.hedged,
+                        ]
+                    )
+                )
+            ).all()
+
+        drawdown_positions = []
+        for position in positions:
+            meta = position.meta if isinstance(position.meta, dict) else {}
+            if bool(meta.get("drawdown_guard_enabled")):
+                drawdown_positions.append(position)
+        if not drawdown_positions:
+            continue
+
+        snapshot_by_user: dict[UUID, tuple[Any, Any]] = {}
+        for position in drawdown_positions:
+            if position.notional <= 0:
+                continue
+            try:
+                snapshots = snapshot_by_user.get(position.user_id)
+                if snapshots is None:
+                    with Session(engine) as session:
+                        user = session.get(User, position.user_id)
+                        if user is None:
+                            continue
+                        lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(
+                            session,
+                            user,
+                        )
+                        grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(
+                            session,
+                            user,
+                        )
+                    snapshots = await asyncio.gather(
+                        lighter_service.get_balances_with_credentials(
+                            lighter_account_index,
+                            lighter_api_key_index,
+                            lighter_private_key,
+                        ),
+                        grvt_service.get_balances_with_credentials(
+                            grvt_api_key,
+                            grvt_private_key,
+                            grvt_trading_account_id,
+                        ),
+                    )
+                    snapshot_by_user[position.user_id] = (snapshots[0], snapshots[1])
+                lighter_snapshot, grvt_snapshot = snapshots
+            except Exception as exc:  # noqa: BLE001
+                logging.warning(
+                    "drawdown guard snapshot failed position_id=%s error=%s",
+                    position.id,
+                    exc,
+                )
+                continue
+
+            symbol = (position.symbol or "").upper()
+            lighter_position = next(
+                (pos for pos in lighter_snapshot.positions if pos.symbol.upper() in _normalized_symbol_candidates(symbol)),
+                None,
+            )
+            grvt_position = next(
+                (
+                    pos
+                    for pos in grvt_snapshot.positions
+                    if _match_grvt_position_symbol(symbol, pos.instrument)
+                ),
+                None,
+            )
+            lighter_unrealized = lighter_position.unrealized_pnl if lighter_position else 0.0
+            grvt_unrealized = grvt_position.unrealized_pnl if grvt_position else 0.0
+            net_unrealized = lighter_unrealized + grvt_unrealized
+            drawdown_ratio_pct, peak_unrealized, current_unrealized = _update_drawdown_state(position, net_unrealized)
+
+            with Session(engine) as session:
+                db_position = session.get(ArbPosition, position.id)
+                if db_position is not None and db_position.status in {
+                    ArbPositionStatus.pending,
+                    ArbPositionStatus.partially_filled,
+                    ArbPositionStatus.hedged,
+                }:
+                    db_position.meta = position.meta
+                    db_position.updated_at = datetime.utcnow()
+                    session.add(db_position)
+                    session.commit()
+
+            threshold_pct = _resolve_drawdown_threshold_pct(position)
+            if drawdown_ratio_pct < threshold_pct:
+                continue
+
+            close_result = await _close_position_with_reduce_only_orders(position.id)
+            if close_result["failed_reasons"]:
+                logging.warning(
+                    "drawdown guard close failed position_id=%s reasons=%s",
+                    position.id,
+                    close_result["failed_reasons"],
+                )
+            else:
+                logging.info(
+                    "drawdown guard close triggered position_id=%s drawdown=%.2f%% threshold=%.2f%% peak=%.4f current=%.4f",
+                    position.id,
+                    drawdown_ratio_pct,
+                    threshold_pct,
+                    peak_unrealized,
+                    current_unrealized,
+                )
 
 
 def get_current_user(

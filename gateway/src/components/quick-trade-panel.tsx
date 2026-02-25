@@ -221,6 +221,8 @@ export function QuickTradePanel({
   const [avoidAdverseSpread, setAvoidAdverseSpread] = useState(true);
   const [liquidationGuardEnabled, setLiquidationGuardEnabled] = useState(true);
   const [liquidationGuardPct, setLiquidationGuardPct] = useState("50");
+  const [drawdownGuardEnabled, setDrawdownGuardEnabled] = useState(true);
+  const [drawdownGuardPct, setDrawdownGuardPct] = useState("20");
 
   const hasSymbols = availableSymbols.length > 0;
   const symbolKey = symbol.trim().toUpperCase();
@@ -274,6 +276,10 @@ export function QuickTradePanel({
   const liquidationGuardThresholdPct = Number.isFinite(parsedLiquidationPct)
     ? Math.min(100, Math.max(1, parsedLiquidationPct))
     : 50;
+  const parsedDrawdownPct = Number(drawdownGuardPct);
+  const drawdownGuardThresholdPct = Number.isFinite(parsedDrawdownPct)
+    ? Math.min(100, Math.max(1, parsedDrawdownPct))
+    : 20;
   const selectedSymbol = useMemo(
     () => availableSymbols.find((option) => option.symbol === symbol),
     [availableSymbols, symbol],
@@ -293,6 +299,8 @@ export function QuickTradePanel({
         avoid_adverse_spread: avoidAdverseSpread,
         liquidation_guard_enabled: liquidationGuardEnabled,
         liquidation_guard_threshold_pct: liquidationGuardThresholdPct,
+        drawdown_guard_enabled: drawdownGuardEnabled,
+        drawdown_guard_threshold_pct: drawdownGuardThresholdPct,
       } : null);
       onNotionalReady(false);
       return;
@@ -310,6 +318,8 @@ export function QuickTradePanel({
       avoid_adverse_spread: avoidAdverseSpread,
       liquidation_guard_enabled: liquidationGuardEnabled,
       liquidation_guard_threshold_pct: liquidationGuardThresholdPct,
+      drawdown_guard_enabled: drawdownGuardEnabled,
+      drawdown_guard_threshold_pct: drawdownGuardThresholdPct,
     };
 
     onConfigChange(sub);
@@ -324,6 +334,8 @@ export function QuickTradePanel({
     avoidAdverseSpread,
     liquidationGuardEnabled,
     liquidationGuardThresholdPct,
+    drawdownGuardEnabled,
+    drawdownGuardThresholdPct,
     onConfigChange,
     onNotionalReady,
   ]);
@@ -535,6 +547,29 @@ export function QuickTradePanel({
                   max="100"
                   value={liquidationGuardPct}
                   onChange={(e) => setLiquidationGuardPct(e.target.value)}
+                  className="h-6 w-12 border-slate-200 text-[10px] font-black p-1 text-center"
+                />
+                <span className="text-[9px] font-bold text-slate-400">%</span>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1.5 py-1">
+            <div className="flex items-center justify-between cursor-pointer" onClick={() => setDrawdownGuardEnabled(!drawdownGuardEnabled)}>
+              <span className="text-[11px] font-bold text-slate-700">回撤自动平仓</span>
+              <div className={cn("h-4 w-7 rounded-full transition-colors relative", drawdownGuardEnabled ? "bg-primary" : "bg-slate-200")}>
+                <div className={cn("absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform", drawdownGuardEnabled && "translate-x-3")} />
+              </div>
+            </div>
+            {drawdownGuardEnabled && (
+              <div className="flex items-center gap-2 bg-slate-50 px-2 py-1.5 rounded border border-slate-100 animate-in slide-in-from-top-1">
+                <span className="text-[9px] font-bold text-slate-400 uppercase">阈值</span>
+                <Input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={drawdownGuardPct}
+                  onChange={(e) => setDrawdownGuardPct(e.target.value)}
                   className="h-6 w-12 border-slate-200 text-[10px] font-black p-1 text-center"
                 />
                 <span className="text-[9px] font-bold text-slate-400">%</span>

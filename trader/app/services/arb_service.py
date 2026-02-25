@@ -34,6 +34,8 @@ class ArbService:
                 "auto_close_after_ms": request.auto_close_after_ms,
                 "liquidation_guard_enabled": request.liquidation_guard_enabled,
                 "liquidation_guard_threshold_pct": request.liquidation_guard_threshold_pct,
+                "drawdown_guard_enabled": request.drawdown_guard_enabled,
+                "drawdown_guard_threshold_pct": request.drawdown_guard_threshold_pct,
             },
         )
         self._session.add(position)

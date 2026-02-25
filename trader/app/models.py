@@ -210,6 +210,10 @@ class OrderBookSubscription(BaseModel):
     liquidation_guard_threshold_pct: Optional[float] = Field(
         None, gt=0, le=100, description="PnL percentage threshold for liquidation guard"
     )
+    drawdown_guard_enabled: bool = Field(False, description="Enable drawdown-based auto close")
+    drawdown_guard_threshold_pct: Optional[float] = Field(
+        None, gt=0, le=100, description="Drawdown percentage threshold for auto close"
+    )
 
 
 class GrvtOrderRequest(BaseModel):
@@ -439,6 +443,8 @@ class ArbOpenRequest(BaseModel):
     auto_close_after_ms: int | None = Field(None, ge=0)
     liquidation_guard_enabled: bool = False
     liquidation_guard_threshold_pct: float | None = Field(None, gt=0, le=100)
+    drawdown_guard_enabled: bool = False
+    drawdown_guard_threshold_pct: float | None = Field(None, gt=0, le=100)
     meta: dict | None = None
 
 

@@ -57,6 +57,8 @@ export type OrderBookSubscription = {
   auto_close_after_ms?: number;
   liquidation_guard_enabled?: boolean;
   liquidation_guard_threshold_pct?: number;
+  drawdown_guard_enabled?: boolean;
+  drawdown_guard_threshold_pct?: number;
 };
 
 export type WebSocketStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
