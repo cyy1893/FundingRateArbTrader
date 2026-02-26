@@ -1642,25 +1642,20 @@ class MarketDataService:
         if self._lighter_leverage_map is not None:
             return self._lighter_leverage_map
 
-        url = "https://docs.lighter.xyz/trading/contract-specifications.md"
-        overrides: dict[str, float] = {
-            "MON": 5,
-            "WLFI": 5,
-            "SKY": 3,
-            "MEGA": 3,
-            "KPEPE": 10,
-            "KSHIB": 10,
-            "KBONK": 10,
-        }
+        leverage_map: dict[str, float] = {}
+
+        # Use exchange API data only: leverage is derived from min initial margin fraction.
         try:
-            response = await self._client.get(url)
+            response = await self._client.get(f"{self._lighter_base_url}/api/v1/orderBookDetails")
             response.raise_for_status()
-            markdown = response.text
-            leverage_map = _parse_lighter_leverage_markdown(markdown, overrides)
-            self._lighter_leverage_map = leverage_map
-            return leverage_map
-        except Exception:  # noqa: BLE001
-            return overrides
+            payload = response.json()
+            if isinstance(payload, dict):
+                leverage_map.update(_parse_lighter_leverage_order_book_details(payload))
+        except Exception:
+            pass
+
+        self._lighter_leverage_map = leverage_map
+        return leverage_map
 
     def _build_grvt_endpoints(self, env: str) -> tuple[str, str]:
         env_lower = env.lower()
@@ -1682,34 +1677,57 @@ class MarketDataService:
         return base, trade_base
 
 
-def _parse_lighter_leverage_markdown(markdown: str, overrides: dict[str, float]) -> dict[str, float]:
+def _parse_lighter_leverage_order_book_details(payload: dict[str, Any]) -> dict[str, float]:
     leverage_map: dict[str, float] = {}
-    # Apply overrides first
-    for sym, lev in overrides.items():
-        leverage_map[sym] = lev
-        leverage_map[f"{sym}-PERP"] = lev
+    raw_entries = payload.get("order_book_details")
+    if not isinstance(raw_entries, list):
+        return leverage_map
 
-    row_regex = re.compile(r"<tr>(.*?)</tr>", re.S)
-    cell_regex = re.compile(r"<td[^>]*>(.*?)</td>", re.S)
-    for row_match in row_regex.finditer(markdown):
-        cells = [re.sub(r"<[^>]+>", " ", c).replace("&nbsp;", " ").strip() for c in cell_regex.findall(row_match.group(1))]
-        if len(cells) < 4:
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
             continue
-        symbol = cells[0].strip().upper()
-        leverage_raw = cells[3].strip()
-        if not symbol or symbol in {"SYMBOL", "LEVERAGE"}:
+        market_type = str(entry.get("market_type") or "").lower()
+        if market_type and market_type != "perp":
             continue
-        lev_match = re.search(r"([\d.]+)\s*x", leverage_raw, re.I)
-        if not lev_match:
+        symbol = str(entry.get("symbol") or "").strip().upper()
+        if not symbol:
             continue
-        try:
-            value = float(lev_match.group(1))
-        except Exception:
+
+        imr_fraction = _parse_float(entry.get("min_initial_margin_fraction"))
+        if imr_fraction is None or imr_fraction <= 0:
+            imr_fraction = _parse_float(entry.get("default_initial_margin_fraction"))
+        if imr_fraction is None or imr_fraction <= 0:
             continue
-        if math.isfinite(value):
-            leverage_map[symbol] = value
-            leverage_map[f"{symbol}-PERP"] = value
+
+        # Use floor to keep leverage conservative and display-friendly (e.g. 15.015 -> 15).
+        leverage = math.floor((10000.0 / imr_fraction) + 1e-12)
+        if leverage > 0:
+            _upsert_lighter_leverage(leverage_map, symbol, leverage)
+
     return leverage_map
+
+
+def _upsert_lighter_leverage(leverage_map: dict[str, float], symbol: str, leverage: float) -> None:
+    normalized_symbol = (symbol or "").strip().upper()
+    if not normalized_symbol:
+        return
+    if not math.isfinite(leverage) or leverage <= 0:
+        return
+
+    candidates = {
+        normalized_symbol,
+        f"{normalized_symbol}-PERP",
+        _normalize_derivatives_base(normalized_symbol),
+    }
+    if "/" in normalized_symbol:
+        base_symbol = _normalize_base_symbol(normalized_symbol.split("/", maxsplit=1)[0])
+        if base_symbol:
+            candidates.add(base_symbol)
+            candidates.add(f"{base_symbol}-PERP")
+
+    for candidate in candidates:
+        if candidate:
+            leverage_map[candidate] = leverage
 
 
 def _extract_best_bid_ask(payload: dict[str, Any]) -> tuple[float | None, float | None]:
