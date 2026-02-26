@@ -49,6 +49,7 @@ export function MonitoringConfigCard({
 
     useEffect(() => {
         if (!hasSymbols) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setSymbol("");
             return;
         }

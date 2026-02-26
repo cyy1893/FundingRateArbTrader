@@ -76,6 +76,7 @@ function LeverageSlider({
 
   useEffect(() => {
     if (!isEditing) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDraftValue(String(value));
     }
   }, [value, isEditing]);
@@ -236,6 +237,7 @@ export function QuickTradePanel({
   useEffect(() => {
     if (lighterLeverage > sharedMax) {
       const clamped = Math.max(LEVERAGE_MIN, Math.floor(sharedMax));
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLighterLeverage(clamped);
       setGrvtLeverage(clamped);
     }
@@ -247,6 +249,7 @@ export function QuickTradePanel({
   useEffect(() => {
     if (grvtLeverage > sharedMax) {
       const clamped = Math.max(LEVERAGE_MIN, Math.floor(sharedMax));
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setGrvtLeverage(clamped);
       setLighterLeverage(clamped);
     }

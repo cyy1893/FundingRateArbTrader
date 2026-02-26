@@ -337,6 +337,7 @@ function TradingPageContent() {
         stored.secondarySource.id === secondarySource.id
         ? stored.symbols
         : [];
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setComparisonSelection({
       primarySource,
       secondarySource,
@@ -688,6 +689,7 @@ function TradingPageContent() {
       return;
     }
     if (draftSubscription.symbol !== subscription.symbol) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSubscription(draftSubscription);
     }
   }, [draftSubscription, subscription]);

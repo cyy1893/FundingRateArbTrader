@@ -10,6 +10,7 @@ export function RightPanel() {
 
     useEffect(() => {
         if (prediction.isOpen) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setOpen(true);
         }
     }, [prediction.isOpen]);

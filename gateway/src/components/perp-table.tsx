@@ -83,6 +83,7 @@ const DEFAULT_PAGE_SIZE = 15;
 const FETCH_INTERVAL_MS = 15000;
 const SORT_REFRESH_CACHE_MS = 5000;
 const DISPLAY_FUNDING_PERIOD_HOURS = 1;
+const MIN_EXCHANGE_VOLUME_USD = 100_000;
 
 type SortColumn =
   | "markPrice"
@@ -503,8 +504,11 @@ export function PerpTable({
         const meetsVolume =
           volumeThreshold <= 0 ||
           (leftVolume + externalVolume >= volumeThreshold);
+        const meetsPerExchangeMinimum =
+          leftVolume >= MIN_EXCHANGE_VOLUME_USD &&
+          externalVolume >= MIN_EXCHANGE_VOLUME_USD;
 
-        return meetsVolume;
+        return meetsVolume && meetsPerExchangeMinimum;
       },
     );
   }, [normalizedSearch, rows, volumeThreshold]);
