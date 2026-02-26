@@ -7,12 +7,29 @@ services:
     image: funding-rate-arb-trader:latest
     container_name: funding-rate-arb-trader
     restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
     env_file:
       - ./trader/.env
+    environment:
+      - LOG_DIR=/tmp/funding-rate-arb-trader
+    expose:
+      - "8080"
     ports:
-      - "8080:8080"
-    volumes:
-      - ./trader/logs:/var/log/funding-rate-arb-trader
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   gateway:
     build:
@@ -22,10 +39,25 @@ services:
     container_name: funding-rate-arb-gateway
     depends_on:
       - trader
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
     environment:
       - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000', (r)=>process.exit(r.statusCode>=200&&r.statusCode<500?0:1)).on('error', ()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   admin:
     profiles: ["admin"]
@@ -36,9 +68,18 @@ services:
     container_name: funding-rate-arb-admin
     depends_on:
       - trader
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
     env_file:
       - ./trader/.env
     environment:
       - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
     ports:
-      - "3002:3000"
+      - "127.0.0.1:3002:3000"

@@ -25,7 +25,12 @@ COPY app ./app
 COPY README.md ./README.md
 COPY docker ./docker
 
-RUN chmod +x docker/entrypoint.sh
+RUN groupadd -g 10001 app \
+    && useradd -u 10001 -g app -m -d /home/app -s /usr/sbin/nologin app \
+    && chown -R app:app /app /opt/venv /home/app \
+    && chmod +x docker/entrypoint.sh
+
+USER app
 
 EXPOSE 8080
 
