@@ -34,6 +34,9 @@ type SymbolCloseResponse = {
     detail?: string | null;
   }>;
 };
+type SymbolCloseResult =
+  | { ok: true; data: SymbolCloseResponse; error: null }
+  | { ok: false; data: unknown; error: string };
 
 type RetryFetchOptions = {
   attempts?: number;
@@ -587,7 +590,7 @@ function TradingPageContent() {
   };
 
   const closeSymbolPositions = useCallback(
-    async (symbol: string, mode: "post_only" | "market") => {
+    async (symbol: string, mode: "post_only" | "market"): Promise<SymbolCloseResult> => {
       const response = await fetch("/api/positions/close", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -644,7 +647,7 @@ function TradingPageContent() {
         return "error";
       }
 
-      const rows = result.data?.results ?? [];
+      const rows: NonNullable<SymbolCloseResponse["results"]> = result.data.results ?? [];
       const successRows = rows.filter((row) => row.success);
       const failedRows = rows.filter((row) => row.attempted && !row.success);
       const hasAttempt = rows.some((row) => row.attempted);

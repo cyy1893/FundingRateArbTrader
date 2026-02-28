@@ -53,7 +53,7 @@ services:
     ports:
       - "3000:3000"
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000', (r)=>process.exit(r.statusCode>=200&&r.statusCode<500?0:1)).on('error', ()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "const h=require('os').hostname();require('http').get('http://'+h+':3000', (r)=>process.exit(r.statusCode>=200&&r.statusCode<500?0:1)).on('error', ()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -83,3 +83,14 @@ services:
       - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
     ports:
       - "127.0.0.1:3002:3000"
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: funding-rate-arb-dozzle
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "127.0.0.1:8088:8080"
