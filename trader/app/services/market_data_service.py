@@ -53,9 +53,8 @@ PREDICTION_REVERSAL_BASE_PROB = 0.05
 PREDICTION_SURVIVAL_MAX_STEPS = 45
 PREDICTION_MARGIN_BUFFER = 0.20
 PREDICTION_MIN_SIGMA = 1e-6
-RECOMMENDATION_APR_WEIGHT = 0.70
-RECOMMENDATION_FUNDING_VOLATILITY_WEIGHT = 0.10
-RECOMMENDATION_PRICE_VOLATILITY_WEIGHT = 0.10
+RECOMMENDATION_APR_WEIGHT = 0.80
+RECOMMENDATION_PRICE_VOLATILITY_WEIGHT = 0.20
 SPREAD_INTOLERABLE_BPS = 15.0
 SPREAD_STEEPNESS_BPS = 1.5
 DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS = 12.0
@@ -903,6 +902,10 @@ class MarketDataService:
                 left_best_ask = _parse_float(row.best_ask)
                 right_best_bid = _parse_float(right_payload.get("best_bid"))
                 right_best_ask = _parse_float(right_payload.get("best_ask"))
+                estimated_price_volatility_24h_pct = _estimate_price_volatility_24h_pct_from_changes(
+                    _parse_float(row.price_change_24h),
+                    _parse_float(right_payload.get("price_change_24h")),
+                )
                 spread_avg = spread_averages.get((row.symbol or row.left_symbol).upper())
                 if spread_avg is not None:
                     left_bid_ask_spread_bps = spread_avg["left"]
@@ -912,7 +915,11 @@ class MarketDataService:
                         "price_volatility_24h_pct",
                         DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
                     )
-                    price_volatility_24h_pct = spread_sample_price_volatility
+                    price_volatility_24h_pct = (
+                        estimated_price_volatility_24h_pct
+                        if estimated_price_volatility_24h_pct is not None
+                        else spread_sample_price_volatility
+                    )
                     left_spread_samples_bps = list(spread_avg.get("left_spread_samples_bps", []))
                     right_spread_samples_bps = list(spread_avg.get("right_spread_samples_bps", []))
                     combined_spread_samples_bps = list(spread_avg.get("combined_spread_samples_bps", []))
@@ -928,7 +935,11 @@ class MarketDataService:
                         default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
                     )
                     combined_bid_ask_spread_bps = left_bid_ask_spread_bps + right_bid_ask_spread_bps
-                    price_volatility_24h_pct = DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT
+                    price_volatility_24h_pct = (
+                        estimated_price_volatility_24h_pct
+                        if estimated_price_volatility_24h_pct is not None
+                        else DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT
+                    )
                     left_spread_samples_bps = [left_bid_ask_spread_bps]
                     right_spread_samples_bps = [right_bid_ask_spread_bps]
                     combined_spread_samples_bps = [combined_bid_ask_spread_bps]
@@ -998,10 +1009,6 @@ class MarketDataService:
         await asyncio.gather(*(_compute_row(row) for row in eligible_rows))
 
         apr_values = [float(entry.get("annualized_decimal") or 0.0) for entry in raw_entries]
-        funding_volatility_values = [
-            float(entry.get("spread_volatility_24h_pct") or 0.0)
-            for entry in raw_entries
-        ]
         price_volatility_values = [
             float(entry.get("price_volatility_24h_pct") or 0.0)
             for entry in raw_entries
@@ -1009,10 +1016,6 @@ class MarketDataService:
         final_entries: list[dict[str, Any]] = []
         for entry in raw_entries:
             apr_norm = _min_max_normalize(float(entry.get("annualized_decimal") or 0.0), apr_values)
-            funding_volatility_norm = _min_max_normalize(
-                float(entry.get("spread_volatility_24h_pct") or 0.0),
-                funding_volatility_values,
-            )
             price_volatility_norm = _min_max_normalize(
                 float(entry.get("price_volatility_24h_pct") or 0.0),
                 price_volatility_values,
@@ -1026,7 +1029,6 @@ class MarketDataService:
             spread_acceptance_score = left_spread_acceptance_score * right_spread_acceptance_score
             core_score = (
                 RECOMMENDATION_APR_WEIGHT * apr_norm
-                + RECOMMENDATION_FUNDING_VOLATILITY_WEIGHT * (1.0 - funding_volatility_norm)
                 + RECOMMENDATION_PRICE_VOLATILITY_WEIGHT * (1.0 - price_volatility_norm)
             )
             score = core_score * spread_acceptance_score * 100.0
@@ -1920,6 +1922,20 @@ def _compute_price_volatility_24h_pct(
     per_step_vol = _compute_stddev(returns)
     steps_per_24h = (24 * 60 * 60) / max(interval_seconds, 1)
     return per_step_vol * math.sqrt(steps_per_24h) * 100.0
+
+
+def _estimate_price_volatility_24h_pct_from_changes(
+    left_change_24h: float | None,
+    right_change_24h: float | None,
+) -> float | None:
+    values: list[float] = []
+    for raw in (left_change_24h, right_change_24h):
+        if raw is None or not math.isfinite(raw):
+            continue
+        values.append(abs(raw))
+    if not values:
+        return None
+    return sum(values) / len(values)
 
 
 def _compute_theta_reversal_apr_metrics(
