@@ -524,22 +524,32 @@ export function QuickTradePanel({
 
         {/* Risk Management - Flatter Group */}
         <div className="space-y-2 pt-2 border-t border-slate-100">
-          <div className="flex items-center justify-between py-1 group cursor-pointer" onClick={() => setAvoidAdverseSpread(!avoidAdverseSpread)}>
-            <div className="flex flex-col">
+          <div className="flex items-start gap-2.5 py-1">
+            <input
+              id="avoid-adverse-spread"
+              type="checkbox"
+              checked={avoidAdverseSpread}
+              onChange={(e) => setAvoidAdverseSpread(e.target.checked)}
+              className="mt-0.5 h-4 w-4 cursor-pointer rounded border-slate-300 accent-primary"
+            />
+            <label htmlFor="avoid-adverse-spread" className="flex cursor-pointer flex-col">
               <span className="text-[11px] font-bold text-slate-700">避免不利价差</span>
               <span className="text-[9px] text-slate-400">阻止偏差超过阈值的成交</span>
-            </div>
-            <div className={cn("h-4 w-7 rounded-full transition-colors relative", avoidAdverseSpread ? "bg-primary" : "bg-slate-200")}>
-              <div className={cn("absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform", avoidAdverseSpread && "translate-x-3")} />
-            </div>
+            </label>
           </div>
 
           <div className="space-y-1.5 py-1">
-            <div className="flex items-center justify-between cursor-pointer" onClick={() => setLiquidationGuardEnabled(!liquidationGuardEnabled)}>
-              <span className="text-[11px] font-bold text-slate-700">风控保护 (L/G)</span>
-              <div className={cn("h-4 w-7 rounded-full transition-colors relative", liquidationGuardEnabled ? "bg-primary" : "bg-slate-200")}>
-                <div className={cn("absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform", liquidationGuardEnabled && "translate-x-3")} />
-              </div>
+            <div className="flex items-center gap-2.5">
+              <input
+                id="liquidation-guard"
+                type="checkbox"
+                checked={liquidationGuardEnabled}
+                onChange={(e) => setLiquidationGuardEnabled(e.target.checked)}
+                className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-primary"
+              />
+              <label htmlFor="liquidation-guard" className="cursor-pointer text-[11px] font-bold text-slate-700">
+                风控保护 (L/G)
+              </label>
             </div>
             {liquidationGuardEnabled && (
               <div className="flex items-center gap-2 bg-slate-50 px-2 py-1.5 rounded border border-slate-100 animate-in slide-in-from-top-1">
@@ -558,11 +568,17 @@ export function QuickTradePanel({
           </div>
 
           <div className="space-y-1.5 py-1">
-            <div className="flex items-center justify-between cursor-pointer" onClick={() => setDrawdownGuardEnabled(!drawdownGuardEnabled)}>
-              <span className="text-[11px] font-bold text-slate-700">回撤自动平仓</span>
-              <div className={cn("h-4 w-7 rounded-full transition-colors relative", drawdownGuardEnabled ? "bg-primary" : "bg-slate-200")}>
-                <div className={cn("absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform", drawdownGuardEnabled && "translate-x-3")} />
-              </div>
+            <div className="flex items-center gap-2.5">
+              <input
+                id="drawdown-guard"
+                type="checkbox"
+                checked={drawdownGuardEnabled}
+                onChange={(e) => setDrawdownGuardEnabled(e.target.checked)}
+                className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-primary"
+              />
+              <label htmlFor="drawdown-guard" className="cursor-pointer text-[11px] font-bold text-slate-700">
+                回撤自动平仓
+              </label>
             </div>
             {drawdownGuardEnabled && (
               <div className="flex items-center gap-2 bg-slate-50 px-2 py-1.5 rounded border border-slate-100 animate-in slide-in-from-top-1">

@@ -293,7 +293,7 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
     <div className="space-y-4">
       <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
         <div>
-          注：预测年化 APR 采用“沿当前有利方向持有，直到不再盈利”为口径；评分偏好高 APR、低资金费率波动、低价格波动、低点差。仅显示 {payload.metadata.volumeLabel} 的币种。
+          注：预测年化 APR 采用“沿当前有利方向持有，直到不再盈利”为口径；评分偏好高 APR、低价格波动、低点差。“建议建仓时机”仅用于提示，不参与综合分。仅显示 {payload.metadata.volumeLabel} 的币种。
         </div>
         {payload.failures.length > 0 ? (
           <div className="mt-2">
@@ -301,13 +301,14 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
           </div>
         ) : null}
       </div>
-      <Table>
+      <div className="overflow-x-auto">
+      <Table className="whitespace-nowrap">
         <TableHeader>
           <TableRow className="text-[11px] uppercase tracking-wide text-muted-foreground">
             <TableHead>币种</TableHead>
             <TableHead>方向</TableHead>
+            <TableHead className="text-right">建议建仓时机</TableHead>
             <TableHead className="text-right">预测年化 APR</TableHead>
-            <TableHead className="text-right">资金费率波动率(24h)</TableHead>
             <TableHead className="text-right">价格波动率(24h估算)</TableHead>
             <TableHead className="text-right">点差(Lighter)</TableHead>
             <TableHead className="text-right">点差(GRVT)</TableHead>
@@ -324,11 +325,11 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
               <TableCell className="text-xs">
                 {renderDirection(entry, payload.metadata)}
               </TableCell>
+              <TableCell className="text-right text-xs font-medium text-foreground">
+                {entry.entryTimingAdvice}
+              </TableCell>
               <TableCell className="text-right font-semibold text-primary">
                 {formatDecimalPercent(entry.annualizedDecimal)}
-              </TableCell>
-              <TableCell className="text-right text-sm font-medium">
-                {formatPercent(entry.spreadVolatility24hPct)}
               </TableCell>
               <TableCell className="text-right text-sm font-medium">
                 {formatPercent(entry.priceVolatility24hPct)}
@@ -357,6 +358,7 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
           ))}
         </TableBody>
       </Table>
+      </div>
     </div>
   );
 }

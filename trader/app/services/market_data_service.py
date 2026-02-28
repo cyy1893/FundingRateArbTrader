@@ -994,6 +994,14 @@ class MarketDataService:
                         "combined_spread_samples_bps": combined_spread_samples_bps,
                         "sample_count": spread_count,
                         "direction": direction,
+                        **_build_entry_timing_advice(
+                            direction=direction,
+                            average_left_hourly=average_left_hourly,
+                            average_right_hourly=average_right_hourly,
+                            left_period_hours=_parse_float(row.left_funding_period_hours),
+                            right_period_hours=_parse_float(right_payload.get("funding_period_hours")),
+                            fetched_at=fetched_at,
+                        ),
                     }
                 )
 
@@ -1936,6 +1944,95 @@ def _estimate_price_volatility_24h_pct_from_changes(
     if not values:
         return None
     return sum(values) / len(values)
+
+
+def _build_entry_timing_advice(
+    direction: str,
+    average_left_hourly: float | None,
+    average_right_hourly: float | None,
+    left_period_hours: float | None,
+    right_period_hours: float | None,
+    fetched_at: datetime | None,
+) -> dict[str, float | str]:
+    default = {
+        "entry_timing_wait_hours": 0.0,
+        "entry_timing_advice": "当前小时",
+    }
+    if direction not in {"leftLong", "rightLong"}:
+        return default
+    if fetched_at is None:
+        return default
+    if average_left_hourly is None or average_right_hourly is None:
+        return default
+
+    left_period = left_period_hours if left_period_hours and left_period_hours > 0 else 1.0
+    right_period = right_period_hours if right_period_hours and right_period_hours > 0 else 1.0
+
+    if direction == "leftLong":
+        left_leg_hourly = -average_left_hourly
+        right_leg_hourly = average_right_hourly
+    else:
+        left_leg_hourly = average_left_hourly
+        right_leg_hourly = -average_right_hourly
+
+    left_wait = _hours_until_next_settlement(fetched_at, left_period)
+    right_wait = _hours_until_next_settlement(fetched_at, right_period)
+
+    def _format_wait(wait_hours: float) -> float:
+        if wait_hours < 0:
+            return 0.0
+        return round(wait_hours, 1)
+
+    if left_wait < right_wait:
+        first_settlement_pnl_pct = left_leg_hourly * left_period
+    elif right_wait < left_wait:
+        first_settlement_pnl_pct = right_leg_hourly * right_period
+    else:
+        first_settlement_pnl_pct = left_leg_hourly * left_period + right_leg_hourly * right_period
+
+    if first_settlement_pnl_pct >= 0:
+        return default
+
+    if left_wait > right_wait:
+        later_wait = left_wait
+        later_settlement_pnl_pct = left_leg_hourly * left_period
+    elif right_wait > left_wait:
+        later_wait = right_wait
+        later_settlement_pnl_pct = right_leg_hourly * right_period
+    else:
+        later_wait = left_wait
+        later_settlement_pnl_pct = first_settlement_pnl_pct
+
+    if later_wait <= 0:
+        return default
+
+    if later_settlement_pnl_pct > first_settlement_pnl_pct:
+        wait_hours = _format_wait(later_wait)
+        if wait_hours <= 0:
+            return default
+        return {
+            "entry_timing_wait_hours": wait_hours,
+            "entry_timing_advice": f"{wait_hours}小时后",
+        }
+    return default
+
+
+def _hours_until_next_settlement(base_time: datetime, period_hours: float) -> float:
+    safe_period_hours = period_hours if period_hours > 0 else 1.0
+    period_seconds = safe_period_hours * 3600.0
+
+    utc_time = base_time.astimezone(timezone.utc)
+    anchor = datetime(
+        utc_time.year,
+        utc_time.month,
+        utc_time.day,
+        tzinfo=timezone.utc,
+    )
+    elapsed_seconds = (utc_time - anchor).total_seconds()
+    remainder = elapsed_seconds % period_seconds
+    if remainder <= 1e-9:
+        return 0.0
+    return (period_seconds - remainder) / 3600.0
 
 
 def _compute_theta_reversal_apr_metrics(

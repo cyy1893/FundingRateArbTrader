@@ -356,6 +356,8 @@ class FundingPredictionEntry(BaseModel):
     recommendation_score: float
     sample_count: int
     direction: Literal["leftLong", "rightLong", "unknown"]
+    entry_timing_wait_hours: float = 0.0
+    entry_timing_advice: str = "当前小时"
 
 
 class FundingPredictionFailure(BaseModel):

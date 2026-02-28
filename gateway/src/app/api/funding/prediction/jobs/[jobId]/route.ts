@@ -56,6 +56,8 @@ function mapEntry(entry: Record<string, unknown>) {
     recommendationScore: Number(entry.recommendation_score ?? 0),
     sampleCount: Number(entry.sample_count ?? 0),
     direction: String(entry.direction ?? "unknown"),
+    entryTimingWaitHours: Number(entry.entry_timing_wait_hours ?? 0),
+    entryTimingAdvice: String(entry.entry_timing_advice ?? "当前小时"),
   };
 }
 

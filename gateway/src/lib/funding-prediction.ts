@@ -35,6 +35,8 @@ export type FundingPredictionEntry = {
   recommendationScore: number;
   sampleCount: number;
   direction: FundingPredictionDirection;
+  entryTimingWaitHours: number;
+  entryTimingAdvice: string;
 };
 
 export type FundingPredictionSnapshot = {
@@ -126,6 +128,8 @@ export async function fetchFundingPredictionSnapshot(
       recommendationScore: Number(entry.recommendation_score ?? 0),
       sampleCount: Number(entry.sample_count ?? 0),
       direction: (entry.direction as FundingPredictionDirection) ?? "unknown",
+      entryTimingWaitHours: Number(entry.entry_timing_wait_hours ?? 0),
+      entryTimingAdvice: String(entry.entry_timing_advice ?? "当前小时"),
     }),
   );
 

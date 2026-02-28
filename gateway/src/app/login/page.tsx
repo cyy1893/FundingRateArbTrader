@@ -2,14 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { LogIn, ShieldCheck } from "lucide-react";
+import { LogIn } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -74,19 +73,12 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 px-4">
       <div className="w-full max-w-3xl">
         <div className="mb-8 text-center">
-          <div className="inline-flex items-center gap-3 rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary ring-1 ring-primary/20">
-            <ShieldCheck className="h-4 w-4" />
-            受保护的交易控制台
-          </div>
           <h1 className="mt-4 text-3xl font-semibold tracking-tight">登录 Funding Rate Trader</h1>
         </div>
 
         <Card className="shadow-lg">
           <CardHeader className="space-y-1">
             <CardTitle className="text-xl font-semibold">账户登录</CardTitle>
-            <CardDescription>
-              使用后端配置的固定账户登录，登录成功后将自动附带令牌访问 API 和 WebSocket。
-            </CardDescription>
           </CardHeader>
           <CardContent>
             <form className="space-y-4" onSubmit={handleSubmit}>
@@ -95,7 +87,6 @@ export default function LoginPage() {
                 <Input
                   id="username"
                   name="username"
-                  placeholder="alice"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   autoComplete="username"
@@ -109,7 +100,6 @@ export default function LoginPage() {
                   id="password"
                   name="password"
                   type="password"
-                  placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"
