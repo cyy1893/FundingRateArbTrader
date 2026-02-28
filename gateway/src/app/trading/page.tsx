@@ -24,6 +24,16 @@ import { getAvailableSymbols } from "@/lib/available-symbols";
 
 type ErrorPayload = { detail?: string; error?: string };
 type ArbOpenResponse = { arb_position_id?: string; status?: string; error?: string };
+type SymbolCloseResponse = {
+  symbol: string;
+  mode: "post_only" | "market";
+  results?: Array<{
+    venue: "lighter" | "grvt";
+    attempted: boolean;
+    success: boolean;
+    detail?: string | null;
+  }>;
+};
 
 type RetryFetchOptions = {
   attempts?: number;
@@ -116,6 +126,23 @@ type UnifiedWalletData = {
   totalPnl: number;
   venues: UnifiedVenue[];
 };
+
+type AggregatedPosition = {
+  symbol: string;
+  lighterUnrealizedPnl: number;
+  grvtUnrealizedPnl: number;
+  totalUnrealizedPnl: number;
+  hasLighterPosition: boolean;
+  hasGrvtPosition: boolean;
+};
+
+function normalizeSymbolFromInstrument(instrument: string): string {
+  const upper = instrument.trim().toUpperCase();
+  if (upper.includes("_")) {
+    return upper.split("_", 1)[0] ?? upper;
+  }
+  return upper.replace("-PERP", "");
+}
 
 function normalizeBalances(balances: BalancesResponse): UnifiedWalletData {
   const lighterInfo = summarizeLighter(balances.lighter);
@@ -221,6 +248,50 @@ function summarizeGrvt(grvt: GrvtBalanceSnapshot): UnifiedVenue {
   };
 }
 
+function buildAggregatedPositions(balances: BalancesResponse): AggregatedPosition[] {
+  const bySymbol = new Map<string, AggregatedPosition>();
+
+  for (const position of balances.lighter.positions) {
+    if (Math.abs(position.position_value) < 1) {
+      continue;
+    }
+    const symbol = position.symbol.toUpperCase();
+    const current = bySymbol.get(symbol) ?? {
+      symbol,
+      lighterUnrealizedPnl: 0,
+      grvtUnrealizedPnl: 0,
+      totalUnrealizedPnl: 0,
+      hasLighterPosition: false,
+      hasGrvtPosition: false,
+    };
+    current.lighterUnrealizedPnl += position.unrealized_pnl;
+    current.hasLighterPosition = true;
+    current.totalUnrealizedPnl = current.lighterUnrealizedPnl + current.grvtUnrealizedPnl;
+    bySymbol.set(symbol, current);
+  }
+
+  for (const position of balances.grvt.positions) {
+    if (Math.abs(position.notional) < 1) {
+      continue;
+    }
+    const symbol = normalizeSymbolFromInstrument(position.instrument);
+    const current = bySymbol.get(symbol) ?? {
+      symbol,
+      lighterUnrealizedPnl: 0,
+      grvtUnrealizedPnl: 0,
+      totalUnrealizedPnl: 0,
+      hasLighterPosition: false,
+      hasGrvtPosition: false,
+    };
+    current.grvtUnrealizedPnl += position.unrealized_pnl;
+    current.hasGrvtPosition = true;
+    current.totalUnrealizedPnl = current.lighterUnrealizedPnl + current.grvtUnrealizedPnl;
+    bySymbol.set(symbol, current);
+  }
+
+  return Array.from(bySymbol.values()).sort((a, b) => Math.abs(b.totalUnrealizedPnl) - Math.abs(a.totalUnrealizedPnl));
+}
+
 function TradingPageContent() {
   const searchParams = useSearchParams();
   const didShowToastRef = useRef(false);
@@ -244,6 +315,7 @@ function TradingPageContent() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [normalized, setNormalized] = useState<UnifiedWalletData | null>(null);
   const [balancesSnapshot, setBalancesSnapshot] = useState<BalancesResponse | null>(null);
+  const [aggregatedPositions, setAggregatedPositions] = useState<AggregatedPosition[]>([]);
   const [subscription, setSubscription] = useState<OrderBookSubscription | null>(null);
   const [draftSubscription, setDraftSubscription] = useState<OrderBookSubscription | null>(null);
   const [notionalReady, setNotionalReady] = useState(false);
@@ -262,6 +334,7 @@ function TradingPageContent() {
   const { orderBook, trades, status, hasLighter, hasGrvt } = useOrderBookWebSocket(subscription);
   const [arbStatus, setArbStatus] = useState<"idle" | "placing" | "success" | "error">("idle");
   const [arbMessage, setArbMessage] = useState<string | null>(null);
+  const [closingState, setClosingState] = useState<Record<string, { postOnly: boolean; market: boolean }>>({});
   const [, setArbPositionId] = useState<string | null>(null);
   const balancesRef = useRef<BalancesResponse | null>(null);
   const symbolsCacheKey = `fra:trade-symbols:${comparisonSelection.primarySource.id}:${comparisonSelection.secondarySource.id}`;
@@ -290,6 +363,7 @@ function TradingPageContent() {
         balancesRef.current = data;
         setBalancesSnapshot(data);
         setNormalized(normalizeBalances(data));
+        setAggregatedPositions(buildAggregatedPositions(data));
         setErrorMessage(null);
       } catch (error) {
         setErrorMessage(
@@ -512,148 +586,95 @@ function TradingPageContent() {
     return side === "buy" ? bestBid : bestAsk;
   };
 
-  const placeOrder = async (
-    venue: "lighter" | "grvt",
-    payload: Record<string, unknown>,
-  ) => {
-    const response = await fetch(`/api/orders/${venue}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const contentType = response.headers.get("content-type") ?? "";
-    const data = contentType.includes("application/json") ? await response.json() : await response.text();
-    if (!response.ok) {
-      const detail =
-        typeof data === "string"
-          ? data
-          : typeof data?.detail === "string"
-            ? data.detail
-            : typeof data?.error === "string"
-              ? data.error
-              : `HTTP ${response.status}`;
-      return { ok: false, data, error: detail };
-    }
-    return { ok: true, data, error: null };
-  };
+  const closeSymbolPositions = useCallback(
+    async (symbol: string, mode: "post_only" | "market") => {
+      const response = await fetch("/api/positions/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, mode }),
+      });
+      const contentType = response.headers.get("content-type") ?? "";
+      const data = contentType.includes("application/json") ? await response.json() : await response.text();
+      if (!response.ok) {
+        const detail =
+          typeof data === "string"
+            ? data
+            : typeof data?.detail === "string"
+              ? data.detail
+              : typeof data?.error === "string"
+                ? data.error
+                : `HTTP ${response.status}`;
+        return { ok: false, data, error: detail };
+      }
+      return { ok: true, data: data as SymbolCloseResponse, error: null };
+    },
+    [],
+  );
 
+  const handleCloseSymbol = useCallback(
+    async (symbol: string, mode: "post_only" | "market", reason: string) => {
+      const upperSymbol = symbol.trim().toUpperCase();
+      if (!upperSymbol) {
+        return "error";
+      }
 
-  const submitCloseOrders = useCallback(
-    async ({
-      subscription: activeSubscription,
-      lighterPosition,
-      grvtPosition,
-      reason,
-    }: {
-      subscription: OrderBookSubscription;
-      lighterPosition?: LighterBalanceSnapshot["positions"][number];
-      grvtPosition?: GrvtBalanceSnapshot["positions"][number];
-      reason: string;
-    }) => {
-      const symbol = activeSubscription.symbol;
-      const orders: Array<{
-        venue: "lighter" | "grvt";
-        payload: Record<string, unknown>;
-      }> = [];
-      const errors: string[] = [];
-      const clientBase = Date.now() % 2_147_483_647;
+      const stateKey = mode === "post_only" ? "postOnly" : "market";
+      setClosingState((prev) => ({
+        ...prev,
+        [upperSymbol]: {
+          postOnly: prev[upperSymbol]?.postOnly ?? false,
+          market: prev[upperSymbol]?.market ?? false,
+          [stateKey]: true,
+        },
+      }));
 
-      const buildPayload = (
-        venue: "lighter" | "grvt",
-        side: "buy" | "sell",
-        size: number,
-        price: number,
-        clientId: number,
-      ) => {
-        if (venue === "lighter") {
-          return {
-            symbol,
-            client_order_index: clientId,
-            side,
-            base_amount: size,
-            price,
-            reduce_only: true,
-            time_in_force: "post_only",
-          };
-        }
-        return {
-          symbol,
-          side,
-          amount: size,
-          price,
-          post_only: true,
-          reduce_only: true,
-          client_order_id: clientId,
-        };
-      };
+      const result = await closeSymbolPositions(upperSymbol, mode);
+      setClosingState((prev) => ({
+        ...prev,
+        [upperSymbol]: {
+          postOnly: stateKey === "postOnly" ? false : (prev[upperSymbol]?.postOnly ?? false),
+          market: stateKey === "market" ? false : (prev[upperSymbol]?.market ?? false),
+        },
+      }));
 
-      const addOrder = (
-        venue: "lighter" | "grvt",
-        side: "buy" | "sell",
-        size: number,
-        clientId: number,
-      ) => {
-        const price = getMakerPrice(venue, side, symbol);
-        if (!price) {
-          errors.push(`${venue === "lighter" ? "Lighter" : "GRVT"}: 订单簿数据不足`);
-          return;
-        }
-        orders.push({
-          venue,
-          payload: buildPayload(venue, side, size, price, clientId),
+      if (!result.ok) {
+        toast.error(`${reason}失败：${result.error}`, {
+          className: "bg-destructive text-destructive-foreground",
         });
-      };
-
-      if (lighterPosition && Math.abs(lighterPosition.position) > 0) {
-        const side = lighterPosition.position >= 0 ? "sell" : "buy";
-        addOrder("lighter", side, Math.abs(lighterPosition.position), clientBase);
-      }
-      if (grvtPosition && Math.abs(grvtPosition.size) > 0) {
-        const side = grvtPosition.size >= 0 ? "sell" : "buy";
-        addOrder("grvt", side, Math.abs(grvtPosition.size), clientBase + 1);
+        return "error";
       }
 
-      if (orders.length === 0) {
+      const rows = result.data?.results ?? [];
+      const successRows = rows.filter((row) => row.success);
+      const failedRows = rows.filter((row) => row.attempted && !row.success);
+      const hasAttempt = rows.some((row) => row.attempted);
+      if (!hasAttempt) {
         toast.error(`${reason}失败：没有可平仓的仓位。`, {
           className: "bg-destructive text-destructive-foreground",
         });
         return "no-position";
       }
 
-      if (errors.length > 0) {
-        toast.error(`${reason}失败：${errors.join(" | ")}`, {
+      if (failedRows.length > 0) {
+        const detail = failedRows
+          .map((row) => `${row.venue === "lighter" ? "Lighter" : "GRVT"}: ${row.detail ?? "订单失败"}`)
+          .join(" | ");
+        toast.error(`${reason}部分失败：${detail}`, {
           className: "bg-destructive text-destructive-foreground",
         });
-        return "error";
+        return successRows.length > 0 ? "partial" : "error";
       }
 
-      const makerResults = await Promise.all(
-        orders.map((order) => placeOrder(order.venue, order.payload)),
-      );
-      const failedVenues = makerResults
-        .map((result, index) => (result.ok ? null : orders[index]?.venue))
-        .filter(Boolean) as Array<"lighter" | "grvt">;
-      if (failedVenues.length === 0) {
-        toast.success(`${reason}挂单已提交。`);
-        return "ok";
-      }
-
-      const message = failedVenues
-        .map((venue) => (venue === "lighter" ? "Lighter" : "GRVT"))
-        .join(" | ");
-      toast.error(`${reason}失败：${message} 挂单未被接受。`, {
-        className: "bg-destructive text-destructive-foreground",
-      });
-      return "error";
+      toast.success(`${reason}已提交。`);
+      return "ok";
     },
-    [getMakerPrice, placeOrder],
+    [closeSymbolPositions],
   );
+
 
   const triggerLiquidationGuard = useCallback(
     async ({
       subscription: activeSubscription,
-      lighterPosition,
-      grvtPosition,
     }: {
       subscription: OrderBookSubscription;
       lighterPosition?: LighterBalanceSnapshot["positions"][number];
@@ -663,18 +684,14 @@ function TradingPageContent() {
         return;
       }
       liquidationGuardTriggeredRef.current = true;
-      const result = await submitCloseOrders({
-        subscription: activeSubscription,
-        lighterPosition,
-        grvtPosition,
-        reason: "避免爆仓",
-      });
+      const result = await handleCloseSymbol(activeSubscription.symbol, "post_only", "避免爆仓");
       if (result === "no-position") {
         liquidationGuardTriggeredRef.current = false;
       }
     },
-    [submitCloseOrders],
+    [handleCloseSymbol],
   );
+
 
   useEffect(() => {
     liquidationGuardTriggeredRef.current = false;
@@ -723,7 +740,12 @@ function TradingPageContent() {
         : null;
 
     if ((lighterPct != null && lighterPct >= threshold) || (grvtPct != null && grvtPct >= threshold)) {
-      triggerLiquidationGuard({ subscription, lighterPosition, grvtPosition });
+      const timer = window.setTimeout(() => {
+        void triggerLiquidationGuard({ subscription });
+      }, 0);
+      return () => {
+        window.clearTimeout(timer);
+      };
     }
   }, [balancesSnapshot, subscription, triggerLiquidationGuard]);
 
@@ -891,6 +913,13 @@ function TradingPageContent() {
     hasGrvt &&
     arbStatus !== "placing";
   const canStartMonitoring = Boolean(draftSubscription) && !subscription;
+  const handleBottomPanelClose = useCallback(
+    (symbol: string, mode: "post_only" | "market") => {
+      const reason = mode === "post_only" ? "挂单平仓" : "紧急市价平仓";
+      void handleCloseSymbol(symbol, mode, reason);
+    },
+    [handleCloseSymbol],
+  );
 
   if (!isAuthenticated) {
     return <AuthRequiredPage />;
@@ -988,7 +1017,11 @@ function TradingPageContent() {
       </div>
 
       {/* Bottom Panel - Positions & Balances */}
-      <BottomPanel venues={normalized.venues} />
+      <BottomPanel
+        positions={aggregatedPositions}
+        closingState={closingState}
+        onCloseSymbol={handleBottomPanelClose}
+      />
     </div>
   );
 }

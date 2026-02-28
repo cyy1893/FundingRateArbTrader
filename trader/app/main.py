@@ -59,6 +59,9 @@ from app.models import (
     VenueOrderBook,
     PerpSnapshot,
     PerpSnapshotRequest,
+    SymbolCloseRequest,
+    SymbolCloseResponse,
+    SymbolCloseVenueResult,
 )
 from app.db_models import (
     ArbPosition,
@@ -216,7 +219,7 @@ async def _execute_auto_close_task(task_id: UUID) -> None:
 async def auto_close_worker() -> None:
     engine = get_engine()
     while True:
-        await asyncio.sleep(2)
+        await asyncio.sleep(15)
         now = datetime.utcnow()
         with Session(engine) as session:
             task_ids = session.exec(
@@ -305,6 +308,13 @@ def _match_grvt_position_symbol(symbol: str, instrument: str) -> bool:
     base = (symbol or "").upper().replace("-PERP", "")
     normalized_instrument = (instrument or "").upper()
     return normalized_instrument.startswith(f"{base}_")
+
+
+def _extract_grvt_base_symbol(instrument: str) -> str:
+    normalized = (instrument or "").upper()
+    if "_" in normalized:
+        return normalized.split("_", 1)[0]
+    return normalized.replace("-PERP", "")
 
 
 async def _close_position_with_reduce_only_orders(position_id: UUID) -> dict[str, Any]:
@@ -1055,6 +1065,139 @@ async def create_grvt_order(
         ).model_dump()
     )
     return response
+
+
+@app.post("/positions/close", response_model=SymbolCloseResponse)
+async def close_symbol_positions(
+    request: SymbolCloseRequest,
+    lighter: LighterService = Depends(get_lighter_service),
+    grvt: GrvtService = Depends(get_grvt_service),
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> SymbolCloseResponse:
+    symbol = request.symbol.strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="symbol is required")
+
+    lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(session, user)
+    grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(session, user)
+
+    try:
+        lighter_snapshot, grvt_snapshot = await asyncio.gather(
+            lighter.get_balances_with_credentials(
+                lighter_account_index,
+                lighter_api_key_index,
+                lighter_private_key,
+            ),
+            grvt.get_balances_with_credentials(
+                grvt_api_key,
+                grvt_private_key,
+                grvt_trading_account_id,
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch balances: {exc}") from exc
+
+    lighter_position = next(
+        (position for position in lighter_snapshot.positions if position.symbol.upper() == symbol),
+        None,
+    )
+    grvt_position = next(
+        (
+            position
+            for position in grvt_snapshot.positions
+            if _extract_grvt_base_symbol(position.instrument) == symbol
+        ),
+        None,
+    )
+
+    try:
+        lighter_best_bid, lighter_best_ask = await _get_lighter_best_prices(symbol)
+        grvt_best_bid, grvt_best_ask, _ = await _get_grvt_best_prices(
+            symbol,
+            grvt_api_key,
+            grvt_private_key,
+            grvt_trading_account_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch best prices: {exc}") from exc
+
+    results: list[SymbolCloseVenueResult] = []
+    client_base = int(datetime.utcnow().timestamp() * 1000) % 2_147_483_647
+
+    async def _close_lighter() -> SymbolCloseVenueResult:
+        if lighter_position is None or abs(lighter_position.position) <= 0:
+            return SymbolCloseVenueResult(venue="lighter", attempted=False, success=False, detail="no position")
+        side = "sell" if lighter_position.position >= 0 else "buy"
+        if request.mode == "post_only":
+            ref_price = lighter_best_bid if side == "buy" else lighter_best_ask
+            tif = "post_only"
+        else:
+            ref_price = lighter_best_ask if side == "buy" else lighter_best_bid
+            tif = "ioc"
+        if ref_price is None or ref_price <= 0:
+            return SymbolCloseVenueResult(venue="lighter", attempted=True, success=False, detail="missing best price")
+        try:
+            payload = LighterSymbolOrderRequest(
+                symbol=symbol,
+                client_order_index=client_base,
+                side=side,
+                base_amount=abs(lighter_position.position),
+                price=ref_price,
+                reduce_only=True,
+                time_in_force=tif,
+            )
+            await lighter.place_order_by_symbol_with_credentials(
+                payload,
+                account_index=lighter_account_index,
+                api_key_index=lighter_api_key_index,
+                private_key=lighter_private_key,
+            )
+            return SymbolCloseVenueResult(venue="lighter", attempted=True, success=True)
+        except Exception as exc:  # noqa: BLE001
+            return SymbolCloseVenueResult(venue="lighter", attempted=True, success=False, detail=str(exc))
+
+    async def _close_grvt() -> SymbolCloseVenueResult:
+        if grvt_position is None or abs(grvt_position.size) <= 0:
+            return SymbolCloseVenueResult(venue="grvt", attempted=False, success=False, detail="no position")
+        side = "sell" if grvt_position.size >= 0 else "buy"
+        if request.mode == "post_only":
+            ref_price = grvt_best_bid if side == "buy" else grvt_best_ask
+            post_only = True
+            duration_secs = 10
+        else:
+            reference = grvt_best_ask if side == "buy" else grvt_best_bid
+            if reference is None:
+                reference = grvt_position.mark_price
+            ref_price = reference * (1.01 if side == "buy" else 0.99) if reference else None
+            post_only = False
+            duration_secs = 5
+        if ref_price is None or ref_price <= 0:
+            return SymbolCloseVenueResult(venue="grvt", attempted=True, success=False, detail="missing best price")
+        try:
+            payload = GrvtOrderRequest(
+                symbol=symbol,
+                side=side,
+                amount=abs(grvt_position.size),
+                price=ref_price,
+                post_only=post_only,
+                reduce_only=True,
+                order_duration_secs=duration_secs,
+                client_order_id=(client_base + 1) % 2_147_483_647,
+            )
+            await grvt.place_order_with_credentials(
+                payload,
+                api_key=grvt_api_key,
+                private_key=grvt_private_key,
+                trading_account_id=grvt_trading_account_id,
+            )
+            return SymbolCloseVenueResult(venue="grvt", attempted=True, success=True)
+        except Exception as exc:  # noqa: BLE001
+            return SymbolCloseVenueResult(venue="grvt", attempted=True, success=False, detail=str(exc))
+
+    lighter_result, grvt_result = await asyncio.gather(_close_lighter(), _close_grvt())
+    results.extend([lighter_result, grvt_result])
+    return SymbolCloseResponse(symbol=symbol, mode=request.mode, results=results)
 
 
 @app.post("/arb/open", response_model=ArbOpenResponse)

@@ -231,6 +231,24 @@ class GrvtOrderResponse(BaseModel):
     payload: dict
 
 
+class SymbolCloseRequest(BaseModel):
+    symbol: str
+    mode: Literal["post_only", "market"] = "post_only"
+
+
+class SymbolCloseVenueResult(BaseModel):
+    venue: Literal["lighter", "grvt"]
+    attempted: bool
+    success: bool
+    detail: str | None = None
+
+
+class SymbolCloseResponse(BaseModel):
+    symbol: str
+    mode: Literal["post_only", "market"]
+    results: list[SymbolCloseVenueResult] = Field(default_factory=list)
+
+
 class ApiError(BaseModel):
     source: str
     message: str
