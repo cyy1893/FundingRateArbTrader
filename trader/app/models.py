@@ -223,7 +223,7 @@ class GrvtOrderRequest(BaseModel):
     price: float = Field(..., gt=0, description="Limit price in quote units")
     post_only: bool = True
     reduce_only: bool = False
-    order_duration_secs: int = Field(10, ge=1, le=3600, description="Order lifetime in seconds")
+    order_duration_secs: int | None = Field(None, ge=1, le=3600, description="Order lifetime in seconds")
     client_order_id: Optional[int] = None
 
 
@@ -374,6 +374,7 @@ class FundingPredictionEntry(BaseModel):
     recommendation_score: float
     sample_count: int
     direction: Literal["leftLong", "rightLong", "unknown"]
+    spread_favorable_now: bool | None = None
     entry_timing_wait_hours: float = 0.0
     entry_timing_advice: str = "当前小时"
 

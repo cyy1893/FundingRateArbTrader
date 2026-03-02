@@ -693,6 +693,10 @@ class MarketDataService:
                 "left": left_spread_bps,
                 "right": right_spread_bps,
                 "combined": left_spread_bps + right_spread_bps,
+                "left_best_bid": left_bid,
+                "left_best_ask": left_ask,
+                "right_best_bid": right_bid,
+                "right_best_ask": right_ask,
                 "price_volatility_24h_pct": DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
                 "left_spread_samples_bps": [left_spread_bps],
                 "right_spread_samples_bps": [right_spread_bps],
@@ -908,6 +912,14 @@ class MarketDataService:
                 )
                 spread_avg = spread_averages.get((row.symbol or row.left_symbol).upper())
                 if spread_avg is not None:
+                    if left_best_bid is None:
+                        left_best_bid = _parse_float(spread_avg.get("left_best_bid"))
+                    if left_best_ask is None:
+                        left_best_ask = _parse_float(spread_avg.get("left_best_ask"))
+                    if right_best_bid is None:
+                        right_best_bid = _parse_float(spread_avg.get("right_best_bid"))
+                    if right_best_ask is None:
+                        right_best_ask = _parse_float(spread_avg.get("right_best_ask"))
                     left_bid_ask_spread_bps = spread_avg["left"]
                     right_bid_ask_spread_bps = spread_avg["right"]
                     combined_bid_ask_spread_bps = spread_avg["combined"]
@@ -968,6 +980,16 @@ class MarketDataService:
                     annualized_decimal = conservative_hourly_decimal * PREDICTION_HOURS_PER_YEAR
                     predicted_spread_24h = abs(average_spread_hourly) * PREDICTION_FORECAST_HOURS
 
+                spread_favorable_now = _is_spread_favorable_for_direction(
+                    direction=direction,
+                    left_best_bid=left_best_bid,
+                    left_best_ask=left_best_ask,
+                    right_best_bid=right_best_bid,
+                    right_best_ask=right_best_ask,
+                    left_mark_price=row.mark_price,
+                    right_mark_price=_parse_float(right_payload.get("mark_price")),
+                )
+
                 raw_entries.append(
                     {
                         "symbol": row.symbol or row.left_symbol,
@@ -994,6 +1016,7 @@ class MarketDataService:
                         "combined_spread_samples_bps": combined_spread_samples_bps,
                         "sample_count": spread_count,
                         "direction": direction,
+                        "spread_favorable_now": spread_favorable_now,
                         **_build_entry_timing_advice(
                             direction=direction,
                             average_left_hourly=average_left_hourly,
@@ -1944,6 +1967,43 @@ def _estimate_price_volatility_24h_pct_from_changes(
     if not values:
         return None
     return sum(values) / len(values)
+
+
+def _is_spread_favorable_for_direction(
+    direction: str,
+    left_best_bid: float | None,
+    left_best_ask: float | None,
+    right_best_bid: float | None,
+    right_best_ask: float | None,
+    left_mark_price: float | None = None,
+    right_mark_price: float | None = None,
+) -> bool | None:
+    if direction == "leftLong":
+        long_price = left_best_bid
+        short_price = right_best_ask
+    elif direction == "rightLong":
+        long_price = right_best_bid
+        short_price = left_best_ask
+    else:
+        return None
+
+    if long_price is None or short_price is None:
+        left_mid = _compute_mid_price(left_best_bid, left_best_ask, fallback_price=left_mark_price)
+        right_mid = _compute_mid_price(right_best_bid, right_best_ask, fallback_price=right_mark_price)
+        # Use mid/mark fallback when one side order book top level is temporarily missing.
+        if direction == "leftLong":
+            long_price = long_price if long_price is not None else left_mid
+            short_price = short_price if short_price is not None else right_mid
+        else:
+            long_price = long_price if long_price is not None else right_mid
+            short_price = short_price if short_price is not None else left_mid
+    if long_price is None or short_price is None:
+        return None
+    if not math.isfinite(long_price) or not math.isfinite(short_price):
+        return None
+    if long_price <= 0 or short_price <= 0:
+        return None
+    return long_price <= short_price
 
 
 def _build_entry_timing_advice(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal, Optional
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     grvt_endpoint_version: str = Field("v1", description="GRVT REST endpoint version (GRVT_END_POINT_VERSION)")
     grvt_ws_stream_version: str = Field(
         "v1", description="GRVT websocket stream version (GRVT_WS_STREAM_VERSION)"
+    )
+    post_only_ttl_secs: int = Field(
+        300,
+        ge=1,
+        le=3600,
+        validation_alias=AliasChoices("POST_ONLY_TTL_SECS", "GRVT_ORDER_DURATION_SECS"),
+        description="Default TTL in seconds for post-only orders",
     )
     auth_users: str = Field(
         "",

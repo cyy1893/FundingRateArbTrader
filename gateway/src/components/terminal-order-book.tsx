@@ -1,6 +1,5 @@
 "use client";
 
-import { ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TradeEntry } from "@/hooks/use-order-book-websocket";
 
@@ -170,10 +169,10 @@ export function TerminalOrderBook({
                 href={marketUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-gray-200 text-gray-600 hover:bg-gray-100"
+                className="inline-flex items-center justify-center rounded-md border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100"
                 aria-label={`在新页面打开 ${exchange} 交易页面`}
               >
-                <ArrowUpRight className="h-3 w-3" />
+                前往交易所
               </a>
             ) : null}
           </div>

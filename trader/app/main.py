@@ -405,7 +405,7 @@ async def _close_position_with_reduce_only_orders(position_id: UUID) -> dict[str
                         price=price,
                         post_only=True,
                         reduce_only=True,
-                        order_duration_secs=None,
+                        order_duration_secs=settings.post_only_ttl_secs,
                         client_order_id=int(datetime.utcnow().timestamp() * 1000 + 1) % 2_147_483_647,
                     ).model_dump(),
                 )
@@ -529,22 +529,45 @@ async def funding_settlement_guard_worker() -> None:
                 meta = position.meta if isinstance(position.meta, dict) else {}
                 if not bool(meta.get("drawdown_guard_enabled")):
                     continue
+                if position.notional <= 0:
+                    continue
                 drawdown_threshold_pct = _resolve_drawdown_threshold_pct(position)
                 guard_state = (
                     position.meta.get("drawdown_guard_state")
                     if isinstance(position.meta, dict)
                     else None
                 )
-                drawdown_ratio_pct = _safe_float(
-                    guard_state.get("drawdown_ratio_pct") if isinstance(guard_state, dict) else None
+                current_net_unrealized = _safe_float(
+                    guard_state.get("latest_unrealized_pnl") if isinstance(guard_state, dict) else None
                 )
-                if drawdown_ratio_pct is None or drawdown_ratio_pct < drawdown_threshold_pct:
+                peak_unrealized = _safe_float(
+                    guard_state.get("peak_unrealized_pnl") if isinstance(guard_state, dict) else None
+                )
+                if current_net_unrealized is None and isinstance(guard_state, dict):
+                    drawdown_value = _safe_float(guard_state.get("drawdown_value"))
+                    if drawdown_value is not None and peak_unrealized is not None:
+                        current_net_unrealized = peak_unrealized - drawdown_value
+
+                if current_net_unrealized is None:
                     logging.info(
-                        "settlement guard skipped close position_id=%s symbol=%s hourly_pnl=%s drawdown=%.4f%% threshold=%.4f%%",
+                        "settlement guard skipped close position_id=%s symbol=%s reason=missing_drawdown_state",
+                        position.id,
+                        position.symbol,
+                    )
+                    continue
+
+                peak_unrealized = max(peak_unrealized if peak_unrealized is not None else 0.0, current_net_unrealized, 0.0)
+                projected_net_unrealized = current_net_unrealized + expected_hourly_pnl
+                projected_drawdown_value = max(0.0, peak_unrealized - projected_net_unrealized)
+                projected_drawdown_ratio_pct = projected_drawdown_value / position.notional * 100.0
+
+                if projected_drawdown_ratio_pct < drawdown_threshold_pct:
+                    logging.info(
+                        "settlement guard skipped close position_id=%s symbol=%s hourly_pnl=%s projected_drawdown=%.4f%% threshold=%.4f%%",
                         position.id,
                         position.symbol,
                         expected_hourly_pnl,
-                        drawdown_ratio_pct or 0.0,
+                        projected_drawdown_ratio_pct,
                         drawdown_threshold_pct,
                     )
                     continue
@@ -559,12 +582,14 @@ async def funding_settlement_guard_worker() -> None:
                     )
                 else:
                     logging.info(
-                        "settlement guard close triggered position_id=%s symbol=%s pnl_estimate=%s drawdown=%.4f%% threshold=%.4f%%",
+                        "settlement guard close triggered position_id=%s symbol=%s pnl_estimate=%s projected_drawdown=%.4f%% threshold=%.4f%% current_unrealized=%.4f projected_unrealized=%.4f",
                         position.id,
                         position.symbol,
                         expected_hourly_pnl,
-                        drawdown_ratio_pct or 0.0,
+                        projected_drawdown_ratio_pct,
                         drawdown_threshold_pct,
+                        current_net_unrealized,
+                        projected_net_unrealized,
                     )
 
 
@@ -1164,7 +1189,7 @@ async def close_symbol_positions(
         if request.mode == "post_only":
             ref_price = grvt_best_bid if side == "buy" else grvt_best_ask
             post_only = True
-            duration_secs = 10
+            duration_secs = settings.post_only_ttl_secs
         else:
             reference = grvt_best_ask if side == "buy" else grvt_best_bid
             if reference is None:
@@ -1288,7 +1313,7 @@ async def open_arb_position(
                 price=price,
                 post_only=True,
                 reduce_only=False,
-                order_duration_secs=None,
+                order_duration_secs=settings.post_only_ttl_secs,
                 client_order_id=client_index,
             )
             response = await grvt.place_order_with_credentials(

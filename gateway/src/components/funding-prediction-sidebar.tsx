@@ -312,6 +312,7 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
             <TableHead className="text-right">价格波动率(24h估算)</TableHead>
             <TableHead className="text-right">点差(Lighter)</TableHead>
             <TableHead className="text-right">点差(GRVT)</TableHead>
+            <TableHead className="text-center">当前价差是否有利</TableHead>
             <TableHead className="text-right">综合分</TableHead>
             <TableHead className="text-right">去交易</TableHead>
           </TableRow>
@@ -331,7 +332,7 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
               <TableCell className="text-right font-semibold text-primary">
                 {formatDecimalPercent(entry.annualizedDecimal)}
               </TableCell>
-              <TableCell className="text-right text-sm font-medium">
+              <TableCell className="text-right text-xs text-muted-foreground">
                 {formatPercent(entry.priceVolatility24hPct)}
               </TableCell>
               <TableCell className="text-right text-xs text-muted-foreground">
@@ -339,6 +340,16 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
               </TableCell>
               <TableCell className="text-right text-xs text-muted-foreground">
                 {formatBps(entry.rightBidAskSpreadBps)}
+              </TableCell>
+              <TableCell className="text-center text-xs">
+                <span className={cn(
+                  "font-medium",
+                  entry.spreadFavorableNow === true && "text-emerald-600",
+                  entry.spreadFavorableNow === false && "text-rose-600",
+                  entry.spreadFavorableNow == null && "text-muted-foreground",
+                )}>
+                  {formatSpreadFavorable(entry.spreadFavorableNow)}
+                </span>
               </TableCell>
               <TableCell className="text-right text-sm font-semibold">
                 {entry.recommendationScore.toFixed(2)}
@@ -426,4 +437,11 @@ function formatBps(value: number): string {
     return "—";
   }
   return `${value.toFixed(2)} bps`;
+}
+
+function formatSpreadFavorable(value: boolean | null): string {
+  if (value == null) {
+    return "未知";
+  }
+  return value ? "有利" : "不利";
 }

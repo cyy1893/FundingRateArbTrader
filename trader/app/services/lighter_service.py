@@ -151,7 +151,10 @@ class LighterService:
             time_in_force=time_in_force,
             reduce_only=request.reduce_only,
             trigger_price=request.trigger_price or SignerClient.NIL_TRIGGER_PRICE,
-            order_expiry=request.order_expiry_secs or SignerClient.DEFAULT_28_DAY_ORDER_EXPIRY,
+            order_expiry=self._resolve_order_expiry_secs(
+                request.order_expiry_secs,
+                request.time_in_force,
+            ),
             nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
             api_key_index=effective_api_key_index,
         )
@@ -201,7 +204,10 @@ class LighterService:
                 time_in_force=time_in_force,
                 reduce_only=request.reduce_only,
                 trigger_price=request.trigger_price or SignerClient.NIL_TRIGGER_PRICE,
-                order_expiry=request.order_expiry_secs or SignerClient.DEFAULT_28_DAY_ORDER_EXPIRY,
+                order_expiry=self._resolve_order_expiry_secs(
+                    request.order_expiry_secs,
+                    request.time_in_force,
+                ),
                 nonce=request.nonce if request.nonce is not None else SignerClient.DEFAULT_NONCE,
                 api_key_index=request.api_key_index if request.api_key_index is not None else api_key_index,
             )
@@ -345,6 +351,14 @@ class LighterService:
     @property
     def is_ready(self) -> bool:
         return True
+
+    def _resolve_order_expiry_secs(self, requested_expiry: int | None, time_in_force: str) -> int:
+        if requested_expiry is not None and requested_expiry > 0:
+            return requested_expiry
+        if time_in_force == "post_only":
+            ttl = max(1, int(self._settings.post_only_ttl_secs))
+            return int(time.time()) + ttl
+        return SignerClient.DEFAULT_28_DAY_ORDER_EXPIRY
 
     @staticmethod
     def _to_float(value: Optional[str]) -> float:
