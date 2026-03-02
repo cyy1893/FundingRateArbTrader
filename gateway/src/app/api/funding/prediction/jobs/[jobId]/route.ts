@@ -37,6 +37,9 @@ function mapEntry(entry: Record<string, unknown>) {
     averageRightHourly:
       entry.average_right_hourly != null ? Number(entry.average_right_hourly) : null,
     averageSpreadHourly: Number(entry.average_spread_hourly ?? 0),
+    currentDirectionalAnnualizedPct: Number(
+      entry.current_directional_annualized_pct ?? 0,
+    ),
     totalDecimal: Number(entry.total_decimal ?? 0),
     annualizedDecimal: Number(entry.annualized_decimal ?? 0),
     spreadVolatility24hPct: Number(entry.spread_volatility_24h_pct ?? 0),

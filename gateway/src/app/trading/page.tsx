@@ -135,6 +135,7 @@ type AggregatedPosition = {
   lighterUnrealizedPnl: number;
   grvtUnrealizedPnl: number;
   totalUnrealizedPnl: number;
+  annualizedFundingRatePctWithLeverage: number | null;
   hasLighterPosition: boolean;
   hasGrvtPosition: boolean;
 };
@@ -251,8 +252,13 @@ function summarizeGrvt(grvt: GrvtBalanceSnapshot): UnifiedVenue {
   };
 }
 
-function buildAggregatedPositions(balances: BalancesResponse): AggregatedPosition[] {
+function buildAggregatedPositions(
+  balances: BalancesResponse,
+  fundingRates: { lighter: Record<string, number>; grvt: Record<string, number> },
+): AggregatedPosition[] {
   const bySymbol = new Map<string, AggregatedPosition>();
+  const lighterPositionMeta = new Map<string, { sideSign: number; leverage: number }>();
+  const grvtPositionMeta = new Map<string, { sideSign: number; leverage: number }>();
 
   for (const position of balances.lighter.positions) {
     if (Math.abs(position.position_value) < 1) {
@@ -264,6 +270,7 @@ function buildAggregatedPositions(balances: BalancesResponse): AggregatedPositio
       lighterUnrealizedPnl: 0,
       grvtUnrealizedPnl: 0,
       totalUnrealizedPnl: 0,
+      annualizedFundingRatePctWithLeverage: null,
       hasLighterPosition: false,
       hasGrvtPosition: false,
     };
@@ -271,6 +278,14 @@ function buildAggregatedPositions(balances: BalancesResponse): AggregatedPositio
     current.hasLighterPosition = true;
     current.totalUnrealizedPnl = current.lighterUnrealizedPnl + current.grvtUnrealizedPnl;
     bySymbol.set(symbol, current);
+    const lighterLeverage =
+      Math.abs(position.allocated_margin) > 0
+        ? Math.max(Math.abs(position.position_value) / Math.abs(position.allocated_margin), 1)
+        : 1;
+    lighterPositionMeta.set(symbol, {
+      sideSign: position.position >= 0 ? -1 : 1,
+      leverage: lighterLeverage,
+    });
   }
 
   for (const position of balances.grvt.positions) {
@@ -283,6 +298,7 @@ function buildAggregatedPositions(balances: BalancesResponse): AggregatedPositio
       lighterUnrealizedPnl: 0,
       grvtUnrealizedPnl: 0,
       totalUnrealizedPnl: 0,
+      annualizedFundingRatePctWithLeverage: null,
       hasLighterPosition: false,
       hasGrvtPosition: false,
     };
@@ -290,6 +306,52 @@ function buildAggregatedPositions(balances: BalancesResponse): AggregatedPositio
     current.hasGrvtPosition = true;
     current.totalUnrealizedPnl = current.lighterUnrealizedPnl + current.grvtUnrealizedPnl;
     bySymbol.set(symbol, current);
+    grvtPositionMeta.set(symbol, {
+      sideSign: position.size >= 0 ? -1 : 1,
+      leverage:
+        position.leverage && Number.isFinite(position.leverage) && position.leverage > 0
+          ? position.leverage
+          : 1,
+    });
+  }
+
+  for (const [symbol, entry] of bySymbol.entries()) {
+    const lighterMeta = lighterPositionMeta.get(symbol);
+    const grvtMeta = grvtPositionMeta.get(symbol);
+    const lighterFundingHourly = fundingRates.lighter[symbol];
+    const grvtFundingHourly = fundingRates.grvt[symbol];
+
+    let netHourly = 0;
+    let hasFundingInput = false;
+    if (lighterMeta && Number.isFinite(lighterFundingHourly)) {
+      netHourly += lighterMeta.sideSign * lighterFundingHourly;
+      hasFundingInput = true;
+    }
+    if (grvtMeta && Number.isFinite(grvtFundingHourly)) {
+      netHourly += grvtMeta.sideSign * grvtFundingHourly;
+      hasFundingInput = true;
+    }
+
+    if (!hasFundingInput) {
+      entry.annualizedFundingRatePctWithLeverage = null;
+      bySymbol.set(symbol, entry);
+      continue;
+    }
+
+    const annualizedPctOnNotional = netHourly * 24 * 365 * 100;
+    const leverageFactors: number[] = [];
+    if (lighterMeta && Number.isFinite(lighterMeta.leverage)) {
+      leverageFactors.push(lighterMeta.leverage);
+    }
+    if (grvtMeta && Number.isFinite(grvtMeta.leverage)) {
+      leverageFactors.push(grvtMeta.leverage);
+    }
+    const leverageFactor =
+      leverageFactors.length > 0
+        ? leverageFactors.reduce((sum, lev) => sum + lev, 0) / leverageFactors.length
+        : 1;
+    entry.annualizedFundingRatePctWithLeverage = annualizedPctOnNotional * leverageFactor;
+    bySymbol.set(symbol, entry);
   }
 
   return Array.from(bySymbol.values()).sort((a, b) => Math.abs(b.totalUnrealizedPnl) - Math.abs(a.totalUnrealizedPnl));
@@ -359,14 +421,53 @@ function TradingPageContent() {
     };
   }, []);
 
+  const fetchFundingRates = useCallback(async (balances: BalancesResponse) => {
+    const symbols = Array.from(
+      new Set([
+        ...balances.lighter.positions.map((position) => position.symbol.toUpperCase()),
+        ...balances.grvt.positions.map((position) => normalizeSymbolFromInstrument(position.instrument)),
+      ]),
+    );
+    if (symbols.length === 0) {
+      return { lighter: {}, grvt: {} };
+    }
+    const response = await fetchWithShortRetry(
+      "/api/funding/live",
+      {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leftSourceId: "lighter",
+          rightSourceId: "grvt",
+          leftSymbols: symbols,
+          rightSymbols: symbols,
+        }),
+      },
+      { attempts: 2, baseDelayMs: 300, retryStatusCodes: [429, 502, 503, 504] },
+    );
+    if (!response.ok) {
+      return { lighter: {}, grvt: {} };
+    }
+    const payload = (await response.json()) as {
+      left?: Record<string, number>;
+      right?: Record<string, number>;
+    };
+    return {
+      lighter: payload.left ?? {},
+      grvt: payload.right ?? {},
+    };
+  }, []);
+
   useEffect(() => {
     async function loadBalances() {
       try {
         const data = await fetchBalances();
+        const currentFundingRates = await fetchFundingRates(data);
         balancesRef.current = data;
         setBalancesSnapshot(data);
         setNormalized(normalizeBalances(data));
-        setAggregatedPositions(buildAggregatedPositions(data));
+        setAggregatedPositions(buildAggregatedPositions(data, currentFundingRates));
         setErrorMessage(null);
       } catch (error) {
         setErrorMessage(
@@ -396,7 +497,7 @@ function TradingPageContent() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [isAuthenticated]);
+  }, [fetchFundingRates, isAuthenticated]);
 
   useEffect(() => {
     const stored = readComparisonSelection();

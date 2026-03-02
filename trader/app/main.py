@@ -405,7 +405,7 @@ async def _close_position_with_reduce_only_orders(position_id: UUID) -> dict[str
                         price=price,
                         post_only=True,
                         reduce_only=True,
-                        order_duration_secs=settings.post_only_ttl_secs,
+                        order_duration_secs=settings.grvt_post_only_ttl_secs,
                         client_order_id=int(datetime.utcnow().timestamp() * 1000 + 1) % 2_147_483_647,
                     ).model_dump(),
                 )
@@ -1189,7 +1189,7 @@ async def close_symbol_positions(
         if request.mode == "post_only":
             ref_price = grvt_best_bid if side == "buy" else grvt_best_ask
             post_only = True
-            duration_secs = settings.post_only_ttl_secs
+            duration_secs = settings.grvt_post_only_ttl_secs
         else:
             reference = grvt_best_ask if side == "buy" else grvt_best_bid
             if reference is None:
@@ -1313,7 +1313,7 @@ async def open_arb_position(
                 price=price,
                 post_only=True,
                 reduce_only=False,
-                order_duration_secs=settings.post_only_ttl_secs,
+                order_duration_secs=settings.grvt_post_only_ttl_secs,
                 client_order_id=client_index,
             )
             response = await grvt.place_order_with_credentials(

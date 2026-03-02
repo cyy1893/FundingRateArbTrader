@@ -30,7 +30,7 @@ GRVT_PRIVATE_KEY=your-grvt-private-key
 GRVT_TRADING_ACCOUNT_ID=your-grvt-trading-account-id
 GRVT_END_POINT_VERSION=v1
 GRVT_WS_STREAM_VERSION=v1
-POST_ONLY_TTL_SECS=300
+GRVT_POST_ONLY_TTL_SECS=300
 
 AUTH_JWT_SECRET=super-secret-change-me
 ADMIN_REGISTRATION_SECRET=replace-with-random-admin-secret

@@ -307,8 +307,8 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
           <TableRow className="text-[11px] uppercase tracking-wide text-muted-foreground">
             <TableHead>币种</TableHead>
             <TableHead>方向</TableHead>
-            <TableHead className="text-right">建议建仓时机</TableHead>
             <TableHead className="text-right">预测年化 APR</TableHead>
+            <TableHead className="text-right">当前方向资金费率年化 APR</TableHead>
             <TableHead className="text-right">价格波动率(24h估算)</TableHead>
             <TableHead className="text-right">点差(Lighter)</TableHead>
             <TableHead className="text-right">点差(GRVT)</TableHead>
@@ -326,11 +326,11 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
               <TableCell className="text-xs">
                 {renderDirection(entry, payload.metadata)}
               </TableCell>
-              <TableCell className="text-right text-xs font-medium text-foreground">
-                {entry.entryTimingAdvice}
-              </TableCell>
               <TableCell className="text-right font-semibold text-primary">
                 {formatDecimalPercent(entry.annualizedDecimal)}
+              </TableCell>
+              <TableCell className="text-right font-semibold text-primary">
+                {formatSignedPercent(entry.currentDirectionalAnnualizedPct)}
               </TableCell>
               <TableCell className="text-right text-xs text-muted-foreground">
                 {formatPercent(entry.priceVolatility24hPct)}
@@ -430,6 +430,13 @@ function formatPercent(value: number): string {
     return "—";
   }
   return `${value.toFixed(4)}%`;
+}
+
+function formatSignedPercent(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "—";
+  }
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
 function formatBps(value: number): string {

@@ -22,6 +22,7 @@ export type FundingPredictionEntry = {
   averageLeftHourly: number | null;
   averageRightHourly: number | null;
   averageSpreadHourly: number;
+  currentDirectionalAnnualizedPct: number;
   totalDecimal: number;
   annualizedDecimal: number;
   spreadVolatility24hPct: number;
@@ -110,6 +111,9 @@ export async function fetchFundingPredictionSnapshot(
           ? Number(entry.average_right_hourly)
           : null,
       averageSpreadHourly: Number(entry.average_spread_hourly ?? 0),
+      currentDirectionalAnnualizedPct: Number(
+        entry.current_directional_annualized_pct ?? 0,
+      ),
       totalDecimal: Number(entry.total_decimal ?? 0),
       annualizedDecimal: Number(entry.annualized_decimal ?? 0),
       spreadVolatility24hPct: Number(entry.spread_volatility_24h_pct ?? 0),

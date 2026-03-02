@@ -270,7 +270,7 @@ class GrvtService:
         params: dict[str, Any] = {
             "post_only": request.post_only,
             "reduce_only": request.reduce_only,
-            "order_duration_secs": request.order_duration_secs or self._settings.post_only_ttl_secs,
+            "order_duration_secs": request.order_duration_secs or self._settings.grvt_post_only_ttl_secs,
             "time_in_force": "GOOD_TILL_TIME",
         }
         if request.client_order_id is not None:

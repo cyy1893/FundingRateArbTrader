@@ -980,6 +980,28 @@ class MarketDataService:
                     annualized_decimal = conservative_hourly_decimal * PREDICTION_HOURS_PER_YEAR
                     predicted_spread_24h = abs(average_spread_hourly) * PREDICTION_FORECAST_HOURS
 
+                current_left_hourly = _parse_float(row.funding_rate)
+                current_right_hourly = _parse_float(right_payload.get("funding_rate"))
+                if current_left_hourly is not None and current_right_hourly is not None:
+                    if direction == "leftLong":
+                        current_directional_hourly = (-current_left_hourly) + current_right_hourly
+                    elif direction == "rightLong":
+                        current_directional_hourly = current_left_hourly + (-current_right_hourly)
+                    else:
+                        current_directional_hourly = current_right_hourly - current_left_hourly
+                else:
+                    if direction == "leftLong":
+                        current_directional_hourly = average_spread_hourly
+                    elif direction == "rightLong":
+                        current_directional_hourly = -average_spread_hourly
+                    else:
+                        current_directional_hourly = average_spread_hourly
+                # Funding rates in this pipeline are decimal values (e.g. 0.0001 for 0.01%).
+                # Convert to annualized percentage to match the homepage arbitrage-space display.
+                current_directional_annualized_pct = (
+                    current_directional_hourly * PREDICTION_HOURS_PER_YEAR * 100.0
+                )
+
                 spread_favorable_now = _is_spread_favorable_for_direction(
                     direction=direction,
                     left_best_bid=left_best_bid,
@@ -1004,6 +1026,7 @@ class MarketDataService:
                         "average_left_hourly": average_left_hourly,
                         "average_right_hourly": average_right_hourly,
                         "average_spread_hourly": average_spread_hourly,
+                        "current_directional_annualized_pct": current_directional_annualized_pct,
                         "total_decimal": total_decimal,
                         "annualized_decimal": annualized_decimal,
                         "spread_volatility_24h_pct": spread_volatility_24h_pct,

@@ -356,8 +356,9 @@ class LighterService:
         if requested_expiry is not None and requested_expiry > 0:
             return requested_expiry
         if time_in_force == "post_only":
-            ttl = max(1, int(self._settings.post_only_ttl_secs))
-            return int(time.time()) + ttl
+            # Lighter uses SDK sentinel expiry for regular limit/post-only orders.
+            # Custom expiry values are rejected by exchange for some markets/accounts.
+            return SignerClient.DEFAULT_28_DAY_ORDER_EXPIRY
         return SignerClient.DEFAULT_28_DAY_ORDER_EXPIRY
 
     @staticmethod

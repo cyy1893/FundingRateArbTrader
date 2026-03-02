@@ -17,6 +17,7 @@ type AggregatedPositionRow = {
     lighterUnrealizedPnl: number;
     grvtUnrealizedPnl: number;
     totalUnrealizedPnl: number;
+    annualizedFundingRatePctWithLeverage: number | null;
     hasLighterPosition: boolean;
     hasGrvtPosition: boolean;
 };
@@ -27,12 +28,29 @@ type BottomPanelProps = {
     onCloseSymbol: (symbol: string, mode: "post_only" | "market") => void;
 };
 
+function buildExchangeUrl(exchange: "lighter" | "grvt", symbol: string): string {
+    const upperSymbol = symbol.trim().toUpperCase();
+    if (exchange === "lighter") {
+        return `https://app.lighter.xyz/trade/${encodeURIComponent(upperSymbol)}`;
+    }
+    const base = upperSymbol.replace(/[-_/]?PERP$/i, "").replace(/[_/]/g, "-");
+    const pair = base.includes("-") ? base : `${base}-USDT`;
+    return `https://grvt.io/exchange/perpetual/${encodeURIComponent(pair)}`;
+}
+
 const usdFormatter = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
 });
+
+function formatAnnualizedRate(value: number | null): string {
+    if (value == null || !Number.isFinite(value)) {
+        return "--";
+    }
+    return `${value.toFixed(2)}%`;
+}
 
 export function BottomPanel({ positions, closingState, onCloseSymbol }: BottomPanelProps) {
     const [isExpanded, setIsExpanded] = useState(false);
@@ -108,12 +126,15 @@ function PositionsTable({
                     <TableHead className="text-right text-gray-700 font-semibold uppercase text-[10px] tracking-wider">Lighter未实现盈亏</TableHead>
                     <TableHead className="text-right text-gray-700 font-semibold uppercase text-[10px] tracking-wider">GRVT未实现盈亏</TableHead>
                     <TableHead className="text-right text-gray-700 font-semibold uppercase text-[10px] tracking-wider">总未实现盈亏</TableHead>
+                    <TableHead className="text-right text-gray-700 font-semibold uppercase text-[10px] tracking-wider">资金费率年化(杠杆后)</TableHead>
+                    <TableHead className="text-right text-gray-700 font-semibold uppercase text-[10px] tracking-wider">交易所</TableHead>
                     <TableHead className="text-right text-gray-700 font-semibold uppercase text-[10px] tracking-wider">平仓操作</TableHead>
                 </TableRow>
             </TableHeader>
             <TableBody>
                 {positions.map((pos) => {
                     const isTotalPositive = pos.totalUnrealizedPnl >= 0;
+                    const fundingRate = pos.annualizedFundingRatePctWithLeverage;
                     const state = closingState[pos.symbol] ?? { postOnly: false, market: false };
                     const disableActions = state.postOnly || state.market || (!pos.hasLighterPosition && !pos.hasGrvtPosition);
 
@@ -148,6 +169,38 @@ function PositionsTable({
                                 )}
                             >
                                 {usdFormatter.format(pos.totalUnrealizedPnl)}
+                            </TableCell>
+                            <TableCell
+                                className={cn(
+                                    "text-right text-sm font-mono font-semibold",
+                                    fundingRate == null
+                                        ? "text-gray-500"
+                                        : fundingRate >= 0
+                                            ? "text-green-700"
+                                            : "text-red-700"
+                                )}
+                            >
+                                {formatAnnualizedRate(fundingRate)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                    <a
+                                        href={buildExchangeUrl("lighter", pos.symbol)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="rounded border border-blue-300 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-50"
+                                    >
+                                        Lighter
+                                    </a>
+                                    <a
+                                        href={buildExchangeUrl("grvt", pos.symbol)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="rounded border border-indigo-300 px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50"
+                                    >
+                                        GRVT
+                                    </a>
+                                </div>
                             </TableCell>
                             <TableCell className="text-right">
                                 <div className="flex items-center justify-end gap-2">

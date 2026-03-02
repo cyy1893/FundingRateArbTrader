@@ -361,6 +361,7 @@ class FundingPredictionEntry(BaseModel):
     average_left_hourly: float | None = None
     average_right_hourly: float | None = None
     average_spread_hourly: float
+    current_directional_annualized_pct: float = 0.0
     total_decimal: float
     annualized_decimal: float
     spread_volatility_24h_pct: float
