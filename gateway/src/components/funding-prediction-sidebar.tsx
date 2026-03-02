@@ -329,7 +329,14 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
               <TableCell className="text-right font-semibold text-primary">
                 {formatDecimalPercent(entry.annualizedDecimal)}
               </TableCell>
-              <TableCell className="text-right font-semibold text-primary">
+              <TableCell
+                className={cn(
+                  "text-right font-semibold",
+                  entry.currentDirectionalAnnualizedPct >= 0
+                    ? "text-emerald-600"
+                    : "text-rose-600",
+                )}
+              >
                 {formatSignedPercent(entry.currentDirectionalAnnualizedPct)}
               </TableCell>
               <TableCell className="text-right text-xs text-muted-foreground">
