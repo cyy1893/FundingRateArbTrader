@@ -36,7 +36,6 @@ export type FundingPredictionEntry = {
   recommendationScore: number;
   sampleCount: number;
   direction: FundingPredictionDirection;
-  spreadFavorableNow: boolean | null;
   entryTimingWaitHours: number;
   entryTimingAdvice: string;
 };
@@ -133,10 +132,6 @@ export async function fetchFundingPredictionSnapshot(
       recommendationScore: Number(entry.recommendation_score ?? 0),
       sampleCount: Number(entry.sample_count ?? 0),
       direction: (entry.direction as FundingPredictionDirection) ?? "unknown",
-      spreadFavorableNow:
-        typeof entry.spread_favorable_now === "boolean"
-          ? entry.spread_favorable_now
-          : null,
       entryTimingWaitHours: Number(entry.entry_timing_wait_hours ?? 0),
       entryTimingAdvice: String(entry.entry_timing_advice ?? "当前小时"),
     }),

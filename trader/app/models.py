@@ -202,7 +202,6 @@ class OrderBookSubscription(BaseModel):
     notional_value: float = Field(..., gt=0, description="Contract notional value in USD")
     depth: int = Field(10, ge=1, le=50, description="Number of price levels to include")
     throttle_ms: int = Field(500, ge=50, le=5000, description="Throttle interval in milliseconds for order book updates")
-    avoid_adverse_spread: bool = Field(False, description="Block orders when spread is unfavorable to the long side")
     auto_close_after_ms: Optional[int] = Field(
         None, ge=0, description="Auto-close delay in milliseconds after opening the hedge"
     )
@@ -375,7 +374,6 @@ class FundingPredictionEntry(BaseModel):
     recommendation_score: float
     sample_count: int
     direction: Literal["leftLong", "rightLong", "unknown"]
-    spread_favorable_now: bool | None = None
     entry_timing_wait_hours: float = 0.0
     entry_timing_advice: str = "当前小时"
 
@@ -461,7 +459,6 @@ class ArbOpenRequest(BaseModel):
     notional: float = Field(..., gt=0)
     leverage_left: float = Field(..., gt=0)
     leverage_right: float = Field(..., gt=0)
-    avoid_adverse_spread: bool = False
     auto_close_after_ms: int | None = Field(None, ge=0)
     liquidation_guard_enabled: bool = False
     liquidation_guard_threshold_pct: float | None = Field(None, gt=0, le=100)

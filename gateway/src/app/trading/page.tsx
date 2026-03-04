@@ -947,14 +947,6 @@ function TradingPageContent() {
       return;
     }
 
-    const longPrice = lighterSide === "buy" ? lighterPrice : grvtPrice;
-    const shortPrice = lighterSide === "sell" ? lighterPrice : grvtPrice;
-    if (activeSubscription.avoid_adverse_spread && longPrice > shortPrice) {
-      setArbStatus("error");
-      setArbMessage("当前价差对多头不利，已阻止下单。");
-      return;
-    }
-
     const notional = activeSubscription.notional_value;
     const lighterSize = Number((notional / lighterPrice).toFixed(6));
     const grvtSize = Number((notional / grvtPrice).toFixed(6));
@@ -977,7 +969,6 @@ function TradingPageContent() {
       notional,
       leverage_left: activeSubscription.lighter_leverage,
       leverage_right: activeSubscription.grvt_leverage ?? 1,
-      avoid_adverse_spread: activeSubscription.avoid_adverse_spread ?? false,
       liquidation_guard_enabled: activeSubscription.liquidation_guard_enabled ?? false,
       liquidation_guard_threshold_pct: activeSubscription.liquidation_guard_threshold_pct ?? null,
       drawdown_guard_enabled: activeSubscription.drawdown_guard_enabled ?? false,

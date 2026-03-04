@@ -219,7 +219,6 @@ export function QuickTradePanel({
   const [grvtLeverage, setGrvtLeverage] = useState(1);
   const [grvtDirection, setGrvtDirection] = useState<"long" | "short">(defaultGrvtDirection ?? "short");
   const [notionalValue, setNotionalValue] = useState("");
-  const [avoidAdverseSpread, setAvoidAdverseSpread] = useState(true);
   const [liquidationGuardEnabled, setLiquidationGuardEnabled] = useState(true);
   const [liquidationGuardPct, setLiquidationGuardPct] = useState("50");
   const [drawdownGuardEnabled, setDrawdownGuardEnabled] = useState(true);
@@ -299,7 +298,6 @@ export function QuickTradePanel({
         notional_value: 1,
         depth: 10,
         throttle_ms: 100,
-        avoid_adverse_spread: avoidAdverseSpread,
         liquidation_guard_enabled: liquidationGuardEnabled,
         liquidation_guard_threshold_pct: liquidationGuardThresholdPct,
         drawdown_guard_enabled: drawdownGuardEnabled,
@@ -318,7 +316,6 @@ export function QuickTradePanel({
       notional_value: safeNotional,
       depth: 10,
       throttle_ms: 100,
-      avoid_adverse_spread: avoidAdverseSpread,
       liquidation_guard_enabled: liquidationGuardEnabled,
       liquidation_guard_threshold_pct: liquidationGuardThresholdPct,
       drawdown_guard_enabled: drawdownGuardEnabled,
@@ -334,7 +331,6 @@ export function QuickTradePanel({
     grvtLeverage,
     grvtDirection,
     safeNotional,
-    avoidAdverseSpread,
     liquidationGuardEnabled,
     liquidationGuardThresholdPct,
     drawdownGuardEnabled,
@@ -524,20 +520,6 @@ export function QuickTradePanel({
 
         {/* Risk Management - Flatter Group */}
         <div className="space-y-2 pt-2 border-t border-slate-100">
-          <div className="flex items-start gap-2.5 py-1">
-            <input
-              id="avoid-adverse-spread"
-              type="checkbox"
-              checked={avoidAdverseSpread}
-              onChange={(e) => setAvoidAdverseSpread(e.target.checked)}
-              className="mt-0.5 h-4 w-4 cursor-pointer rounded border-slate-300 accent-primary"
-            />
-            <label htmlFor="avoid-adverse-spread" className="flex cursor-pointer flex-col">
-              <span className="text-[11px] font-bold text-slate-700">避免不利价差</span>
-              <span className="text-[9px] text-slate-400">阻止偏差超过阈值的成交</span>
-            </label>
-          </div>
-
           <div className="space-y-1.5 py-1">
             <div className="flex items-center gap-2.5">
               <input

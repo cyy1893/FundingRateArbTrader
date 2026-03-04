@@ -24,7 +24,7 @@ export function RightPanel() {
 
     return (
         <Sheet open={open} onOpenChange={handleOpenChange} modal={false}>
-            <SheetContent className="top-16 h-[calc(100vh-4rem)] w-[80vw] border-l shadow-xl outline-none p-0 sm:max-w-[80vw] lg:w-[760px] lg:max-w-[760px] data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right">
+            <SheetContent className="top-16 h-[calc(100vh-4rem)] w-[86vw] border-l shadow-xl outline-none p-0 sm:max-w-[86vw] lg:w-[900px] lg:max-w-[900px] data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right">
                 <div className="flex h-full flex-col">
                     <div className="flex border-b px-4 py-3 text-sm font-medium text-primary">
                         推荐套利币种

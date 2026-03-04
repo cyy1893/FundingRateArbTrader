@@ -48,7 +48,6 @@ import {
 } from "@/components/ui/table";
 import { formatVolume } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import { useFundingPredictionSidebar } from "@/components/funding-prediction-sidebar";
 import { persistComparisonSelection } from "@/lib/comparison-selection";
 import type { MarketRow } from "@/types/market";
 import type { FundingHistoryPoint, LiveFundingResponse } from "@/types/funding";
@@ -81,6 +80,7 @@ type PerpTableProps = {
 
 const DEFAULT_PAGE_SIZE = 15;
 const FETCH_INTERVAL_MS = 15000;
+const LIVE_FUNDING_CACHE_TTL_MS = 60000;
 const SORT_REFRESH_CACHE_MS = 5000;
 const DISPLAY_FUNDING_PERIOD_HOURS = 1;
 const MIN_EXCHANGE_VOLUME_USD = 100_000;
@@ -283,6 +283,15 @@ async function fetchLiveFundingSnapshot(
   };
 }
 
+function buildLiveFundingCacheKey(
+  leftSourceId: string,
+  rightSourceId: string,
+  leftSymbols: string[],
+  rightSymbols: string[],
+): string {
+  return `live-funding:${leftSourceId}:${rightSourceId}:${leftSymbols.join(",")}::${rightSymbols.join(",")}`;
+}
+
 type HistoryRequestPayload = {
   leftSymbol: string;
   rightSymbol: string | null;
@@ -367,6 +376,7 @@ export function PerpTable({
 }: PerpTableProps) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [pendingVolumeThreshold, setPendingVolumeThreshold] = useState<number | null>(null);
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<"desc" | "asc">("desc");
   const [liveFunding, setLiveFunding] = useState<{
@@ -404,11 +414,11 @@ export function PerpTable({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const predictionSidebar = useFundingPredictionSidebar();
 
   const handleVolumeThresholdChange = useCallback(
     (value: string) => {
       const numeric = Number.parseInt(value, 10);
+      setPendingVolumeThreshold(numeric);
       const params = new URLSearchParams(searchParams.toString());
       if (numeric === DEFAULT_VOLUME_THRESHOLD) {
         params.delete("volumeThreshold");
@@ -422,6 +432,18 @@ export function PerpTable({
     },
     [pathname, router, searchParams],
   );
+  useEffect(() => {
+    if (pendingVolumeThreshold == null) {
+      return;
+    }
+    if (pendingVolumeThreshold === volumeThreshold) {
+      setPendingVolumeThreshold(null);
+    }
+  }, [pendingVolumeThreshold, volumeThreshold]);
+
+  const displayedVolumeThreshold = pendingVolumeThreshold ?? volumeThreshold;
+  const isVolumeThresholdLoading =
+    pendingVolumeThreshold != null && pendingVolumeThreshold !== volumeThreshold;
   const historyRangeDurationMs = historyRangeDays * 24 * MS_PER_HOUR;
   const rows = useMemo(() => initialRows, [initialRows]);
   const isPriceDataLoading = false;
@@ -986,6 +1008,39 @@ export function PerpTable({
         return;
       }
 
+      const cacheKey = buildLiveFundingCacheKey(
+        leftSource.id,
+        rightSource.id,
+        leftSymbols,
+        rightSymbols,
+      );
+      if (!force) {
+        try {
+          const raw = window.sessionStorage.getItem(cacheKey);
+          if (raw) {
+            const parsed = JSON.parse(raw) as {
+              timestamp?: number;
+              payload?: { left?: Record<string, number>; right?: Record<string, number> };
+            };
+            const timestamp = Number(parsed?.timestamp ?? 0);
+            if (
+              parsed?.payload &&
+              Number.isFinite(timestamp) &&
+              now - timestamp < LIVE_FUNDING_CACHE_TTL_MS
+            ) {
+              setLiveFunding({
+                left: parsed.payload.left ?? {},
+                right: parsed.payload.right ?? {},
+              });
+              lastFetchRef.current = now;
+              return;
+            }
+          }
+        } catch {
+          // Ignore cache parse/storage errors.
+        }
+      }
+
       if (isFetchingRef.current) {
         if (force) {
           await new Promise<void>((resolve) => {
@@ -1016,6 +1071,20 @@ export function PerpTable({
           right: snapshot.right,
         });
         lastFetchRef.current = Date.now();
+        try {
+          window.sessionStorage.setItem(
+            cacheKey,
+            JSON.stringify({
+              timestamp: Date.now(),
+              payload: {
+                left: snapshot.left,
+                right: snapshot.right,
+              },
+            }),
+          );
+        } catch {
+          // Ignore storage errors.
+        }
       } catch {
         // ignore network errors; keep last values
       } finally {
@@ -1090,7 +1159,7 @@ export function PerpTable({
                 24H交易量 &ge;
               </span>
               <Select
-                value={String(volumeThreshold)}
+                value={String(displayedVolumeThreshold)}
                 onValueChange={handleVolumeThresholdChange}
               >
                 <SelectTrigger className="h-7 w-[90px] border-0 bg-transparent p-0 text-xs focus:ring-0">
@@ -1109,13 +1178,14 @@ export function PerpTable({
             <Button
               variant="outline"
               className="whitespace-nowrap"
-              onClick={() =>
-                predictionSidebar.open({
+              onClick={() => {
+                const params = new URLSearchParams({
                   sourceA: leftSource.id,
                   sourceB: rightSource.id,
-                  volumeThreshold,
-                })
-              }
+                  volumeThreshold: String(displayedVolumeThreshold),
+                });
+                router.push(`/recommendations?${params.toString()}`);
+              }}
             >
               推荐套利币种
             </Button>
@@ -1142,6 +1212,16 @@ export function PerpTable({
           {externalFilterDescription}
         </div>
 
+        {isVolumeThresholdLoading ? (
+          <div className="rounded-xl border">
+            <div className="flex h-[420px] items-center justify-center text-muted-foreground">
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <span className="text-xs font-medium">加载中…</span>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="relative rounded-xl border">
           {isBlockingRefresh ? (
             <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-background/80 backdrop-blur-sm">
@@ -1264,6 +1344,7 @@ export function PerpTable({
             </TableBody>
           </Table>
         </div>
+        )}
 
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="text-sm text-muted-foreground">

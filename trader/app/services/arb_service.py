@@ -30,7 +30,6 @@ class ArbService:
             created_at=now,
             updated_at=now,
             meta=request.meta or {
-                "avoid_adverse_spread": request.avoid_adverse_spread,
                 "auto_close_after_ms": request.auto_close_after_ms,
                 "liquidation_guard_enabled": request.liquidation_guard_enabled,
                 "liquidation_guard_threshold_pct": request.liquidation_guard_threshold_pct,

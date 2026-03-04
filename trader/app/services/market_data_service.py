@@ -44,7 +44,10 @@ PREDICTION_LOOKBACK_HOURS = 72
 PREDICTION_FORECAST_HOURS = 24
 PREDICTION_HOURS_PER_YEAR = 24 * 365
 MAX_PREDICTION_WORKERS = 5
-PREDICTION_HALF_LIFE_HOURS = 16.0
+# Use a shorter half-life so recent funding spreads dominate prediction more strongly.
+PREDICTION_HALF_LIFE_HOURS = 8.0
+PREDICTION_ROW_RETRY_ATTEMPTS = 4
+PREDICTION_ROW_RETRY_BASE_DELAY_SECONDS = 1.5
 PREDICTION_VOLATILITY_WINDOW_HOURS = 24
 PREDICTION_EWMA_LAMBDA = 0.90
 PREDICTION_ROUND_TRIP_FEE_PCT = 0.04  # 4 bps total round-trip cost proxy.
@@ -61,6 +64,7 @@ DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS = 12.0
 DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT = 5.0
 MAX_ACCEPTABLE_PRICE_VOLATILITY_PCT = 10.0
 LIGHTER_SPREAD_FETCH_CONCURRENCY = 8
+MIN_PER_EXCHANGE_VOLUME_USD = 100_000.0
 CACHE_TTL_SECONDS = 10 * 60
 PREDICTION_CACHE_TTL_SECONDS = 10 * 60
 AVAILABLE_SYMBOLS_CACHE_TTL_SECONDS = 60 * 60
@@ -753,11 +757,13 @@ class MarketDataService:
         failures: list[dict[str, str]] = []
 
         def _passes_volume(row: MarketRow) -> bool:
-            if volume_cutoff <= 0:
-                return True
             left_volume = _parse_float(row.day_notional_volume) or 0.0
             right_payload = row.right if isinstance(row.right, dict) else None
             right_volume = _parse_float(right_payload.get("volume_usd")) if right_payload else None
+            if left_volume < MIN_PER_EXCHANGE_VOLUME_USD or (right_volume or 0.0) < MIN_PER_EXCHANGE_VOLUME_USD:
+                return False
+            if volume_cutoff <= 0:
+                return True
             return left_volume + (right_volume or 0.0) >= volume_cutoff
 
         eligible_rows = [
@@ -792,22 +798,31 @@ class MarketDataService:
                     failures.append({"symbol": symbol_label, "reason": "右侧市场缺失"})
                     return
 
-                try:
-                    dataset = await self.get_funding_history(
-                        left_source=primary,
-                        right_source=secondary,
-                        left_symbol=row.left_symbol,
-                        right_symbol=right_symbol,
-                        days=PREDICTION_LOOKBACK_DAYS,
-                        left_funding_period_hours=row.left_funding_period_hours,
-                        right_funding_period_hours=_parse_float(right_payload.get("funding_period_hours")),
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    failures.append({"symbol": symbol_label, "reason": str(exc)})
-                    return
+                dataset: list[FundingHistoryPoint] = []
+                last_retry_error: Exception | None = None
+                for attempt in range(PREDICTION_ROW_RETRY_ATTEMPTS):
+                    try:
+                        dataset = await self.get_funding_history(
+                            left_source=primary,
+                            right_source=secondary,
+                            left_symbol=row.left_symbol,
+                            right_symbol=right_symbol,
+                            days=PREDICTION_LOOKBACK_DAYS,
+                            left_funding_period_hours=row.left_funding_period_hours,
+                            right_funding_period_hours=_parse_float(right_payload.get("funding_period_hours")),
+                        )
+                        if dataset:
+                            break
+                    except Exception as exc:  # noqa: BLE001
+                        last_retry_error = exc
+                    if attempt < PREDICTION_ROW_RETRY_ATTEMPTS - 1:
+                        await asyncio.sleep(PREDICTION_ROW_RETRY_BASE_DELAY_SECONDS * (2**attempt))
 
                 if not dataset:
-                    failures.append({"symbol": symbol_label, "reason": "暂无资金费率历史数据"})
+                    if last_retry_error is not None:
+                        failures.append({"symbol": symbol_label, "reason": str(last_retry_error)})
+                    else:
+                        failures.append({"symbol": symbol_label, "reason": "暂无资金费率历史数据"})
                     return
 
                 latest_time = dataset[-1].time
@@ -1002,16 +1017,6 @@ class MarketDataService:
                     current_directional_hourly * PREDICTION_HOURS_PER_YEAR * 100.0
                 )
 
-                spread_favorable_now = _is_spread_favorable_for_direction(
-                    direction=direction,
-                    left_best_bid=left_best_bid,
-                    left_best_ask=left_best_ask,
-                    right_best_bid=right_best_bid,
-                    right_best_ask=right_best_ask,
-                    left_mark_price=row.mark_price,
-                    right_mark_price=_parse_float(right_payload.get("mark_price")),
-                )
-
                 raw_entries.append(
                     {
                         "symbol": row.symbol or row.left_symbol,
@@ -1039,7 +1044,6 @@ class MarketDataService:
                         "combined_spread_samples_bps": combined_spread_samples_bps,
                         "sample_count": spread_count,
                         "direction": direction,
-                        "spread_favorable_now": spread_favorable_now,
                         **_build_entry_timing_advice(
                             direction=direction,
                             average_left_hourly=average_left_hourly,
@@ -1990,43 +1994,6 @@ def _estimate_price_volatility_24h_pct_from_changes(
     if not values:
         return None
     return sum(values) / len(values)
-
-
-def _is_spread_favorable_for_direction(
-    direction: str,
-    left_best_bid: float | None,
-    left_best_ask: float | None,
-    right_best_bid: float | None,
-    right_best_ask: float | None,
-    left_mark_price: float | None = None,
-    right_mark_price: float | None = None,
-) -> bool | None:
-    if direction == "leftLong":
-        long_price = left_best_bid
-        short_price = right_best_ask
-    elif direction == "rightLong":
-        long_price = right_best_bid
-        short_price = left_best_ask
-    else:
-        return None
-
-    if long_price is None or short_price is None:
-        left_mid = _compute_mid_price(left_best_bid, left_best_ask, fallback_price=left_mark_price)
-        right_mid = _compute_mid_price(right_best_bid, right_best_ask, fallback_price=right_mark_price)
-        # Use mid/mark fallback when one side order book top level is temporarily missing.
-        if direction == "leftLong":
-            long_price = long_price if long_price is not None else left_mid
-            short_price = short_price if short_price is not None else right_mid
-        else:
-            long_price = long_price if long_price is not None else right_mid
-            short_price = short_price if short_price is not None else left_mid
-    if long_price is None or short_price is None:
-        return None
-    if not math.isfinite(long_price) or not math.isfinite(short_price):
-        return None
-    if long_price <= 0 or short_price <= 0:
-        return None
-    return long_price <= short_price
 
 
 def _build_entry_timing_advice(

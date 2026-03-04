@@ -1,12 +1,16 @@
 FROM node:22 AS deps
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm config set registry ${NPM_REGISTRY} \
+    && npm ci
 
 FROM node:22 AS builder
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN npm config set registry ${NPM_REGISTRY}
 RUN npm run build
 
 FROM node:22-slim AS runner

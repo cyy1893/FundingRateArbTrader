@@ -53,7 +53,6 @@ export type OrderBookSubscription = {
   notional_value: number;
   depth: number;
   throttle_ms?: number;
-  avoid_adverse_spread?: boolean;
   auto_close_after_ms?: number;
   liquidation_guard_enabled?: boolean;
   liquidation_guard_threshold_pct?: number;

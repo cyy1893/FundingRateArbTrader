@@ -55,6 +55,11 @@ type SidebarState = {
 };
 
 const SidebarContext = createContext<SidebarState | null>(null);
+const RECOMMENDATION_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function buildRecommendationCacheKey(request: SidebarRequest): string {
+  return `funding-prediction:${request.sourceA}:${request.sourceB}:${request.volumeThreshold}`;
+}
 
 export function FundingPredictionSidebarProvider({
   children,
@@ -91,6 +96,39 @@ export function FundingPredictionSidebarProvider({
     // Prevent accidental duplicate run creation while a task is already executing.
     if (loading && !request.forceRefresh) {
       return;
+    }
+
+    const cacheKey = buildRecommendationCacheKey(request);
+    if (!request.forceRefresh) {
+      try {
+        const raw = window.sessionStorage.getItem(cacheKey);
+        if (raw) {
+          const parsed = JSON.parse(raw) as {
+            timestamp?: number;
+            payload?: PredictionSidebarPayload;
+          };
+          if (
+            parsed?.payload &&
+            Number.isFinite(parsed.timestamp) &&
+            Date.now() - Number(parsed.timestamp) < RECOMMENDATION_CACHE_TTL_MS
+          ) {
+            setLastRequest(request);
+            setError(null);
+            setData(parsed.payload);
+            setProgress(100);
+            setStage("命中前端缓存");
+            return;
+          }
+        }
+      } catch {
+        // Ignore cache parse/storage errors.
+      }
+    } else {
+      try {
+        window.sessionStorage.removeItem(cacheKey);
+      } catch {
+        // Ignore storage errors.
+      }
     }
 
     setLastRequest(request);
@@ -156,6 +194,17 @@ export function FundingPredictionSidebarProvider({
             throw new Error("推荐任务已完成但返回为空");
           }
           setData(statusPayload.result);
+          try {
+            window.sessionStorage.setItem(
+              cacheKey,
+              JSON.stringify({
+                timestamp: Date.now(),
+                payload: statusPayload.result,
+              }),
+            );
+          } catch {
+            // Ignore storage errors.
+          }
           setProgress(100);
           setStage("完成");
           break;
@@ -302,19 +351,18 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
         ) : null}
       </div>
       <div className="overflow-x-auto">
-      <Table className="whitespace-nowrap">
+      <Table className="w-auto whitespace-nowrap [&_th]:text-left [&_td]:text-left">
         <TableHeader>
           <TableRow className="text-[11px] uppercase tracking-wide text-muted-foreground">
             <TableHead>币种</TableHead>
             <TableHead>方向</TableHead>
-            <TableHead className="text-right">预测年化 APR</TableHead>
-            <TableHead className="text-right">当前方向资金费率年化 APR</TableHead>
-            <TableHead className="text-right">价格波动率(24h估算)</TableHead>
-            <TableHead className="text-right">点差(Lighter)</TableHead>
-            <TableHead className="text-right">点差(GRVT)</TableHead>
-            <TableHead className="text-center">当前价差是否有利</TableHead>
-            <TableHead className="text-right">综合分</TableHead>
-            <TableHead className="text-right">去交易</TableHead>
+            <TableHead>预测年化 APR</TableHead>
+            <TableHead>当前方向年化 APR</TableHead>
+            <TableHead>价格波动率(24h估算)</TableHead>
+            <TableHead>点差(Lighter)</TableHead>
+            <TableHead>点差(GRVT)</TableHead>
+            <TableHead>综合分</TableHead>
+            <TableHead>去交易</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -326,12 +374,12 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
               <TableCell className="text-xs">
                 {renderDirection(entry, payload.metadata)}
               </TableCell>
-              <TableCell className="text-right font-semibold text-primary">
+              <TableCell className="font-semibold text-primary">
                 {formatDecimalPercent(entry.annualizedDecimal)}
               </TableCell>
               <TableCell
                 className={cn(
-                  "text-right font-semibold",
+                  "font-semibold",
                   entry.currentDirectionalAnnualizedPct >= 0
                     ? "text-emerald-600"
                     : "text-rose-600",
@@ -339,29 +387,19 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
               >
                 {formatSignedPercent(entry.currentDirectionalAnnualizedPct)}
               </TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground">
+              <TableCell className="text-xs text-muted-foreground">
                 {formatPercent(entry.priceVolatility24hPct)}
               </TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground">
+              <TableCell className="text-xs text-muted-foreground">
                 {formatBps(entry.leftBidAskSpreadBps)}
               </TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground">
+              <TableCell className="text-xs text-muted-foreground">
                 {formatBps(entry.rightBidAskSpreadBps)}
               </TableCell>
-              <TableCell className="text-center text-xs">
-                <span className={cn(
-                  "font-medium",
-                  entry.spreadFavorableNow === true && "text-emerald-600",
-                  entry.spreadFavorableNow === false && "text-rose-600",
-                  entry.spreadFavorableNow == null && "text-muted-foreground",
-                )}>
-                  {formatSpreadFavorable(entry.spreadFavorableNow)}
-                </span>
-              </TableCell>
-              <TableCell className="text-right text-sm font-semibold">
+              <TableCell className="text-sm font-semibold">
                 {entry.recommendationScore.toFixed(2)}
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell>
                 <a
                   href={`/trading?symbol=${entry.symbol}&lighterDir=${entry.direction === "leftLong" ? "long" : "short"
                     }&grvtDir=${entry.direction === "leftLong" ? "short" : "long"
@@ -451,11 +489,4 @@ function formatBps(value: number): string {
     return "—";
   }
   return `${value.toFixed(2)} bps`;
-}
-
-function formatSpreadFavorable(value: boolean | null): string {
-  if (value == null) {
-    return "未知";
-  }
-  return value ? "有利" : "不利";
 }

@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, TrendingUp, Lock, User, LogOut } from "lucide-react";
+import { BarChart3, TrendingUp, Lock, User, LogOut, ListOrdered } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { clearClientAuthToken, extractUsernameFromToken, getClientAuthToken } from "@/lib/auth";
 
 const NAV_ITEMS = [
   { href: "/", label: "费率比较", icon: BarChart3 },
+  { href: "/recommendations", label: "推荐套利币种", icon: ListOrdered },
   { href: "/trading", label: "交易", icon: TrendingUp },
   { href: "/login", label: "登录", icon: Lock },
 ];
