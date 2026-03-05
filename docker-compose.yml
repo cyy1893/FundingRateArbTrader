@@ -51,7 +51,7 @@ services:
     environment:
       - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
     ports:
-      - "3000:3000"
+      - "80:3000"
     healthcheck:
       test: ["CMD", "node", "-e", "const h=require('os').hostname();require('http').get('http://'+h+':3000', (r)=>process.exit(r.statusCode>=200&&r.statusCode<500?0:1)).on('error', ()=>process.exit(1))"]
       interval: 30s

@@ -19,5 +19,5 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/package*.json ./
 RUN chown -R node:node /app
 USER node
-EXPOSE 3000
+EXPOSE 80
 CMD ["node", "server.js"]
