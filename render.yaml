@@ -1,0 +1,65 @@
+services:
+  - type: web
+    name: funding-rate-arb-trader
+    runtime: docker
+    plan: starter
+    rootDir: trader
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    preDeployCommand: /opt/venv/bin/alembic -c alembic.ini upgrade head
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: LOG_DIR
+        value: /tmp/funding-rate-arb-trader
+      - key: LIGHTER_BASE_URL
+        sync: false
+      - key: GRVT_ENV
+        sync: false
+      - key: GRVT_END_POINT_VERSION
+        value: v1
+      - key: GRVT_WS_STREAM_VERSION
+        value: v1
+      - key: GRVT_POST_ONLY_TTL_SECS
+        value: "300"
+      - key: AUTH_JWT_SECRET
+        sync: false
+      - key: AUTH_TOKEN_TTL_MINUTES
+        value: "10080"
+      - key: AUTH_LOCKOUT_THRESHOLD
+        value: "3"
+      - key: AUTH_LOCKOUT_MINUTES
+        value: "60"
+      - key: ADMIN_REGISTRATION_SECRET
+        sync: false
+      - key: ADMIN_CLIENT_HEADER_NAME
+        value: X-Admin-Client-Secret
+      - key: USER_CACHE_TTL_SECONDS
+        value: "300"
+      - key: DB_KEEPALIVE_INTERVAL_SECONDS
+        value: "28800"
+      - key: CRYPTO_KEY
+        sync: false
+      - key: COINGECKO_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+
+  - type: web
+    name: funding-rate-arb-gateway
+    runtime: docker
+    plan: starter
+    rootDir: gateway
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: commit
+    healthCheckPath: /
+    envVars:
+      - key: TRADER_API_BASE_URL
+        value: https://funding-rate-arb-trader.onrender.com
+      - key: NEXT_PUBLIC_API_BASE_URL
+        value: https://funding-rate-arb-trader.onrender.com
+      - key: NEXT_PUBLIC_TRADER_WS_URL
+        value: wss://funding-rate-arb-trader.onrender.com/ws/events
