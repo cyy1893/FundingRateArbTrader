@@ -13,6 +13,26 @@ function buildUpstreamUrl(path: string): string {
   return `${TRADER_API_BASE_URL.replace(/\/$/, "")}${path}`;
 }
 
+async function parseUpstreamResponse(response: Response): Promise<unknown> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    return response.json().catch(() => ({ error: "上游返回了无效 JSON" }));
+  }
+
+  const text = await response.text().catch(() => "");
+  if (text.trim()) {
+    return { error: text.trim() };
+  }
+  return { error: `上游返回了非 JSON 响应（HTTP ${response.status}）` };
+}
+
+function getObjectValue(payload: unknown, key: string): unknown {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  return (payload as Record<string, unknown>)[key];
+}
+
 export async function POST(request: Request) {
   const cookieStore = await cookies();
   let payload: unknown;
@@ -32,16 +52,18 @@ export async function POST(request: Request) {
       body: JSON.stringify(payload),
     });
 
-    const data = await response.json();
+    const data = await parseUpstreamResponse(response);
 
     if (!response.ok) {
       return NextResponse.json(data, { status: response.status });
     }
 
-    const token = typeof data?.access_token === "string" ? data.access_token : null;
+    const tokenValue = getObjectValue(data, "access_token");
+    const expiresInValue = getObjectValue(data, "expires_in");
+    const token = typeof tokenValue === "string" ? tokenValue : null;
     const expiresIn =
-      typeof data?.expires_in === "number" && Number.isFinite(data.expires_in)
-        ? Math.max(1, Math.floor(data.expires_in))
+      typeof expiresInValue === "number" && Number.isFinite(expiresInValue)
+        ? Math.max(1, Math.floor(expiresInValue))
         : 12 * 60 * 60; // default 12h
 
     if (token) {
