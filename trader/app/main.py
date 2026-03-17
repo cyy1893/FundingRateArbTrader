@@ -15,6 +15,7 @@ from cachetools import TTLCache
 from fastapi import Depends, FastAPI, HTTPException, Request, Security, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import text
 from sqlmodel import Session, select
 import os
 
@@ -86,6 +87,7 @@ from app.utils.crypto import decrypt_secret, encrypt_secret
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger("websockets").setLevel(logging.WARNING)
 logging.getLogger("websockets.client").setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
 
 
 settings = get_settings()
@@ -111,6 +113,8 @@ async def lifespan(app: FastAPI):
     workers.append(asyncio.create_task(funding_settlement_guard_worker()))
     workers.append(asyncio.create_task(liquidation_guard_worker()))
     workers.append(asyncio.create_task(drawdown_guard_worker()))
+    if settings.db_keepalive_interval_seconds > 0:
+        workers.append(asyncio.create_task(database_keepalive_worker()))
     try:
         yield
     finally:
@@ -232,6 +236,23 @@ async def auto_close_worker() -> None:
             ).all()
         for task_id in task_ids:
             await _execute_auto_close_task(task_id)
+
+
+def _run_database_keepalive() -> None:
+    engine = get_engine()
+    with Session(engine) as session:
+        session.exec(text("SELECT 1")).first()
+
+
+async def database_keepalive_worker() -> None:
+    interval_seconds = settings.db_keepalive_interval_seconds
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await asyncio.to_thread(_run_database_keepalive)
+            logger.info("Database keepalive query completed successfully.")
+        except Exception:
+            logger.exception("Database keepalive query failed.")
 
 
 def _funding_sign_for_side(side: str) -> float:
