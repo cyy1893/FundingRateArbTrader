@@ -1,16 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, useState } from "react";
 
-import { clearClientAuthToken, extractUsernameFromToken, getClientAuthToken } from "@/lib/auth";
 import type { AdminCreateUserRequest, AdminCreateUserResponse } from "@/types/admin";
 
 type CreateFormState = {
   username: string;
   password: string;
-  is_admin: boolean;
   is_active: boolean;
   lighter_account_index: string;
   lighter_api_key_index: string;
@@ -57,14 +54,12 @@ function extractErrorMessage(payload: unknown, fallback: string): string {
 }
 
 export default function CreateUserPage() {
-  const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
   const [form, setForm] = useState<CreateFormState>({
     username: "",
     password: "",
-    is_admin: false,
     is_active: true,
     lighter_account_index: "",
     lighter_api_key_index: "",
@@ -73,20 +68,6 @@ export default function CreateUserPage() {
     grvt_private_key: "",
     grvt_trading_account_id: "",
   });
-
-  const currentUser = useMemo(() => extractUsernameFromToken(getClientAuthToken()), []);
-
-  useEffect(() => {
-    if (!getClientAuthToken()) {
-      router.push("/login");
-    }
-  }, [router]);
-
-  const handleLogout = async () => {
-    await fetch("/api/login", { method: "DELETE" });
-    clearClientAuthToken();
-    router.push("/login");
-  };
 
   const onCreateUser = async (event: FormEvent) => {
     event.preventDefault();
@@ -105,7 +86,6 @@ export default function CreateUserPage() {
     const payload: AdminCreateUserRequest = {
       username: form.username.trim(),
       password: form.password,
-      is_admin: form.is_admin,
       is_active: form.is_active,
       lighter_account_index: lighterAccountIndex,
       lighter_api_key_index: lighterApiKeyIndex,
@@ -132,7 +112,6 @@ export default function CreateUserPage() {
       setForm({
         username: "",
         password: "",
-        is_admin: false,
         is_active: true,
         lighter_account_index: "",
         lighter_api_key_index: "",
@@ -153,15 +132,12 @@ export default function CreateUserPage() {
       <header className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-semibold">Create User</h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">Current admin: {currentUser ?? "unknown"}</p>
+          <p className="mt-1 text-sm text-[var(--muted)]">Protected by ADMIN_REGISTRATION_SECRET.</p>
         </div>
         <div className="flex items-center gap-3">
           <Link href="/users" className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm">
             Back to Users
           </Link>
-          <button className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm" onClick={handleLogout}>
-            Logout
-          </button>
         </div>
       </header>
 
@@ -275,14 +251,6 @@ export default function CreateUserPage() {
           </div>
 
           <div className="flex items-center gap-6">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={form.is_admin}
-                onChange={(e) => setForm((prev) => ({ ...prev, is_admin: e.target.checked }))}
-              />
-              admin
-            </label>
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"

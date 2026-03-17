@@ -1,7 +1,4 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-
-import { AUTH_COOKIE_NAME } from "@/lib/auth";
 
 const TRADER_API_BASE_URL =
   process.env.TRADER_API_BASE_URL ??
@@ -41,12 +38,6 @@ function extractError(payload: unknown, fallback: string): string {
 }
 
 export async function GET() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const secretOrResponse = getAdminSecretOrResponse();
   if (secretOrResponse instanceof NextResponse) {
     return secretOrResponse;
@@ -56,7 +47,6 @@ export async function GET() {
     const response = await fetch(buildUpstreamUrl("/admin/users"), {
       cache: "no-store",
       headers: {
-        Authorization: `Bearer ${token}`,
         [ADMIN_CLIENT_HEADER_NAME]: secretOrResponse,
       },
     });
@@ -78,12 +68,6 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const secretOrResponse = getAdminSecretOrResponse();
   if (secretOrResponse instanceof NextResponse) {
     return secretOrResponse;
@@ -101,7 +85,6 @@ export async function POST(request: Request) {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        Authorization: `Bearer ${token}`,
         [ADMIN_CLIENT_HEADER_NAME]: secretOrResponse,
       },
       body: JSON.stringify(payload),

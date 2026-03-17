@@ -1,7 +1,4 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-
-import { AUTH_COOKIE_NAME } from "@/lib/auth";
 
 const TRADER_API_BASE_URL =
   process.env.TRADER_API_BASE_URL ??
@@ -50,12 +47,6 @@ export async function POST(_: Request, { params }: Params) {
     return NextResponse.json({ error: "Missing user id" }, { status: 400 });
   }
 
-  const cookieStore = await cookies();
-  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const secretOrResponse = getAdminSecretOrResponse();
   if (secretOrResponse instanceof NextResponse) {
     return secretOrResponse;
@@ -66,7 +57,6 @@ export async function POST(_: Request, { params }: Params) {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        Authorization: `Bearer ${token}`,
         [ADMIN_CLIENT_HEADER_NAME]: secretOrResponse,
       },
       body: JSON.stringify({}),

@@ -1,10 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { clearClientAuthToken, extractUsernameFromToken, getClientAuthToken } from "@/lib/auth";
 import type { AdminResetPasswordResponse, AdminUserListResponse, AdminUserSummary } from "@/types/admin";
 
 function toLocalTime(value: string | null): string {
@@ -25,13 +23,11 @@ function extractErrorMessage(payload: unknown, fallback: string): string {
 }
 
 export default function UsersPage() {
-  const router = useRouter();
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [resettingUserId, setResettingUserId] = useState<string | null>(null);
   const [resetResult, setResetResult] = useState<{ username: string; temporaryPassword: string } | null>(null);
-  const currentUser = useMemo(() => extractUsernameFromToken(getClientAuthToken()), []);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -41,11 +37,6 @@ export default function UsersPage() {
       const data = (await response.json()) as AdminUserListResponse | { error?: string };
       if (!response.ok) {
         const message = extractErrorMessage(data, "Failed to load users");
-        if (response.status === 401) {
-          clearClientAuthToken();
-          router.push("/login");
-          return;
-        }
         setError(message);
         return;
       }
@@ -58,18 +49,8 @@ export default function UsersPage() {
   };
 
   useEffect(() => {
-    if (!getClientAuthToken()) {
-      router.push("/login");
-      return;
-    }
     void loadUsers();
-  }, [router]);
-
-  const handleLogout = async () => {
-    await fetch("/api/login", { method: "DELETE" });
-    clearClientAuthToken();
-    router.push("/login");
-  };
+  }, []);
 
   const handleResetPassword = async (user: AdminUserSummary) => {
     setError(null);
@@ -82,11 +63,6 @@ export default function UsersPage() {
       const data = (await response.json()) as AdminResetPasswordResponse | { error?: string };
       if (!response.ok) {
         const message = extractErrorMessage(data, "Failed to reset password");
-        if (response.status === 401) {
-          clearClientAuthToken();
-          router.push("/login");
-          return;
-        }
         setError(message);
         return;
       }
@@ -108,15 +84,12 @@ export default function UsersPage() {
       <header className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-semibold">Users</h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">Current admin: {currentUser ?? "unknown"}</p>
+          <p className="mt-1 text-sm text-[var(--muted)]">Protected by ADMIN_REGISTRATION_SECRET.</p>
         </div>
         <div className="flex items-center gap-3">
           <Link href="/users/create" className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm text-white">
             Create User
           </Link>
-          <button className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm" onClick={handleLogout}>
-            Logout
-          </button>
         </div>
       </header>
 
@@ -143,7 +116,6 @@ export default function UsersPage() {
               <thead>
                 <tr className="border-b border-[var(--line)] text-left">
                   <th className="px-2 py-2">Username</th>
-                  <th className="px-2 py-2">Role</th>
                   <th className="px-2 py-2">Status</th>
                   <th className="px-2 py-2">Attempts</th>
                   <th className="px-2 py-2">Locked Until</th>
@@ -161,7 +133,6 @@ export default function UsersPage() {
                 {users.map((user) => (
                   <tr key={user.id} className="border-b border-[var(--line)]">
                     <td className="px-2 py-2">{user.username}</td>
-                    <td className="px-2 py-2">{user.is_admin ? "admin" : "user"}</td>
                     <td className="px-2 py-2">{user.is_active ? "active" : "inactive"}</td>
                     <td className="px-2 py-2">{user.failed_attempts}</td>
                     <td className="px-2 py-2">{toLocalTime(user.locked_until)}</td>

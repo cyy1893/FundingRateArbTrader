@@ -135,7 +135,6 @@ class User(SQLModel, table=True):
     password_hash: str
     password_salt: str
     is_active: bool = True
-    is_admin: bool = False
     failed_attempts: int = 0
     failed_first_at: Optional[datetime] = None
     locked_until: Optional[datetime] = None
@@ -163,4 +162,3 @@ class TradingProfile(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     deleted_at: Optional[datetime] = Field(default=None, index=True)
-

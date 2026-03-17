@@ -542,7 +542,6 @@ class ArbStatusResponse(BaseModel):
 class AdminCreateUserRequest(BaseModel):
     username: str
     password: str
-    is_admin: bool = False
     is_active: bool = True
     lighter_account_index: int
     lighter_api_key_index: int
@@ -555,7 +554,6 @@ class AdminCreateUserRequest(BaseModel):
 class AdminUserResponse(BaseModel):
     id: str
     username: str
-    is_admin: bool
     is_active: bool
     created_at: datetime
 
@@ -563,7 +561,6 @@ class AdminUserResponse(BaseModel):
 class AdminUserSummary(BaseModel):
     id: str
     username: str
-    is_admin: bool
     is_active: bool
     failed_attempts: int
     locked_until: datetime | None = None

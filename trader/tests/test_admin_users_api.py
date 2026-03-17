@@ -21,7 +21,6 @@ def _create_user(
     username: str,
     password: str,
     *,
-    is_admin: bool,
     is_active: bool = True,
 ) -> None:
     salt = os.urandom(16)
@@ -31,7 +30,6 @@ def _create_user(
         username=username,
         password_hash=_hash_password(password, salt),
         password_salt=salt.hex(),
-        is_admin=is_admin,
         is_active=is_active,
         created_at=now,
         updated_at=now,
@@ -59,22 +57,13 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(grvt_service, "stop", _noop)
 
     with Session(engine) as session:
-        _create_user(session, "admin", "admin-pass", is_admin=True)
-        _create_user(session, "trader", "user-pass", is_admin=False)
+        _create_user(session, "admin", "admin-pass")
+        _create_user(session, "trader", "user-pass")
 
     with TestClient(app) as test_client:
         yield test_client
 
     app.dependency_overrides.clear()
-
-
-def _login_token(client: TestClient, username: str, password: str) -> str:
-    response = client.post("/login", json={"username": username, "password": password})
-    assert response.status_code == 200
-    payload = response.json()
-    token = payload.get("access_token")
-    assert isinstance(token, str) and token
-    return token
 
 
 def _create_payload(username: str) -> dict:
@@ -90,15 +79,28 @@ def _create_payload(username: str) -> dict:
     }
 
 
-def test_admin_users_list_requires_admin(client: TestClient) -> None:
-    user_token = _login_token(client, "trader", "user-pass")
-    response = client.get("/admin/users", headers={"Authorization": f"Bearer {user_token}"})
+def test_admin_users_list_requires_client_secret(client: TestClient) -> None:
+    response = client.get("/admin/users")
     assert response.status_code == 403
+
+    wrong_secret = client.get(
+        "/admin/users",
+        headers={settings.admin_client_header_name: "wrong-secret"},
+    )
+    assert wrong_secret.status_code == 403
+
+    ok = client.get(
+        "/admin/users",
+        headers={settings.admin_client_header_name: settings.admin_registration_secret},
+    )
+    assert ok.status_code == 200
 
 
 def test_admin_users_list_masks_sensitive_fields(client: TestClient) -> None:
-    admin_token = _login_token(client, "admin", "admin-pass")
-    response = client.get("/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
+    response = client.get(
+        "/admin/users",
+        headers={settings.admin_client_header_name: settings.admin_registration_secret},
+    )
     assert response.status_code == 200
 
     payload = response.json()
@@ -123,36 +125,30 @@ def test_admin_users_list_masks_sensitive_fields(client: TestClient) -> None:
 
 
 def test_admin_create_user_requires_client_secret(client: TestClient) -> None:
-    admin_token = _login_token(client, "admin", "admin-pass")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-
     missing_secret = client.post(
         "/admin/users",
         json=_create_payload("alice"),
-        headers=headers,
     )
     assert missing_secret.status_code == 403
 
     wrong_secret = client.post(
         "/admin/users",
         json=_create_payload("alice"),
-        headers={**headers, settings.admin_client_header_name: "wrong-secret"},
+        headers={settings.admin_client_header_name: "wrong-secret"},
     )
     assert wrong_secret.status_code == 403
 
     ok = client.post(
         "/admin/users",
         json=_create_payload("alice"),
-        headers={**headers, settings.admin_client_header_name: settings.admin_registration_secret},
+        headers={settings.admin_client_header_name: settings.admin_registration_secret},
     )
     assert ok.status_code == 200
     assert ok.json()["username"] == "alice"
 
 
 def test_admin_create_user_conflict(client: TestClient) -> None:
-    admin_token = _login_token(client, "admin", "admin-pass")
     headers = {
-        "Authorization": f"Bearer {admin_token}",
         settings.admin_client_header_name: settings.admin_registration_secret,
     }
     first = client.post("/admin/users", json=_create_payload("bob"), headers=headers)
@@ -163,9 +159,7 @@ def test_admin_create_user_conflict(client: TestClient) -> None:
 
 
 def test_admin_create_user_requires_exchange_fields(client: TestClient) -> None:
-    admin_token = _login_token(client, "admin", "admin-pass")
     headers = {
-        "Authorization": f"Bearer {admin_token}",
         settings.admin_client_header_name: settings.admin_registration_secret,
     }
     response = client.post(
@@ -177,10 +171,10 @@ def test_admin_create_user_requires_exchange_fields(client: TestClient) -> None:
 
 
 def test_admin_reset_password_requires_client_secret(client: TestClient) -> None:
-    admin_token = _login_token(client, "admin", "admin-pass")
-    headers = {"Authorization": f"Bearer {admin_token}"}
-
-    users_response = client.get("/admin/users", headers=headers)
+    users_response = client.get(
+        "/admin/users",
+        headers={settings.admin_client_header_name: settings.admin_registration_secret},
+    )
     assert users_response.status_code == 200
     target = next(user for user in users_response.json()["users"] if user["username"] == "trader")
     user_id = target["id"]
@@ -188,26 +182,23 @@ def test_admin_reset_password_requires_client_secret(client: TestClient) -> None
     missing_secret = client.post(
         f"/admin/users/{user_id}/reset-password",
         json={},
-        headers=headers,
     )
     assert missing_secret.status_code == 403
 
     wrong_secret = client.post(
         f"/admin/users/{user_id}/reset-password",
         json={},
-        headers={**headers, settings.admin_client_header_name: "wrong-secret"},
+        headers={settings.admin_client_header_name: "wrong-secret"},
     )
     assert wrong_secret.status_code == 403
 
 
 def test_admin_reset_password_success_and_can_login(client: TestClient) -> None:
-    admin_token = _login_token(client, "admin", "admin-pass")
     headers = {
-        "Authorization": f"Bearer {admin_token}",
         settings.admin_client_header_name: settings.admin_registration_secret,
     }
 
-    users_response = client.get("/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
+    users_response = client.get("/admin/users", headers=headers)
     assert users_response.status_code == 200
     target = next(user for user in users_response.json()["users"] if user["username"] == "trader")
     user_id = target["id"]

@@ -849,12 +849,6 @@ def get_current_user(
     return user
 
 
-def get_current_admin(user: User = Depends(get_current_user)) -> User:
-    if not user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
-    return user
-
-
 def verify_admin_registration_secret(request: Request) -> None:
     header_name = settings.admin_client_header_name
     provided_secret = request.headers.get(header_name)
@@ -1630,7 +1624,6 @@ async def create_user(
     payload: AdminCreateUserRequest,
     request: Request,
     session: Session = Depends(get_session),
-    _: User = Depends(get_current_admin),
 ) -> AdminUserResponse:
     verify_admin_registration_secret(request)
     existing = session.exec(
@@ -1656,7 +1649,6 @@ async def create_user(
         password_hash=_hash_password(payload.password, salt),
         password_salt=salt.hex(),
         is_active=payload.is_active,
-        is_admin=payload.is_admin,
         created_at=now,
         updated_at=now,
     )
@@ -1678,7 +1670,6 @@ async def create_user(
     return AdminUserResponse(
         id=str(user.id),
         username=user.username,
-        is_admin=user.is_admin,
         is_active=user.is_active,
         created_at=user.created_at,
     )
@@ -1686,9 +1677,10 @@ async def create_user(
 
 @app.get("/admin/users", response_model=AdminUserListResponse)
 async def list_users(
+    request: Request,
     session: Session = Depends(get_session),
-    _: User = Depends(get_current_admin),
 ) -> AdminUserListResponse:
+    verify_admin_registration_secret(request)
     users = session.exec(
         select(User)
         .where(User.deleted_at.is_(None))
@@ -1731,7 +1723,6 @@ async def list_users(
             AdminUserSummary(
                 id=str(user.id),
                 username=user.username,
-                is_admin=user.is_admin,
                 is_active=user.is_active,
                 failed_attempts=user.failed_attempts,
                 locked_until=user.locked_until,
@@ -1770,7 +1761,6 @@ async def reset_user_password(
     request: Request,
     payload: AdminResetPasswordRequest,
     session: Session = Depends(get_session),
-    _: User = Depends(get_current_admin),
 ) -> AdminResetPasswordResponse:
     verify_admin_registration_secret(request)
 

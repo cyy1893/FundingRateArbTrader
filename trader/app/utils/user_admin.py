@@ -15,7 +15,6 @@ from app.utils.crypto import encrypt_secret
 def create_user(
     username: str,
     password: str,
-    is_admin: bool,
     lighter_account_index: int | None,
     lighter_api_key_index: int | None,
     lighter_private_key: str | None,
@@ -36,7 +35,6 @@ def create_user(
             password_hash=_hash_password(password, salt),
             password_salt=salt.hex(),
             is_active=True,
-            is_admin=is_admin,
             created_at=now,
             updated_at=now,
         )
@@ -77,7 +75,6 @@ def main() -> None:
     create_cmd = subparsers.add_parser("create", help="Create a user")
     create_cmd.add_argument("--username", required=True)
     create_cmd.add_argument("--password", required=True)
-    create_cmd.add_argument("--admin", action="store_true")
     create_cmd.add_argument("--lighter-account-index", type=int)
     create_cmd.add_argument("--lighter-api-key-index", type=int)
     create_cmd.add_argument("--lighter-private-key")
@@ -94,7 +91,6 @@ def main() -> None:
         create_user(
             args.username,
             args.password,
-            args.admin,
             args.lighter_account_index,
             args.lighter_api_key_index,
             args.lighter_private_key,
