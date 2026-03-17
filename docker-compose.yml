@@ -8,7 +8,6 @@ services:
     container_name: funding-rate-arb-trader
     restart: unless-stopped
     user: "10001:10001"
-    read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     cap_drop:
@@ -20,6 +19,8 @@ services:
       - ./trader/.env
     environment:
       - LOG_DIR=/tmp/funding-rate-arb-trader
+    volumes:
+      - ./trader/app/data:/app/app/data
     expose:
       - "8080"
     ports:
@@ -83,14 +84,3 @@ services:
       - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
     ports:
       - "127.0.0.1:3002:3000"
-
-  dozzle:
-    image: amir20/dozzle:latest
-    container_name: funding-rate-arb-dozzle
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    ports:
-      - "127.0.0.1:8088:8080"

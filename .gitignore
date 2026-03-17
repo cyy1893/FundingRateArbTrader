@@ -67,3 +67,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 data/
+!trader/app/data/
+!trader/app/data/asset_icons.json

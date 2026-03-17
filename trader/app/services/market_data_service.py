@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-import math
 import asyncio
+import json
+import logging
+import math
 import os
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
+from threading import RLock
 from time import time
 from typing import Any, Awaitable, Callable
 
 import httpx
-from sqlmodel import Session, select
 
 from app.config import Settings
-from app.db_models import AssetIcon
-from app.db_session import get_engine
 from app.services.lighter_service import LighterService
 from app.models import (
     ArbitrageSnapshotResponse,
@@ -71,16 +72,25 @@ AVAILABLE_SYMBOLS_CACHE_TTL_SECONDS = 60 * 60
 BINANCE_PRICE_CACHE_TTL_SECONDS = 5 * 60
 ICON_URL_CACHE_TTL_SECONDS = 60 * 60
 ICON_DISCOVERY_CONCURRENCY = 8
+MAX_SYNC_ICON_DISCOVERY_SYMBOLS = 24
+ICON_DISCOVERY_TIMEOUT_SECONDS = 2.0
 COINGECKO_SYMBOL_MAP_TTL_SECONDS = 6 * 60 * 60
 SYMBOL_RENAMES: dict[str, str] = {
     "1000PEPE": "kPEPE",
     "1000SHIB": "kSHIB",
     "1000BONK": "kBONK",
 }
+ASSET_ICON_CACHE_FILE = Path(__file__).resolve().parent.parent / "data" / "asset_icons.json"
+logger = logging.getLogger(__name__)
 
 
 class MarketDataService:
-    def __init__(self, settings: Settings, lighter_service: LighterService | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        lighter_service: LighterService | None = None,
+        asset_icon_cache_file: Path | None = None,
+    ) -> None:
         self._lighter_base_url = settings.lighter_base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=10.0)
         self._lighter_service = lighter_service
@@ -91,6 +101,10 @@ class MarketDataService:
         self._available_symbols_cache: dict[tuple[str, str], tuple[float, list[AvailableSymbolEntry], datetime]] = {}
         self._binance_price_cache: dict[str, tuple[float, dict[str, float | None]]] = {}
         self._icon_url_cache: dict[str, tuple[float, str | None]] = {}
+        self._asset_icon_file_cache: dict[str, tuple[str | None, str | None]] = {}
+        self._asset_icon_file_lock = RLock()
+        self._asset_icon_file_path = asset_icon_cache_file or ASSET_ICON_CACHE_FILE
+        self._asset_icon_file_mtime_ns: int | None = None
         self._coingecko_symbol_to_ids_cache: tuple[float, dict[str, list[str]]] | None = None
         self._coingecko_api_key = os.getenv("COINGECKO_API_KEY", "").strip()
 
@@ -1414,17 +1428,30 @@ class MarketDataService:
         if not missing:
             return result
 
-        db_rows_by_symbol = self._load_asset_icons_from_db(missing)
+        file_rows_by_symbol = self._load_asset_icons_from_file(missing)
         unresolved: set[str] = set()
         for symbol in missing:
-            if symbol in db_rows_by_symbol:
-                icon_url = db_rows_by_symbol[symbol]
+            if symbol in file_rows_by_symbol:
+                icon_url, _ = file_rows_by_symbol[symbol]
                 result[symbol] = icon_url
                 self._icon_url_cache[symbol] = (time(), icon_url)
             else:
                 unresolved.add(symbol)
 
         if not unresolved:
+            return result
+
+        deferred = sorted(unresolved)[MAX_SYNC_ICON_DISCOVERY_SYMBOLS:]
+        unresolved = set(sorted(unresolved)[:MAX_SYNC_ICON_DISCOVERY_SYMBOLS])
+        cache_updates: dict[str, tuple[str | None, str | None]] = {}
+        for symbol in deferred:
+            result[symbol] = None
+            self._icon_url_cache[symbol] = (time(), None)
+            cache_updates[symbol] = (None, None)
+
+        if not unresolved:
+            if cache_updates:
+                self._persist_asset_icons_to_file(cache_updates)
             return result
 
         semaphore = asyncio.Semaphore(ICON_DISCOVERY_CONCURRENCY)
@@ -1437,67 +1464,87 @@ class MarketDataService:
             result[symbol] = icon_url
             self._icon_url_cache[symbol] = (time(), icon_url)
 
-        await asyncio.gather(*(_discover_one(symbol) for symbol in unresolved))
-        self._persist_asset_icons_to_db(discovered)
+        tasks = [asyncio.create_task(_discover_one(symbol)) for symbol in unresolved]
+        done, pending = await asyncio.wait(tasks, timeout=ICON_DISCOVERY_TIMEOUT_SECONDS)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        for symbol in unresolved:
+            if symbol not in discovered:
+                result[symbol] = None
+                self._icon_url_cache[symbol] = (time(), None)
+                cache_updates[symbol] = (None, None)
+
+        cache_updates.update(discovered)
+        if cache_updates:
+            self._persist_asset_icons_to_file(cache_updates)
         return result
 
-    def _load_asset_icons_from_db(self, symbols: set[str]) -> dict[str, str | None]:
+    def _load_asset_icons_from_file(self, symbols: set[str]) -> dict[str, tuple[str | None, str | None]]:
         if not symbols:
             return {}
-        try:
-            engine = get_engine()
-        except Exception:
-            return {}
+        icon_cache = self._get_asset_icon_file_cache()
+        return {symbol: icon_cache[symbol] for symbol in symbols if symbol in icon_cache}
 
-        with Session(engine) as session:
-            records = session.exec(
-                select(AssetIcon).where(
-                    AssetIcon.symbol.in_(symbols),
-                    AssetIcon.deleted_at.is_(None),
-                )
-            ).all()
-            return {record.symbol.upper(): record.icon_url for record in records}
-
-    def _persist_asset_icons_to_db(self, discovered: dict[str, tuple[str | None, str | None]]) -> None:
+    def _persist_asset_icons_to_file(self, discovered: dict[str, tuple[str | None, str | None]]) -> None:
         if not discovered:
             return
+        with self._asset_icon_file_lock:
+            icon_cache = dict(self._get_asset_icon_file_cache())
+            for symbol, value in discovered.items():
+                icon_cache[symbol] = value
+            self._asset_icon_file_cache = icon_cache
+            self._write_asset_icon_file(icon_cache)
+
+    def _get_asset_icon_file_cache(self) -> dict[str, tuple[str | None, str | None]]:
+        with self._asset_icon_file_lock:
+            try:
+                stat = self._asset_icon_file_path.stat()
+            except FileNotFoundError:
+                self._asset_icon_file_cache = {}
+                self._asset_icon_file_mtime_ns = None
+                return {}
+
+            if self._asset_icon_file_mtime_ns == stat.st_mtime_ns:
+                return dict(self._asset_icon_file_cache)
+
+            try:
+                raw_data = json.loads(self._asset_icon_file_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                logger.warning("Asset icon cache file is invalid JSON: %s", self._asset_icon_file_path)
+                return dict(self._asset_icon_file_cache)
+            except OSError as exc:
+                logger.warning("Failed to read asset icon cache file %s: %s", self._asset_icon_file_path, exc)
+                return dict(self._asset_icon_file_cache)
+
+            normalized = _normalize_asset_icon_file(raw_data)
+            self._asset_icon_file_cache = normalized
+            self._asset_icon_file_mtime_ns = stat.st_mtime_ns
+            return dict(normalized)
+
+    def _write_asset_icon_file(self, icon_cache: dict[str, tuple[str | None, str | None]]) -> None:
+        serialized = {
+            symbol: {
+                "icon_url": icon_url or "",
+                "source": source,
+                "last_checked_at": datetime.now(tz=timezone.utc).isoformat(),
+            }
+            for symbol, (icon_url, source) in sorted(icon_cache.items())
+        }
         try:
-            engine = get_engine()
-        except Exception:
-            return
-
-        now = datetime.utcnow()
-        with Session(engine) as session:
-            existing_rows = session.exec(
-                select(AssetIcon).where(
-                    AssetIcon.symbol.in_(set(discovered.keys())),
-                )
-            ).all()
-            existing_by_symbol = {row.symbol.upper(): row for row in existing_rows}
-
-            for symbol, (icon_url, source) in discovered.items():
-                existing = existing_by_symbol.get(symbol)
-                if existing is not None:
-                    existing.icon_url = icon_url
-                    existing.source = source
-                    existing.last_checked_at = now
-                    existing.updated_at = now
-                    if existing.deleted_at is not None:
-                        existing.deleted_at = None
-                    session.add(existing)
-                    continue
-
-                session.add(
-                    AssetIcon(
-                        symbol=symbol,
-                        icon_url=icon_url,
-                        source=source,
-                        last_checked_at=now,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
-            session.commit()
+            self._asset_icon_file_path.parent.mkdir(parents=True, exist_ok=True)
+            self._asset_icon_file_path.write_text(
+                json.dumps(serialized, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            self._asset_icon_file_mtime_ns = self._asset_icon_file_path.stat().st_mtime_ns
+        except OSError as exc:
+            logger.warning(
+                "Failed to persist asset icon cache file %s; continuing with in-memory cache only: %s",
+                self._asset_icon_file_path,
+                exc,
+            )
 
     async def _discover_icon_url(self, symbol: str) -> tuple[str | None, str | None]:
         tasks: list[asyncio.Task[tuple[str | None, str | None]]] = []
@@ -2258,6 +2305,36 @@ def _normalize_icon_symbol(symbol: str | None) -> str:
         "WETH": "ETH",
     }
     return aliases.get(normalized, normalized)
+
+
+def _normalize_asset_icon_file(raw_data: Any) -> dict[str, tuple[str | None, str | None]]:
+    if not isinstance(raw_data, dict):
+        return {}
+
+    normalized: dict[str, tuple[str | None, str | None]] = {}
+    for raw_symbol, raw_value in raw_data.items():
+        symbol = _normalize_icon_symbol(raw_symbol if isinstance(raw_symbol, str) else None)
+        if not symbol:
+            continue
+
+        icon_url: str | None = None
+        source: str | None = None
+        if isinstance(raw_value, str):
+            icon_url = raw_value.strip() or None
+        elif raw_value is None:
+            icon_url = None
+        elif isinstance(raw_value, dict):
+            raw_icon_url = raw_value.get("icon_url")
+            raw_source = raw_value.get("source")
+            if isinstance(raw_icon_url, str):
+                icon_url = raw_icon_url.strip() or None
+            if isinstance(raw_source, str):
+                source = raw_source.strip() or None
+        else:
+            continue
+
+        normalized[symbol] = (icon_url, source)
+    return normalized
 
 
 def _build_icon_candidate_urls(symbol: str) -> list[str]:
