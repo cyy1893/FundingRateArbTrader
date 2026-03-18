@@ -65,6 +65,11 @@ DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS = 12.0
 DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT = 5.0
 MAX_ACCEPTABLE_PRICE_VOLATILITY_PCT = 10.0
 LIGHTER_SPREAD_FETCH_CONCURRENCY = 8
+LIGHTER_FUNDING_HISTORY_CONCURRENCY = 2
+LIGHTER_FUNDING_MARKET_MAP_TTL_SECONDS = 60 * 60
+LIGHTER_FUNDING_HISTORY_CACHE_TTL_SECONDS = 10 * 60
+GRVT_FUNDING_HISTORY_CONCURRENCY = 3
+GRVT_FUNDING_HISTORY_CACHE_TTL_SECONDS = 10 * 60
 MIN_PER_EXCHANGE_VOLUME_USD = 100_000.0
 CACHE_TTL_SECONDS = 10 * 60
 PREDICTION_CACHE_TTL_SECONDS = 10 * 60
@@ -95,6 +100,11 @@ class MarketDataService:
         self._client = httpx.AsyncClient(timeout=10.0)
         self._lighter_service = lighter_service
         self._lighter_leverage_map: dict[str, float] | None = None
+        self._lighter_market_id_map_cache: tuple[float, dict[str, int]] | None = None
+        self._lighter_funding_history_cache: dict[tuple[str, int], tuple[float, list[tuple[int, float]]]] = {}
+        self._lighter_funding_history_semaphore = asyncio.Semaphore(LIGHTER_FUNDING_HISTORY_CONCURRENCY)
+        self._grvt_funding_history_cache: dict[tuple[str, int], tuple[float, list[tuple[int, float]]]] = {}
+        self._grvt_funding_history_semaphore = asyncio.Semaphore(GRVT_FUNDING_HISTORY_CONCURRENCY)
         self._grvt_market_data_base, _ = self._build_grvt_endpoints(settings.grvt_env)
         self._arbitrage_cache: dict[tuple[str, str, float], tuple[float, ArbitrageSnapshotResponse]] = {}
         self._prediction_cache: dict[tuple[str, str, float], tuple[float, FundingPredictionResponse]] = {}
@@ -426,19 +436,13 @@ class MarketDataService:
         if not base_symbol:
             raise ValueError("Invalid Lighter symbol requested.")
 
-        order_books_res = await self._client.get(f"{self._lighter_base_url}/api/v1/orderBooks")
-        order_books_res.raise_for_status()
-        order_books = order_books_res.json()
-        market_id: int | None = None
-        if isinstance(order_books, dict):
-            for market in order_books.get("order_books", []) or []:
-                if not isinstance(market, dict):
-                    continue
-                if _normalize_lighter_symbol(str(market.get("symbol") or "")) == base_symbol:
-                    market_id_value = _parse_float(market.get("market_id"))
-                    if market_id_value is not None and market_id_value > 0:
-                        market_id = int(market_id_value)
-                    break
+        cache_key = (base_symbol, int(start_time_ms))
+        cached = self._lighter_funding_history_cache.get(cache_key)
+        if cached and time() - cached[0] < LIGHTER_FUNDING_HISTORY_CACHE_TTL_SECONDS:
+            return list(cached[1])
+
+        market_id_map = await self._get_lighter_market_id_map()
+        market_id = market_id_map.get(base_symbol)
         if market_id is None or market_id <= 0:
             raise ValueError("Unknown Lighter market.")
 
@@ -452,9 +456,28 @@ class MarketDataService:
             "end_timestamp": str(end_timestamp_seconds),
             "count_back": str(min(duration_hours, 1000)),
         }
-        funding_res = await self._client.get(f"{self._lighter_base_url}/api/v1/fundings", params=params)
-        funding_res.raise_for_status()
-        payload = funding_res.json()
+
+        async with self._lighter_funding_history_semaphore:
+            payload: Any = {}
+            last_exc: Exception | None = None
+            for attempt in range(5):
+                try:
+                    funding_res = await self._client.get(f"{self._lighter_base_url}/api/v1/fundings", params=params)
+                    funding_res.raise_for_status()
+                    payload = funding_res.json()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    last_exc = exc
+                    if exc.response.status_code != 429:
+                        raise
+                except httpx.RequestError as exc:
+                    last_exc = exc
+                if attempt < 4:
+                    await asyncio.sleep(1.0 * (attempt + 1))
+            else:
+                if last_exc is not None:
+                    raise last_exc
+
         series: list[tuple[int, float]] = []
         if isinstance(payload, dict):
             for entry in payload.get("fundings", []) or []:
@@ -470,7 +493,28 @@ class MarketDataService:
                 normalized_time = _normalize_timestamp_to_hour(timestamp_ms)
                 if normalized_time is not None:
                     series.append((normalized_time, signed_rate))
+        self._lighter_funding_history_cache[cache_key] = (time(), list(series))
         return series
+
+    async def _get_lighter_market_id_map(self) -> dict[str, int]:
+        cached = self._lighter_market_id_map_cache
+        if cached and time() - cached[0] < LIGHTER_FUNDING_MARKET_MAP_TTL_SECONDS:
+            return dict(cached[1])
+
+        order_books_res = await self._client.get(f"{self._lighter_base_url}/api/v1/orderBooks")
+        order_books_res.raise_for_status()
+        order_books = order_books_res.json()
+        market_map: dict[str, int] = {}
+        if isinstance(order_books, dict):
+            for market in order_books.get("order_books", []) or []:
+                if not isinstance(market, dict):
+                    continue
+                normalized_symbol = _normalize_lighter_symbol(str(market.get("symbol") or ""))
+                market_id_value = _parse_float(market.get("market_id"))
+                if normalized_symbol and market_id_value is not None and market_id_value > 0:
+                    market_map[normalized_symbol] = int(market_id_value)
+        self._lighter_market_id_map_cache = (time(), market_map)
+        return dict(market_map)
 
     async def _fetch_grvt_funding_history(
         self,
@@ -482,17 +526,39 @@ class MarketDataService:
         base = _normalize_grvt_base_symbol(symbol)
         if not base:
             raise ValueError("Invalid GRVT symbol requested.")
+        cache_key = (base, int(start_time_ms))
+        cached = self._grvt_funding_history_cache.get(cache_key)
+        if cached and time() - cached[0] < GRVT_FUNDING_HISTORY_CACHE_TTL_SECONDS:
+            return list(cached[1])
         instrument = f"{base}_USDT_Perp"
         start_ns = max(0, int(start_time_ms * 1_000_000))
         body = {"instrument": instrument, "start_time": str(start_ns), "limit": 1000}
         period_hours = funding_period_hours or 8.0
         normalized_hours = max(period_hours, 1.0)
-        response = await self._client.post(
-            f"{self._grvt_market_data_base}/full/v1/funding",
-            json=body,
-        )
-        response.raise_for_status()
-        payload = response.json()
+        async with self._grvt_funding_history_semaphore:
+            payload: Any = {}
+            last_exc: Exception | None = None
+            for attempt in range(4):
+                try:
+                    response = await self._client.post(
+                        f"{self._grvt_market_data_base}/full/v1/funding",
+                        json=body,
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    last_exc = exc
+                    status = exc.response.status_code
+                    if status not in {408, 425, 429, 500, 502, 503, 504}:
+                        raise
+                except httpx.RequestError as exc:
+                    last_exc = exc
+                if attempt < 3:
+                    await asyncio.sleep(0.75 * (attempt + 1))
+            else:
+                if last_exc is not None:
+                    raise last_exc
         series: list[tuple[int, float]] = []
         if isinstance(payload, dict):
             for entry in payload.get("result", []) or []:
@@ -507,6 +573,7 @@ class MarketDataService:
                 normalized_time = _normalize_timestamp_to_hour(time_ms)
                 if normalized_time is not None:
                     series.append((normalized_time, hourly_rate))
+        self._grvt_funding_history_cache[cache_key] = (time(), list(series))
         return series
 
     async def _fetch_history_series_for_source(
