@@ -21,6 +21,7 @@ function mapEntry(entry: Record<string, unknown>) {
   return {
     symbol: String(entry.symbol ?? ""),
     displayName: String(entry.display_name ?? entry.symbol ?? ""),
+    iconUrl: typeof entry.icon_url === "string" ? entry.icon_url : null,
     leftSymbol: String(entry.left_symbol ?? ""),
     rightSymbol: String(entry.right_symbol ?? ""),
     leftVolume24h:

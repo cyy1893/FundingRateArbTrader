@@ -1102,6 +1102,7 @@ class MarketDataService:
                     {
                         "symbol": row.symbol or row.left_symbol,
                         "display_name": row.display_name or row.symbol or row.left_symbol,
+                        "icon_url": row.icon_url,
                         "left_symbol": row.left_symbol,
                         "right_symbol": right_symbol,
                         "left_volume_24h": row.day_notional_volume,

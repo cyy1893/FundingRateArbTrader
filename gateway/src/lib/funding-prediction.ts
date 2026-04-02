@@ -12,6 +12,7 @@ export type FundingPredictionDirection = "leftLong" | "rightLong" | "unknown";
 export type FundingPredictionEntry = {
   symbol: string;
   displayName: string;
+  iconUrl: string | null;
   leftSymbol: string;
   rightSymbol: string;
   leftVolume24h: number | null;
@@ -86,6 +87,7 @@ export async function fetchFundingPredictionSnapshot(
     (entry) => ({
       symbol: String(entry.symbol ?? ""),
       displayName: String(entry.display_name ?? entry.symbol ?? ""),
+      iconUrl: typeof entry.icon_url === "string" ? entry.icon_url : null,
       leftSymbol: String(entry.left_symbol ?? ""),
       rightSymbol: String(entry.right_symbol ?? ""),
       leftVolume24h:

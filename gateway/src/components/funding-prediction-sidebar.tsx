@@ -21,6 +21,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  buildTokenIconCandidates,
+  makeFallbackSvgDataUrl,
+} from "@/lib/token-icons";
 import { cn } from "@/lib/utils";
 
 type SidebarRequest = {
@@ -368,8 +372,12 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
         <TableBody>
           {topEntries.map((entry) => (
             <TableRow key={entry.symbol}>
-              <TableCell className="font-semibold">
-                {entry.displayName}
+              <TableCell className="min-w-[190px] py-3 text-sm font-semibold text-foreground">
+                <RecommendationSymbolCell
+                  symbol={entry.symbol}
+                  displayName={entry.displayName}
+                  iconUrl={entry.iconUrl}
+                />
               </TableCell>
               <TableCell className="text-xs">
                 {renderDirection(entry, payload.metadata)}
@@ -414,6 +422,46 @@ function PredictionResults({ payload }: { payload: PredictionSidebarPayload }) {
           ))}
         </TableBody>
       </Table>
+      </div>
+    </div>
+  );
+}
+
+function RecommendationSymbolCell({
+  symbol,
+  displayName,
+  iconUrl,
+}: {
+  symbol: string;
+  displayName: string;
+  iconUrl: string | null;
+}) {
+  const iconCandidates = useMemo(
+    () => buildTokenIconCandidates(symbol, iconUrl),
+    [symbol, iconUrl],
+  );
+  const [iconCandidateIndex, setIconCandidateIndex] = useState(0);
+  const iconSrc =
+    iconCandidates[iconCandidateIndex] ?? makeFallbackSvgDataUrl(symbol);
+
+  return (
+    <div className="flex items-center gap-2.5">
+      <img
+        src={iconSrc}
+        alt={`${displayName} 图标`}
+        className="h-7 w-7 flex-shrink-0 rounded-full border border-border/30 bg-background object-contain"
+        loading="lazy"
+        onError={() => {
+          setIconCandidateIndex((current) => current + 1);
+        }}
+      />
+      <div className="flex flex-col overflow-hidden">
+        <span className="truncate text-sm font-semibold text-foreground">
+          {displayName}
+        </span>
+        <span className="truncate text-[11px] uppercase text-muted-foreground">
+          {symbol}
+        </span>
       </div>
     </div>
   );

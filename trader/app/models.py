@@ -350,6 +350,7 @@ class AvailableSymbolsResponse(BaseModel):
 class FundingPredictionEntry(BaseModel):
     symbol: str
     display_name: str
+    icon_url: str | None = None
     left_symbol: str
     right_symbol: str
     left_volume_24h: float | None = None
