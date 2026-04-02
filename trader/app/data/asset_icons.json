@@ -1,782 +1,802 @@
 {
   "0G": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094105+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732113+00:00",
+    "source": null
   },
   "1000FLOKI": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094401+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732158+00:00",
+    "source": null
   },
   "1000TOSHI": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094405+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732164+00:00",
+    "source": null
   },
   "2Z": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094408+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732170+00:00",
+    "source": null
   },
   "AAPL": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094410+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732175+00:00",
+    "source": null
   },
   "AAVE": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/aave.png",
-    "last_checked_at": "2026-03-17T13:34:44.094412+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732181+00:00",
     "source": "spothq"
   },
   "ADA": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/ada.png",
-    "last_checked_at": "2026-03-17T13:34:44.094414+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732187+00:00",
     "source": "spothq"
   },
   "AERO": {
     "icon_url": "https://assets.coincap.io/assets/icons/aero@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094418+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732192+00:00",
     "source": "coincap"
   },
   "AI16Z": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094420+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732197+00:00",
+    "source": null
   },
   "AMD": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094422+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732202+00:00",
+    "source": null
   },
   "AMZN": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/AMZN@2x3d05.png",
-    "last_checked_at": "2026-03-17T13:34:44.094425+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732208+00:00",
+    "source": null
   },
   "APEX": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/apex.png",
-    "last_checked_at": "2026-03-17T13:34:44.094427+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732214+00:00",
     "source": "spothq"
   },
   "APT": {
     "icon_url": "https://assets.coincap.io/assets/icons/apt@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094429+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732219+00:00",
     "source": "coincap"
   },
   "ARB": {
     "icon_url": "https://assets.coincap.io/assets/icons/arb@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094431+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732224+00:00",
     "source": "coincap"
   },
   "ARC": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094432+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732234+00:00",
+    "source": null
   },
   "ASML": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094434+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732240+00:00",
+    "source": null
   },
   "ASTER": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/ASTER@2xe746.png",
-    "last_checked_at": "2026-03-17T13:34:44.094436+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732245+00:00",
+    "source": null
   },
   "AUDUSD": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094438+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732250+00:00",
+    "source": null
   },
   "AVAX": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/avax.png",
-    "last_checked_at": "2026-03-17T13:34:44.094440+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732256+00:00",
     "source": "spothq"
   },
   "AVNT": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094441+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732261+00:00",
+    "source": null
   },
   "AXS": {
     "icon_url": "https://assets.coincap.io/assets/icons/axs@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094443+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732266+00:00",
     "source": "coincap"
   },
   "AZTEC": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094445+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732305+00:00",
+    "source": null
   },
   "BCH": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/bch.png",
-    "last_checked_at": "2026-03-17T13:34:44.094447+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732312+00:00",
     "source": "spothq"
   },
   "BERA": {
     "icon_url": "https://coin-images.coingecko.com/coins/images/25235/large/BERA.png",
-    "last_checked_at": "2026-03-17T13:34:44.094449+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732318+00:00",
     "source": "coingecko"
   },
   "BIRB": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094450+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732322+00:00",
+    "source": null
   },
   "BMNR": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094452+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732328+00:00",
+    "source": null
   },
   "BNB": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/bnb.png",
-    "last_checked_at": "2026-03-17T13:34:44.094454+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732333+00:00",
     "source": "spothq"
   },
   "BOTZ": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094455+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732338+00:00",
+    "source": null
+  },
+  "BRENTOIL": {
+    "icon_url": "",
+    "last_checked_at": "2026-04-02T13:56:19.732343+00:00",
+    "source": null
   },
   "BTC": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/btc.png",
-    "last_checked_at": "2026-03-17T13:34:44.094457+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732348+00:00",
     "source": "spothq"
   },
   "CC": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/cc.png",
-    "last_checked_at": "2026-03-17T13:34:44.094459+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732354+00:00",
     "source": "spothq"
   },
   "COIN": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/COIN@2x9fba.png",
-    "last_checked_at": "2026-03-17T13:34:44.094461+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732359+00:00",
+    "source": null
   },
   "CRCL": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/CRCL@2xb239.png",
-    "last_checked_at": "2026-03-17T13:34:44.094462+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732364+00:00",
+    "source": null
   },
   "CRO": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/cro.png",
-    "last_checked_at": "2026-03-17T13:34:44.094464+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732369+00:00",
     "source": "spothq"
   },
   "CRV": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/crv.png",
-    "last_checked_at": "2026-03-17T13:34:44.094465+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732374+00:00",
     "source": "spothq"
   },
   "DASH": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/dash.png",
-    "last_checked_at": "2026-03-17T13:34:44.094467+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732379+00:00",
     "source": "spothq"
   },
   "DIA": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094469+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732384+00:00",
+    "source": null
   },
   "DOGE": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/DOGE@2x30e2.png",
-    "last_checked_at": "2026-03-17T13:34:44.094471+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732389+00:00",
     "source": "spothq"
   },
   "DOLO": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094472+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732394+00:00",
+    "source": null
   },
   "DOT": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/dot.png",
-    "last_checked_at": "2026-03-17T13:34:44.094474+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732399+00:00",
     "source": "spothq"
   },
   "DUSK": {
     "icon_url": "https://logo.svgcdn.com/token-branded/dusk.png",
-    "last_checked_at": "2026-03-17T13:34:44.094476+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732404+00:00",
     "source": "svgcdn"
   },
   "DYDX": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/dydx.png",
-    "last_checked_at": "2026-03-17T13:34:44.094477+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732409+00:00",
     "source": "spothq"
   },
   "EDEN": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094479+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732414+00:00",
+    "source": null
+  },
+  "EDGE": {
+    "icon_url": "",
+    "last_checked_at": "2026-04-02T13:56:19.732421+00:00",
+    "source": null
   },
   "EIGEN": {
     "icon_url": "https://coin-images.coingecko.com/coins/images/37441/large/eigencloud.jpg",
-    "last_checked_at": "2026-03-17T13:34:44.094481+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732427+00:00",
     "source": "coingecko"
   },
   "ENA": {
     "icon_url": "https://assets.coincap.io/assets/icons/ena@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094483+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732432+00:00",
     "source": "coincap"
   },
   "ETH": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/eth.png",
-    "last_checked_at": "2026-03-17T13:34:44.094484+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732437+00:00",
     "source": "spothq"
   },
   "ETHFI": {
     "icon_url": "https://assets.coincap.io/assets/icons/ethfi@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094486+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732442+00:00",
     "source": "coincap"
   },
   "EURUSD": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094488+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732446+00:00",
+    "source": null
   },
   "FARTCOIN": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/FARTCOIN@2x3096.png",
-    "last_checked_at": "2026-03-17T13:34:44.094489+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732451+00:00",
+    "source": null
   },
   "FF": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094491+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732456+00:00",
+    "source": null
   },
   "FIL": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/fil.png",
-    "last_checked_at": "2026-03-17T13:34:44.094492+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732461+00:00",
     "source": "spothq"
   },
   "FOGO": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094494+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732466+00:00",
+    "source": null
   },
   "GBPUSD": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094496+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732471+00:00",
+    "source": null
   },
   "GMX": {
     "icon_url": "https://assets.coincap.io/assets/icons/gmx@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094497+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732476+00:00",
     "source": "coincap"
   },
   "GOOGL": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094499+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732481+00:00",
+    "source": null
   },
   "GRASS": {
     "icon_url": "https://coin-images.coingecko.com/coins/images/40094/large/Grass.jpg",
-    "last_checked_at": "2026-03-17T13:34:44.094500+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732486+00:00",
     "source": "coingecko"
   },
   "HANMI": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094502+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732491+00:00",
+    "source": null
   },
   "HBAR": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/hbar.png",
-    "last_checked_at": "2026-03-17T13:34:44.094503+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732496+00:00",
     "source": "spothq"
   },
   "HOOD": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/HOOD@2x3c09.png",
-    "last_checked_at": "2026-03-17T13:34:44.094505+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732501+00:00",
+    "source": null
   },
   "HYPE": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094506+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732505+00:00",
+    "source": null
   },
   "HYUNDAI": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094508+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732510+00:00",
+    "source": null
   },
   "ICP": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/icp.png",
-    "last_checked_at": "2026-03-17T13:34:44.094509+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732515+00:00",
     "source": "spothq"
   },
   "INTC": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/INTC@2x7f6a.png",
-    "last_checked_at": "2026-03-17T13:34:44.094511+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732520+00:00",
+    "source": null
   },
   "IP": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094512+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732525+00:00",
+    "source": null
   },
   "IWM": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094514+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732530+00:00",
+    "source": null
   },
   "JTO": {
     "icon_url": "https://assets.coincap.io/assets/icons/jto@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094515+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732535+00:00",
     "source": "coincap"
   },
   "JUP": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/JUP@2xae10.png",
-    "last_checked_at": "2026-03-17T13:34:44.094517+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732540+00:00",
     "source": "coincap"
   },
   "KAITO": {
     "icon_url": "https://coin-images.coingecko.com/coins/images/54411/large/Qm4DW488_400x400.jpg",
-    "last_checked_at": "2026-03-17T13:34:44.094518+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732545+00:00",
     "source": "coingecko"
   },
   "KBONK": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094520+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732550+00:00",
+    "source": null
   },
   "KPEPE": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094521+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732555+00:00",
+    "source": null
   },
   "KRCOMP": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094540+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732560+00:00",
+    "source": null
   },
   "KSHIB": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094542+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732565+00:00",
+    "source": null
   },
   "LAUNCHCOIN": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094544+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732570+00:00",
+    "source": null
   },
   "LDO": {
     "icon_url": "https://assets.coincap.io/assets/icons/ldo@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094546+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732575+00:00",
     "source": "coincap"
   },
   "LINEA": {
     "icon_url": "https://logo.svgcdn.com/token-branded/linea.png",
-    "last_checked_at": "2026-03-17T13:34:44.094547+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732581+00:00",
     "source": "svgcdn"
   },
   "LINK": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/link.png",
-    "last_checked_at": "2026-03-17T13:34:44.094549+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732587+00:00",
     "source": "spothq"
   },
   "LIT": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094551+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732592+00:00",
+    "source": null
   },
   "LTC": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/ltc.png",
-    "last_checked_at": "2026-03-17T13:34:44.094552+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732597+00:00",
     "source": "spothq"
   },
   "MAGS": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094554+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732603+00:00",
+    "source": null
   },
   "MEGA": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094556+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732608+00:00",
+    "source": null
   },
   "MET": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094558+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732613+00:00",
+    "source": null
   },
   "META": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094559+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732619+00:00",
+    "source": null
   },
   "MKR": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/mkr.png",
-    "last_checked_at": "2026-03-17T13:34:44.094561+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732624+00:00",
     "source": "spothq"
   },
   "MNT": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094563+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732630+00:00",
+    "source": null
   },
   "MON": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/MON@2xe270.png",
-    "last_checked_at": "2026-03-17T13:34:44.094564+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732635+00:00",
+    "source": null
   },
   "MORPHO": {
     "icon_url": "https://coin-images.coingecko.com/coins/images/29837/large/Morpho-token-icon.png",
-    "last_checked_at": "2026-03-17T13:34:44.094566+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732643+00:00",
     "source": "coingecko"
   },
   "MSFT": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094568+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732648+00:00",
+    "source": null
   },
   "MSTR": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/MSTR@2x2f12.png",
-    "last_checked_at": "2026-03-17T13:34:44.094571+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732654+00:00",
+    "source": null
   },
   "MYX": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094573+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732659+00:00",
+    "source": null
+  },
+  "NATGAS": {
+    "icon_url": "",
+    "last_checked_at": "2026-04-02T13:56:19.732664+00:00",
+    "source": null
   },
   "NEAR": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/near.png",
-    "last_checked_at": "2026-03-17T13:34:44.094575+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732670+00:00",
     "source": "spothq"
   },
   "NMR": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094576+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732675+00:00",
+    "source": null
   },
   "NVDA": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094578+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732681+00:00",
+    "source": null
   },
   "NZDUSD": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094580+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732687+00:00",
+    "source": null
   },
   "ONDO": {
     "icon_url": "https://coin-images.coingecko.com/coins/images/26580/large/ONDO.png",
-    "last_checked_at": "2026-03-17T13:34:44.094581+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732692+00:00",
     "source": "coingecko"
   },
   "OP": {
     "icon_url": "https://assets.coincap.io/assets/icons/op@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094583+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732697+00:00",
     "source": "coincap"
   },
   "PAXG": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/paxg.png",
-    "last_checked_at": "2026-03-17T13:34:44.094585+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732703+00:00",
     "source": "spothq"
   },
   "PENDLE": {
     "icon_url": "https://assets.coincap.io/assets/icons/pendle@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094586+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732708+00:00",
     "source": "coincap"
   },
   "PENGU": {
     "icon_url": "https://coin-images.coingecko.com/coins/images/52622/large/PUDGY_PENGUINS_PENGU_PFP.png",
-    "last_checked_at": "2026-03-17T13:34:44.094588+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732714+00:00",
     "source": "coingecko"
   },
   "PIPPIN": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094589+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732719+00:00",
+    "source": null
   },
   "PLTR": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/PLTR@2xc82b.png",
-    "last_checked_at": "2026-03-17T13:34:44.094591+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732724+00:00",
+    "source": null
   },
   "POL": {
     "icon_url": "https://assets.coincap.io/assets/icons/pol@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094593+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732730+00:00",
     "source": "coincap"
   },
   "POPCAT": {
     "icon_url": "https://logo.svgcdn.com/token-branded/popcat.png",
-    "last_checked_at": "2026-03-17T13:34:44.094594+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732735+00:00",
     "source": "svgcdn"
   },
   "PROVE": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094596+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732741+00:00",
+    "source": null
   },
   "PUMP": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094597+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732746+00:00",
+    "source": null
   },
   "PYTH": {
     "icon_url": "https://assets.coincap.io/assets/icons/pyth@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094599+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732752+00:00",
     "source": "coincap"
   },
   "QQQ": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094601+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732757+00:00",
+    "source": null
   },
   "RESOLV": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094602+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732763+00:00",
+    "source": null
   },
   "RIVER": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094604+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732768+00:00",
+    "source": null
   },
   "ROBO": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094605+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732773+00:00",
+    "source": null
   },
   "S": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094607+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732778+00:00",
+    "source": null
   },
   "SAMSUNG": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094609+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732783+00:00",
+    "source": null
   },
   "SEI": {
     "icon_url": "https://assets.coincap.io/assets/icons/sei@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094610+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732789+00:00",
     "source": "coincap"
   },
   "SKHYNIX": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094612+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732794+00:00",
+    "source": null
   },
   "SKR": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094613+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732799+00:00",
+    "source": null
   },
   "SKY": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094615+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732804+00:00",
+    "source": null
   },
   "SNDK": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094616+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732809+00:00",
+    "source": null
   },
   "SOL": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/sol.png",
-    "last_checked_at": "2026-03-17T13:34:44.094618+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732815+00:00",
     "source": "spothq"
   },
   "SPX": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094619+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732820+00:00",
+    "source": null
   },
   "SPY": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094621+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732826+00:00",
+    "source": null
   },
   "STABLE": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094622+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732831+00:00",
+    "source": null
   },
   "STBL": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094624+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732836+00:00",
+    "source": null
+  },
+  "STRC": {
+    "icon_url": "",
+    "last_checked_at": "2026-04-02T13:56:19.732841+00:00",
+    "source": null
   },
   "STRK": {
     "icon_url": "https://assets.coincap.io/assets/icons/strk@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094625+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732847+00:00",
     "source": "coincap"
   },
   "SUI": {
     "icon_url": "https://assets.coincap.io/assets/icons/sui@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094627+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732852+00:00",
     "source": "coincap"
   },
   "SYRUP": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094628+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732857+00:00",
+    "source": null
   },
   "TAO": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/TAO@2x1b4e.png",
-    "last_checked_at": "2026-03-17T13:34:44.094630+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732863+00:00",
     "source": "svgcdn"
   },
   "TIA": {
     "icon_url": "https://assets.coincap.io/assets/icons/tia@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094631+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732869+00:00",
     "source": "coincap"
   },
   "TON": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/TON@2x8682.png",
-    "last_checked_at": "2026-03-17T13:34:44.094633+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732874+00:00",
     "source": "spothq"
   },
   "TRUMP": {
     "icon_url": "https://assets.coincap.io/assets/icons/trump@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094634+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732879+00:00",
     "source": "coincap"
   },
   "TRX": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/trx.png",
-    "last_checked_at": "2026-03-17T13:34:44.094636+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732884+00:00",
     "source": "spothq"
   },
   "TSLA": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/TSLA@2x278e.png",
-    "last_checked_at": "2026-03-17T13:34:44.094638+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732890+00:00",
+    "source": null
   },
   "UNI": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/uni.png",
-    "last_checked_at": "2026-03-17T13:34:44.094639+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732895+00:00",
     "source": "spothq"
   },
   "URA": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094641+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732900+00:00",
+    "source": null
   },
   "USDCAD": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094642+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732905+00:00",
+    "source": null
   },
   "USDCHF": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094644+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732910+00:00",
+    "source": null
   },
   "USDJPY": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094645+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732915+00:00",
+    "source": null
   },
   "USDKRW": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094647+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732921+00:00",
+    "source": null
   },
   "USELESS": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094648+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732926+00:00",
+    "source": null
   },
   "VIRTUAL": {
     "icon_url": "https://coin-images.coingecko.com/coins/images/34057/large/LOGOMARK.png",
-    "last_checked_at": "2026-03-17T13:34:44.094650+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732931+00:00",
     "source": "coingecko"
   },
   "VVV": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094651+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732950+00:00",
+    "source": null
   },
   "WIF": {
     "icon_url": "https://assets.coincap.io/assets/icons/wif@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094652+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732956+00:00",
     "source": "coincap"
   },
   "WLD": {
     "icon_url": "https://coin-images.coingecko.com/coins/images/31069/large/worldcoin.jpeg",
-    "last_checked_at": "2026-03-17T13:34:44.094654+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732961+00:00",
     "source": "coingecko"
   },
   "WLFI": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/WLFI@2xfad0.png",
-    "last_checked_at": "2026-03-17T13:34:44.094656+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732966+00:00",
+    "source": null
   },
   "WTI": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094657+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732972+00:00",
+    "source": null
   },
   "XAG": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/XAG@2x391a.png",
-    "last_checked_at": "2026-03-17T13:34:44.094659+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732977+00:00",
+    "source": null
   },
   "XAU": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/XAU@2x72be.png",
-    "last_checked_at": "2026-03-17T13:34:44.094661+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732982+00:00",
+    "source": null
   },
   "XCU": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094662+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.732987+00:00",
+    "source": null
   },
   "XLM": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/xlm.png",
-    "last_checked_at": "2026-03-17T13:34:44.094664+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732992+00:00",
     "source": "spothq"
   },
   "XMR": {
     "icon_url": "https://assets.coincap.io/assets/icons/xmr@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094665+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.732997+00:00",
     "source": "coincap"
   },
   "XPD": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/XPD@2xca28.png",
-    "last_checked_at": "2026-03-17T13:34:44.094667+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.733003+00:00",
+    "source": null
   },
   "XPL": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/XPL@2x635e.png",
-    "last_checked_at": "2026-03-17T13:34:44.094668+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.733008+00:00",
+    "source": null
   },
   "XPT": {
     "icon_url": "https://edge-cdn.grvt.io/currencies/icon/XPT@2xb5c1.png",
-    "last_checked_at": "2026-03-17T13:34:44.094670+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.733013+00:00",
+    "source": null
   },
   "XRP": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/xrp.png",
-    "last_checked_at": "2026-03-17T13:34:44.094671+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.733018+00:00",
     "source": "spothq"
   },
   "YZY": {
     "icon_url": "",
-    "last_checked_at": "2026-03-17T13:34:44.094673+00:00",
-    "source": ""
+    "last_checked_at": "2026-04-02T13:56:19.733023+00:00",
+    "source": null
   },
   "ZEC": {
     "icon_url": "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/zec.png",
-    "last_checked_at": "2026-03-17T13:34:44.094675+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.733028+00:00",
     "source": "spothq"
   },
   "ZK": {
     "icon_url": "https://assets.coincap.io/assets/icons/zk@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094676+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.733034+00:00",
     "source": "coincap"
   },
   "ZORA": {
     "icon_url": "https://logo.svgcdn.com/token-branded/zora.png",
-    "last_checked_at": "2026-03-17T13:34:44.094677+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.733039+00:00",
     "source": "svgcdn"
   },
   "ZRO": {
     "icon_url": "https://assets.coincap.io/assets/icons/zro@2x.png",
-    "last_checked_at": "2026-03-17T13:34:44.094679+00:00",
+    "last_checked_at": "2026-04-02T13:56:19.733108+00:00",
     "source": "coincap"
   }
 }
