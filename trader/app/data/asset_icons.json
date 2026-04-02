@@ -275,7 +275,7 @@
     "source": "coincap"
   },
   "GOOGL": {
-    "icon_url": "",
+    "icon_url": "https://edge-cdn.grvt.io/currencies/icon/GOOGL@2x9af7.png",
     "last_checked_at": "2026-04-02T13:56:19.732481+00:00",
     "source": null
   },
@@ -465,7 +465,7 @@
     "source": null
   },
   "NVDA": {
-    "icon_url": "",
+    "icon_url": "https://edge-cdn.grvt.io/currencies/icon/NVDA@2x9155.png",
     "last_checked_at": "2026-04-02T13:56:19.732681+00:00",
     "source": null
   },
