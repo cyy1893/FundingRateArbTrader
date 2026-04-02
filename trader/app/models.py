@@ -571,12 +571,9 @@ class AdminUserSummary(BaseModel):
     lighter_account_index: int | None = None
     lighter_api_key_index: int | None = None
     lighter_private_key_configured: bool
-    lighter_private_key: str | None = None
     grvt_trading_account_id: str | None = None
     grvt_api_key_configured: bool
     grvt_private_key_configured: bool
-    grvt_api_key: str | None = None
-    grvt_private_key: str | None = None
 
 
 class AdminUserListResponse(BaseModel):

@@ -1,7 +1,7 @@
 FROM node:22 AS deps
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 FROM node:22 AS builder
 WORKDIR /app

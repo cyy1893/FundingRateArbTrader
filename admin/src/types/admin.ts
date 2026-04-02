@@ -11,12 +11,9 @@ export type AdminUserSummary = {
   lighter_account_index: number | null;
   lighter_api_key_index: number | null;
   lighter_private_key_configured: boolean;
-  lighter_private_key: string | null;
   grvt_trading_account_id: string | null;
   grvt_api_key_configured: boolean;
   grvt_private_key_configured: boolean;
-  grvt_api_key: string | null;
-  grvt_private_key: string | null;
 };
 
 export type AdminUserListResponse = {
@@ -47,4 +44,8 @@ export type AdminResetPasswordResponse = {
   username: string;
   updated_at: string;
   temporary_password: string;
+};
+
+export type AdminResetPasswordRequest = {
+  new_password?: string;
 };

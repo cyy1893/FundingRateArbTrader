@@ -41,7 +41,7 @@ type Params = {
   params: Promise<{ id: string }>;
 };
 
-export async function POST(_: Request, { params }: Params) {
+export async function POST(request: Request, { params }: Params) {
   const { id } = await params;
   if (!id) {
     return NextResponse.json({ error: "Missing user id" }, { status: 400 });
@@ -53,13 +53,20 @@ export async function POST(_: Request, { params }: Params) {
   }
 
   try {
+    let requestBody: unknown = {};
+    try {
+      requestBody = await request.json();
+    } catch {
+      requestBody = {};
+    }
+
     const response = await fetch(buildUpstreamUrl(`/admin/users/${id}/reset-password`), {
       method: "POST",
       headers: {
         "content-type": "application/json",
         [ADMIN_CLIENT_HEADER_NAME]: secretOrResponse,
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify(requestBody),
     });
 
     const payload = await response.json();

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 
 from sqlmodel import Session, select
@@ -15,6 +15,12 @@ class ArbService:
 
     def open_position(self, request: ArbOpenRequest, user_id: uuid.UUID) -> tuple[ArbPosition, list[RiskTask]]:
         now = datetime.utcnow()
+        meta = dict(request.meta or {})
+        meta.setdefault("auto_close_after_ms", request.auto_close_after_ms)
+        meta.setdefault("liquidation_guard_enabled", request.liquidation_guard_enabled)
+        meta.setdefault("liquidation_guard_threshold_pct", request.liquidation_guard_threshold_pct)
+        meta.setdefault("drawdown_guard_enabled", request.drawdown_guard_enabled)
+        meta.setdefault("drawdown_guard_threshold_pct", request.drawdown_guard_threshold_pct)
         position = ArbPosition(
             user_id=user_id,
             symbol=request.symbol,
@@ -29,17 +35,23 @@ class ArbService:
             opened_at=now,
             created_at=now,
             updated_at=now,
-            meta=request.meta or {
-                "auto_close_after_ms": request.auto_close_after_ms,
-                "liquidation_guard_enabled": request.liquidation_guard_enabled,
-                "liquidation_guard_threshold_pct": request.liquidation_guard_threshold_pct,
-                "drawdown_guard_enabled": request.drawdown_guard_enabled,
-                "drawdown_guard_threshold_pct": request.drawdown_guard_threshold_pct,
-            },
+            meta=meta,
         )
         self._session.add(position)
 
         risk_tasks: list[RiskTask] = []
+        if request.auto_close_after_ms is not None and request.auto_close_after_ms > 0:
+            risk_tasks.append(
+                RiskTask(
+                    arb_position_id=position.id,
+                    task_type=RiskTaskType.auto_close,
+                    enabled=True,
+                    execute_at=now + timedelta(milliseconds=request.auto_close_after_ms),
+                    status=RiskTaskStatus.pending,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
         if request.liquidation_guard_enabled:
             threshold = request.liquidation_guard_threshold_pct or 50
             risk_tasks.append(
@@ -60,8 +72,11 @@ class ArbService:
         self._session.commit()
         return position, risk_tasks
 
-    def close_position(self, request: ArbCloseRequest) -> ArbCloseResponse:
-        position = self._get_position(uuid.UUID(request.arb_position_id))
+    def get_position_for_user(self, arb_position_id: str, user_id: uuid.UUID) -> ArbPosition | None:
+        return self._get_position(uuid.UUID(arb_position_id), user_id)
+
+    def close_position(self, request: ArbCloseRequest, user_id: uuid.UUID) -> ArbCloseResponse:
+        position = self._get_position(uuid.UUID(request.arb_position_id), user_id)
         if position is None:
             raise ValueError("arb_position not found")
         now = datetime.utcnow()
@@ -72,9 +87,9 @@ class ArbService:
         self._session.commit()
         return ArbCloseResponse(arb_position_id=str(position.id), status=position.status.value)
 
-    def get_status(self, arb_position_id: str) -> ArbStatusResponse:
+    def get_status(self, arb_position_id: str, user_id: uuid.UUID) -> ArbStatusResponse:
         position_id = uuid.UUID(arb_position_id)
-        position = self._get_position(position_id)
+        position = self._get_position(position_id, user_id)
         if position is None:
             raise ValueError("arb_position not found")
 
@@ -91,9 +106,12 @@ class ArbService:
             order_logs=[_serialize_order_log(log) for log in logs],
         )
 
-    def _get_position(self, position_id: uuid.UUID) -> ArbPosition | None:
+    def _get_position(self, position_id: uuid.UUID, user_id: uuid.UUID | None = None) -> ArbPosition | None:
+        filters = [ArbPosition.id == position_id, ArbPosition.deleted_at.is_(None)]
+        if user_id is not None:
+            filters.append(ArbPosition.user_id == user_id)
         return self._session.exec(
-            select(ArbPosition).where(ArbPosition.id == position_id)
+            select(ArbPosition).where(*filters)
         ).first()
 
 

@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import type { AdminResetPasswordResponse, AdminUserListResponse, AdminUserSummary } from "@/types/admin";
+import type {
+  AdminResetPasswordRequest,
+  AdminResetPasswordResponse,
+  AdminUserListResponse,
+  AdminUserSummary,
+} from "@/types/admin";
 
 function toLocalTime(value: string | null): string {
   if (!value) return "-";
@@ -28,6 +33,8 @@ export default function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [resettingUserId, setResettingUserId] = useState<string | null>(null);
   const [resetResult, setResetResult] = useState<{ username: string; temporaryPassword: string } | null>(null);
+  const [resetDialogUser, setResetDialogUser] = useState<AdminUserSummary | null>(null);
+  const [newPassword, setNewPassword] = useState("");
 
   const loadUsers = async () => {
     setLoading(true);
@@ -52,13 +59,20 @@ export default function UsersPage() {
     void loadUsers();
   }, []);
 
-  const handleResetPassword = async (user: AdminUserSummary) => {
+  const handleResetPassword = async (user: AdminUserSummary, password: string) => {
     setError(null);
     setResetResult(null);
     setResettingUserId(user.id);
     try {
+      const payload: AdminResetPasswordRequest = {
+        new_password: password.trim(),
+      };
       const response = await fetch(`/api/admin/users/${user.id}/reset-password`, {
         method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
       });
       const data = (await response.json()) as AdminResetPasswordResponse | { error?: string };
       if (!response.ok) {
@@ -66,17 +80,25 @@ export default function UsersPage() {
         setError(message);
         return;
       }
-      const payload = data as AdminResetPasswordResponse;
+      const resetResponse = data as AdminResetPasswordResponse;
       setResetResult({
-        username: payload.username,
-        temporaryPassword: payload.temporary_password,
+        username: resetResponse.username,
+        temporaryPassword: resetResponse.temporary_password,
       });
+      setResetDialogUser(null);
+      setNewPassword("");
       await loadUsers();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Failed to reset password");
     } finally {
       setResettingUserId(null);
     }
+  };
+
+  const closeResetDialog = () => {
+    if (resettingUserId) return;
+    setResetDialogUser(null);
+    setNewPassword("");
   };
 
   return (
@@ -121,10 +143,10 @@ export default function UsersPage() {
                   <th className="px-2 py-2">Locked Until</th>
                   <th className="px-2 py-2">Lighter Account</th>
                   <th className="px-2 py-2">Lighter API Index</th>
-                  <th className="px-2 py-2">Lighter Private Key (plain)</th>
+                  <th className="px-2 py-2">Lighter Private Key</th>
                   <th className="px-2 py-2">GRVT Account ID</th>
-                  <th className="px-2 py-2">GRVT API Key (plain)</th>
-                  <th className="px-2 py-2">GRVT Private Key (plain)</th>
+                  <th className="px-2 py-2">GRVT API Key</th>
+                  <th className="px-2 py-2">GRVT Private Key</th>
                   <th className="px-2 py-2">Created</th>
                   <th className="px-2 py-2">Actions</th>
                 </tr>
@@ -138,16 +160,21 @@ export default function UsersPage() {
                     <td className="px-2 py-2">{toLocalTime(user.locked_until)}</td>
                     <td className="px-2 py-2">{user.lighter_account_index ?? "-"}</td>
                     <td className="px-2 py-2">{user.lighter_api_key_index ?? "-"}</td>
-                    <td className="px-2 py-2 font-mono text-xs">{user.lighter_private_key ?? "-"}</td>
+                    <td className="px-2 py-2">{user.lighter_private_key_configured ? "configured" : "-"}</td>
                     <td className="px-2 py-2">{user.grvt_trading_account_id ?? "-"}</td>
-                    <td className="px-2 py-2 font-mono text-xs">{user.grvt_api_key ?? "-"}</td>
-                    <td className="px-2 py-2 font-mono text-xs">{user.grvt_private_key ?? "-"}</td>
+                    <td className="px-2 py-2">{user.grvt_api_key_configured ? "configured" : "-"}</td>
+                    <td className="px-2 py-2">{user.grvt_private_key_configured ? "configured" : "-"}</td>
                     <td className="px-2 py-2">{toLocalTime(user.created_at)}</td>
                     <td className="px-2 py-2">
                       <button
                         className="rounded-md border border-[var(--line)] px-3 py-1 text-xs"
                         disabled={resettingUserId === user.id}
-                        onClick={() => void handleResetPassword(user)}
+                        onClick={() => {
+                          setError(null);
+                          setResetResult(null);
+                          setResetDialogUser(user);
+                          setNewPassword("");
+                        }}
                       >
                         {resettingUserId === user.id ? "Resetting..." : "Reset Password"}
                       </button>
@@ -159,6 +186,55 @@ export default function UsersPage() {
           </div>
         ) : null}
       </div>
+
+      {resetDialogUser ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-[var(--line)] bg-[var(--card)] p-6 shadow-xl">
+            <h2 className="text-xl font-semibold">Reset Password</h2>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              Enter a new password for <span className="font-semibold">{resetDialogUser.username}</span>.
+            </p>
+            <form
+              className="mt-5 space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleResetPassword(resetDialogUser, newPassword);
+              }}
+            >
+              <label className="block text-sm font-medium" htmlFor="new-password">
+                New password
+              </label>
+              <input
+                id="new-password"
+                type="password"
+                className="w-full rounded-lg border border-[var(--line)] bg-transparent px-3 py-2 text-sm outline-none"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                placeholder="Enter a new password"
+                required
+                autoFocus
+              />
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  className="rounded-md border border-[var(--line)] px-4 py-2 text-sm"
+                  onClick={closeResetDialog}
+                  disabled={Boolean(resettingUserId)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-md bg-[var(--primary)] px-4 py-2 text-sm text-white disabled:opacity-60"
+                  disabled={resettingUserId === resetDialogUser.id}
+                >
+                  {resettingUserId === resetDialogUser.id ? "Resetting..." : "Confirm Reset"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

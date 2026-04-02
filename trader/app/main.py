@@ -180,6 +180,53 @@ async def _get_grvt_best_prices(
     )
 
 
+def _build_order_tracking_entry(
+    *,
+    venue: str,
+    request_payload: dict[str, Any],
+    response_payload: dict[str, Any],
+    client_order_id: int | None = None,
+    tx_hash: str | None = None,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "venue": venue,
+        "request": request_payload,
+        "response": response_payload,
+    }
+    if client_order_id is not None:
+        entry["client_order_id"] = client_order_id
+    if tx_hash:
+        entry["tx_hash"] = tx_hash
+    return entry
+
+
+def _finalize_position_risk_tasks(
+    session: Session,
+    position_id: UUID,
+    *,
+    triggered_task_id: UUID | None = None,
+    triggered_reason: str | None = None,
+    cancel_reason: str = "position exiting",
+) -> None:
+    now = datetime.utcnow()
+    pending_tasks = session.exec(
+        select(RiskTask)
+        .where(RiskTask.arb_position_id == position_id)
+        .where(RiskTask.deleted_at.is_(None))
+        .where(RiskTask.status == RiskTaskStatus.pending)
+    ).all()
+    for task in pending_tasks:
+        task.updated_at = now
+        task.triggered_at = now
+        if triggered_task_id is not None and task.id == triggered_task_id:
+            task.status = RiskTaskStatus.triggered
+            task.trigger_reason = triggered_reason
+        else:
+            task.status = RiskTaskStatus.canceled
+            task.trigger_reason = cancel_reason
+        session.add(task)
+
+
 async def _execute_auto_close_task(task_id: UUID) -> None:
     engine = get_engine()
     with Session(engine) as session:
@@ -203,19 +250,21 @@ async def _execute_auto_close_task(task_id: UUID) -> None:
             session.commit()
             return
 
-    close_result = await _close_position_with_reduce_only_orders(position.id)
+    close_result = await _close_position_with_reduce_only_orders(
+        position.id,
+        triggered_task_id=task_id,
+        triggered_reason="auto close orders placed",
+    )
 
     with Session(engine) as session:
         task = session.get(RiskTask, task_id)
-        if task is None:
+        if task is None or task.status != RiskTaskStatus.pending:
             return
-        task.triggered_at = datetime.utcnow()
         if close_result["failed_reasons"]:
             task.status = RiskTaskStatus.failed
             task.trigger_reason = " | ".join(close_result["failed_reasons"])
-        else:
-            task.status = RiskTaskStatus.triggered
-            task.trigger_reason = "auto close orders placed"
+            task.triggered_at = datetime.utcnow()
+            task.updated_at = datetime.utcnow()
         session.add(task)
         session.commit()
 
@@ -338,7 +387,12 @@ def _extract_grvt_base_symbol(instrument: str) -> str:
     return normalized.replace("-PERP", "")
 
 
-async def _close_position_with_reduce_only_orders(position_id: UUID) -> dict[str, Any]:
+async def _close_position_with_reduce_only_orders(
+    position_id: UUID,
+    *,
+    triggered_task_id: UUID | None = None,
+    triggered_reason: str | None = None,
+) -> dict[str, Any]:
     engine = get_engine()
     with Session(engine) as session:
         position = session.get(ArbPosition, position_id)
@@ -435,7 +489,10 @@ async def _close_position_with_reduce_only_orders(position_id: UUID) -> dict[str
     if not orders:
         return {"failed_reasons": ["no positions or price"], "closed": False}
 
-    async def _place_order(venue: str, payload: dict[str, Any]) -> tuple[str, bool, str | None]:
+    async def _place_order(
+        venue: str,
+        payload: dict[str, Any],
+    ) -> tuple[str, bool, str | None, dict[str, Any] | None]:
         try:
             if venue == "lighter":
                 response = await lighter_service.place_order_by_symbol_with_credentials(
@@ -452,24 +509,45 @@ async def _close_position_with_reduce_only_orders(position_id: UUID) -> dict[str
                     trading_account_id=grvt_trading_account_id,
                 )
             logging.info("auto close order placed venue=%s payload=%s response=%s", venue, payload, response.model_dump())
-            return venue, True, None
+            response_payload = response.model_dump()
+            tracking_entry = _build_order_tracking_entry(
+                venue=venue,
+                request_payload=payload,
+                response_payload=response_payload,
+                client_order_id=payload.get("client_order_index") or payload.get("client_order_id"),
+                tx_hash=response_payload.get("tx_hash"),
+            )
+            return venue, True, None, tracking_entry
         except Exception as exc:  # noqa: BLE001
             logging.error("auto close order failed venue=%s payload=%s error=%s", venue, payload, exc)
-            return venue, False, str(exc)
+            return venue, False, str(exc), None
 
     results = await asyncio.gather(*(_place_order(venue, payload) for venue, payload in orders))
-    failed_reasons = [f"{venue}: {err}" for venue, ok, err in results if not ok and err]
+    failed_reasons = [f"{venue}: {err}" for venue, ok, err, _ in results if not ok and err]
     if failed_reasons:
         return {"failed_reasons": failed_reasons, "closed": False}
+
+    close_order_ids = {
+        venue: tracking_entry
+        for venue, ok, _, tracking_entry in results
+        if ok and tracking_entry is not None
+    }
 
     with Session(engine) as session:
         position = session.get(ArbPosition, position_id)
         if position is not None and position.status not in {ArbPositionStatus.closed, ArbPositionStatus.failed}:
             position.status = ArbPositionStatus.exiting
+            position.close_order_ids = close_order_ids
             position.updated_at = datetime.utcnow()
             session.add(position)
+            _finalize_position_risk_tasks(
+                session,
+                position_id,
+                triggered_task_id=triggered_task_id,
+                triggered_reason=triggered_reason,
+            )
             session.commit()
-    return {"failed_reasons": [], "closed": True}
+    return {"failed_reasons": [], "closed": True, "close_order_ids": close_order_ids}
 
 
 def _is_settlement_guard_window(now: datetime) -> bool:
@@ -709,7 +787,13 @@ async def liquidation_guard_worker() -> None:
             if pnl_ratio_pct < threshold_pct:
                 continue
 
-            close_result = await _close_position_with_reduce_only_orders(position.id)
+            close_result = await _close_position_with_reduce_only_orders(
+                position.id,
+                triggered_task_id=task.id,
+                triggered_reason=(
+                    f"unrealized pnl ratio {pnl_ratio_pct:.2f}% reached threshold {threshold_pct:.2f}%"
+                ),
+            )
             if close_result["failed_reasons"]:
                 logging.warning(
                     "liquidation guard close failed task_id=%s position_id=%s reasons=%s",
@@ -718,18 +802,6 @@ async def liquidation_guard_worker() -> None:
                     close_result["failed_reasons"],
                 )
                 continue
-
-            with Session(engine) as session:
-                db_task = session.get(RiskTask, task.id)
-                if db_task is not None and db_task.status == RiskTaskStatus.pending:
-                    db_task.status = RiskTaskStatus.triggered
-                    db_task.triggered_at = datetime.utcnow()
-                    db_task.trigger_reason = (
-                        f"unrealized pnl ratio {pnl_ratio_pct:.2f}% reached threshold {threshold_pct:.2f}%"
-                    )
-                    session.add(db_task)
-                    session.commit()
-
 
 async def drawdown_guard_worker() -> None:
     engine = get_engine()
@@ -1021,6 +1093,7 @@ async def create_lighter_order(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     await broadcaster.publish(
+        str(user.id),
         OrderEvent(
             venue="lighter",
             payload={"request": order.model_dump(), "response": response.model_dump()},
@@ -1050,6 +1123,7 @@ async def create_lighter_order_by_symbol(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     await broadcaster.publish(
+        str(user.id),
         OrderEvent(
             venue="lighter",
             payload={"request": order.model_dump(), "response": response.model_dump()},
@@ -1098,6 +1172,7 @@ async def create_grvt_order(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     await broadcaster.publish(
+        str(user.id),
         OrderEvent(
             venue="grvt",
             payload={"request": order.model_dump(), "response": response.model_dump()},
@@ -1292,7 +1367,7 @@ async def open_arb_position(
         price: float,
         size: float,
         client_index: int,
-    ) -> bool:
+    ) -> dict[str, Any]:
         try:
             if venue == "lighter":
                 order = LighterSymbolOrderRequest(
@@ -1320,7 +1395,16 @@ async def open_arb_position(
                     response_payload=response.model_dump(),
                     status_value=OrderStatus.accepted,
                 )
-                return True
+                return {
+                    "ok": True,
+                    "tracking": _build_order_tracking_entry(
+                        venue="lighter",
+                        request_payload=order.model_dump(),
+                        response_payload=response.model_dump(),
+                        client_order_id=order.client_order_index,
+                        tx_hash=response.tx_hash,
+                    ),
+                }
             order = GrvtOrderRequest(
                 symbol=request.symbol,
                 side=side,
@@ -1347,7 +1431,15 @@ async def open_arb_position(
                 response_payload=response.model_dump(),
                 status_value=OrderStatus.accepted,
             )
-            return True
+            return {
+                "ok": True,
+                "tracking": _build_order_tracking_entry(
+                    venue="grvt",
+                    request_payload=order.model_dump(),
+                    response_payload=response.model_dump(),
+                    client_order_id=order.client_order_id,
+                ),
+            }
         except Exception as exc:  # noqa: BLE001
             logging.error(
                 "arb order failed venue=%s symbol=%s side=%s price=%s size=%s error=%s",
@@ -1373,9 +1465,9 @@ async def open_arb_position(
                 response_payload={"error": str(exc)},
                 status_value=OrderStatus.failed,
             )
-            return False
+            return {"ok": False, "tracking": None}
 
-    left_ok, right_ok = await asyncio.gather(
+    left_result, right_result = await asyncio.gather(
         place_for_venue(
             request.left_venue,
             request.left_side,
@@ -1391,6 +1483,12 @@ async def open_arb_position(
             client_base + 1,
         ),
     )
+    left_ok = bool(left_result["ok"])
+    right_ok = bool(right_result["ok"])
+    position.open_order_ids = {
+        request.left_venue: left_result["tracking"],
+        request.right_venue: right_result["tracking"],
+    }
 
     if left_ok and right_ok:
         position.status = ArbPositionStatus.pending
@@ -1413,10 +1511,10 @@ async def open_arb_position(
 async def close_arb_position(
     request: ArbCloseRequest,
     session: Session = Depends(get_session),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> ArbCloseResponse:
     try:
-        return ArbService(session).close_position(request)
+        return ArbService(session).close_position(request, user.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -1425,10 +1523,10 @@ async def close_arb_position(
 async def get_arb_status(
     arb_position_id: str,
     session: Session = Depends(get_session),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> ArbStatusResponse:
     try:
-        return ArbService(session).get_status(arb_position_id)
+        return ArbService(session).get_status(arb_position_id, user.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -1719,27 +1817,6 @@ async def list_users(
     for user in users:
         profile = profile_by_user_id.get(user.id)
 
-        lighter_private_key: str | None = None
-        grvt_api_key: str | None = None
-        grvt_private_key: str | None = None
-        if profile is not None:
-            try:
-                lighter_private_key = (
-                    decrypt_secret(profile.lighter_private_key_enc)
-                    if profile.lighter_private_key_enc
-                    else None
-                )
-                grvt_api_key = decrypt_secret(profile.grvt_api_key_enc) if profile.grvt_api_key_enc else None
-                grvt_private_key = (
-                    decrypt_secret(profile.grvt_private_key_enc)
-                    if profile.grvt_private_key_enc
-                    else None
-                )
-            except ValueError:
-                lighter_private_key = None
-                grvt_api_key = None
-                grvt_private_key = None
-
         summaries.append(
             AdminUserSummary(
                 id=str(user.id),
@@ -1764,12 +1841,9 @@ async def list_users(
                 lighter_account_index=profile.lighter_account_index if profile else None,
                 lighter_api_key_index=profile.lighter_api_key_index if profile else None,
                 lighter_private_key_configured=bool(profile and profile.lighter_private_key_enc),
-                lighter_private_key=lighter_private_key,
                 grvt_trading_account_id=profile.grvt_trading_account_id if profile else None,
                 grvt_api_key_configured=bool(profile and profile.grvt_api_key_enc),
                 grvt_private_key_configured=bool(profile and profile.grvt_private_key_enc),
-                grvt_api_key=grvt_api_key,
-                grvt_private_key=grvt_private_key,
             )
         )
 
@@ -1824,11 +1898,12 @@ async def ws_events(
     session: Session = Depends(get_session),
 ):
     try:
-        await authenticate_websocket(websocket, manager, session)
+        user = await authenticate_websocket(websocket, manager, session)
     except WebSocketDisconnect:
         return
     await websocket.accept()
-    queue = await broadcaster.register()
+    channel = str(user.id)
+    queue = await broadcaster.register(channel)
     try:
         while True:
             event = await queue.get()
@@ -1836,7 +1911,7 @@ async def ws_events(
     except WebSocketDisconnect:
         pass
     finally:
-        await broadcaster.unregister(queue)
+        await broadcaster.unregister(channel, queue)
 
 
 @app.websocket("/ws/orderbook")
