@@ -29,6 +29,8 @@ from app.models import (
     ArbOpenRequest,
     ArbOpenResponse,
     ArbStatusResponse,
+    ExecutionLegSnapshot,
+    ExecutionProgressSnapshot,
     AdminCreateUserRequest,
     AdminResetPasswordRequest,
     AdminResetPasswordResponse,
@@ -1002,6 +1004,113 @@ def _get_grvt_credentials(session: Session, user: User) -> tuple[str, str, str]:
     return api_key, private_key, profile.grvt_trading_account_id
 
 
+async def _build_execution_progress(
+    session: Session,
+    position: ArbPosition,
+) -> ExecutionProgressSnapshot | None:
+    if not isinstance(position.open_order_ids, dict):
+        return None
+
+    user = session.get(User, position.user_id)
+    if user is None:
+        return None
+
+    left_tracking = position.open_order_ids.get(position.left_venue)
+    right_tracking = position.open_order_ids.get(position.right_venue)
+    if not isinstance(left_tracking, dict) or not isinstance(right_tracking, dict):
+        return None
+
+    lighter_account_index, lighter_api_key_index, lighter_private_key = _get_lighter_credentials(session, user)
+    grvt_api_key, grvt_private_key, grvt_trading_account_id = _get_grvt_credentials(session, user)
+
+    async def _fetch_leg(venue: str, tracking: dict[str, Any]) -> ExecutionLegSnapshot:
+        client_order_id_raw = tracking.get("client_order_id")
+        client_order_id = client_order_id_raw if isinstance(client_order_id_raw, int) else None
+        request_payload = tracking.get("request") if isinstance(tracking.get("request"), dict) else {}
+        response_payload = tracking.get("response") if isinstance(tracking.get("response"), dict) else {}
+
+        target_size_raw = request_payload.get("base_amount") if venue == "lighter" else request_payload.get("amount")
+        try:
+            target_size = float(target_size_raw) if target_size_raw is not None else None
+        except (TypeError, ValueError):
+            target_size = None
+        try:
+            target_price = float(request_payload.get("price")) if request_payload.get("price") is not None else None
+        except (TypeError, ValueError):
+            target_price = None
+
+        order_id = response_payload.get("order_id") if isinstance(response_payload.get("order_id"), str) else None
+        detail = None
+        status = None
+        filled_size = 0.0
+        remaining_size = target_size
+        is_complete = False
+
+        try:
+            if client_order_id is not None:
+                if venue == "lighter":
+                    order_state = await lighter_service.get_order_status_with_credentials(
+                        position.symbol,
+                        lighter_account_index,
+                        lighter_api_key_index,
+                        lighter_private_key,
+                        client_order_id,
+                    )
+                else:
+                    order_state = await grvt_service.get_order_status_with_credentials(
+                        position.symbol,
+                        grvt_api_key,
+                        grvt_private_key,
+                        grvt_trading_account_id,
+                        client_order_id,
+                    )
+            else:
+                order_state = None
+        except Exception as exc:  # noqa: BLE001
+            order_state = None
+            detail = str(exc)
+
+        if isinstance(order_state, dict):
+            order_id = order_state.get("order_id") or order_id
+            status = order_state.get("status")
+            filled_size = float(order_state.get("filled_size") or 0.0)
+            remaining_size_raw = order_state.get("remaining_size")
+            remaining_size = float(remaining_size_raw) if remaining_size_raw is not None else remaining_size
+            target_size = float(order_state.get("target_size") or target_size or 0.0) or target_size
+            target_price = float(order_state.get("target_price") or target_price or 0.0) or target_price
+            is_complete = bool(order_state.get("is_complete"))
+
+        return ExecutionLegSnapshot(
+            venue=venue,  # type: ignore[arg-type]
+            client_order_id=client_order_id,
+            order_id=order_id,
+            status=status,
+            filled_size=filled_size,
+            remaining_size=remaining_size,
+            target_size=target_size,
+            target_price=target_price,
+            is_complete=is_complete,
+            detail=detail,
+        )
+
+    left_leg, right_leg = await asyncio.gather(
+        _fetch_leg(position.left_venue, left_tracking),
+        _fetch_leg(position.right_venue, right_tracking),
+    )
+    hedged = left_leg.is_complete and right_leg.is_complete
+    if hedged and position.status == ArbPositionStatus.pending:
+        position.status = ArbPositionStatus.hedged
+        position.updated_at = datetime.utcnow()
+        session.add(position)
+        session.commit()
+
+    return ExecutionProgressSnapshot(
+        left_leg=left_leg,
+        right_leg=right_leg,
+        hedged=hedged,
+    )
+
+
 async def authenticate_websocket(
     websocket: WebSocket,
     manager: AuthManager,
@@ -1412,7 +1521,6 @@ async def open_arb_position(
                 price=price,
                 post_only=True,
                 reduce_only=False,
-                order_duration_secs=settings.grvt_post_only_ttl_secs,
                 client_order_id=client_index,
             )
             response = await grvt.place_order_with_credentials(
@@ -1526,7 +1634,9 @@ async def get_arb_status(
     user: User = Depends(get_current_user),
 ) -> ArbStatusResponse:
     try:
-        return ArbService(session).get_status(arb_position_id, user.id)
+        payload = ArbService(session).get_status(arb_position_id, user.id)
+        execution = await _build_execution_progress(session, session.get(ArbPosition, UUID(payload.arb_position.id)))
+        return payload.model_copy(update={"execution": execution})
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

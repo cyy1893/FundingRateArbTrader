@@ -274,9 +274,10 @@ class GrvtService:
         params: dict[str, Any] = {
             "post_only": request.post_only,
             "reduce_only": request.reduce_only,
-            "order_duration_secs": request.order_duration_secs or self._settings.grvt_post_only_ttl_secs,
             "time_in_force": "GOOD_TILL_TIME",
         }
+        if request.order_duration_secs is not None:
+            params["order_duration_secs"] = request.order_duration_secs
         if request.client_order_id is not None:
             params["client_order_id"] = request.client_order_id
 
@@ -410,6 +411,44 @@ class GrvtService:
         best_ask = extract_price(asks[0]) if isinstance(asks, list) and asks else 0.0
         return (best_bid or None), (best_ask or None), instrument
 
+    async def get_order_status_with_credentials(
+        self,
+        symbol: str,
+        api_key: str,
+        private_key: str,
+        trading_account_id: str,
+        client_order_id: int,
+    ) -> dict[str, Any] | None:
+        client = await self._get_cached_client_for_credentials(api_key, private_key, trading_account_id)
+        instrument = await self._get_instrument_with_client(client, symbol)
+        await self._refresh_client_cookie(client, api_key)
+
+        payload = await client.fetch_order(
+            None,
+            {
+                "client_order_id": str(client_order_id),
+            },
+        )
+        result = payload.get("result") if isinstance(payload, dict) else None
+        if not isinstance(result, dict):
+            return None
+
+        filled_size = self._extract_grvt_filled_size(result)
+        target_size = self._extract_grvt_target_size(result)
+        remaining_size = max(target_size - filled_size, 0.0) if target_size > 0 else None
+        status = str(result.get("status") or result.get("order_status") or "")
+        return {
+            "order_id": str(result.get("order_id") or result.get("id") or ""),
+            "client_order_id": client_order_id,
+            "status": status or None,
+            "filled_size": filled_size,
+            "remaining_size": remaining_size,
+            "target_size": target_size,
+            "target_price": self._to_float(result.get("price")),
+            "instrument": instrument,
+            "is_complete": status.lower() in {"filled", "closed", "completed"},
+        }
+
     def _make_refresh_cookie_override(
         self,
         client: GrvtCcxtPro,
@@ -511,6 +550,48 @@ class GrvtService:
             if normalized not in self._instrument_map:
                 raise ValueError(f"GRVT instrument not found for symbol {normalized}")
             return self._instrument_map[normalized]
+
+    def _extract_grvt_filled_size(self, result: dict[str, Any]) -> float:
+        direct_keys = [
+            "filled_size",
+            "executed_size",
+            "filled_amount",
+            "filled_qty",
+        ]
+        for key in direct_keys:
+            value = self._to_float(result.get(key))
+            if value > 0:
+                return value
+
+        legs = result.get("legs")
+        if isinstance(legs, list) and legs:
+            leg = legs[0] if isinstance(legs[0], dict) else {}
+            for key in direct_keys:
+                value = self._to_float(leg.get(key))
+                if value > 0:
+                    return value
+        return 0.0
+
+    def _extract_grvt_target_size(self, result: dict[str, Any]) -> float:
+        direct_keys = [
+            "size",
+            "amount",
+            "order_size",
+            "quantity",
+        ]
+        for key in direct_keys:
+            value = self._to_float(result.get(key))
+            if value > 0:
+                return value
+
+        legs = result.get("legs")
+        if isinstance(legs, list) and legs:
+            leg = legs[0] if isinstance(legs[0], dict) else {}
+            for key in direct_keys:
+                value = self._to_float(leg.get(key))
+                if value > 0:
+                    return value
+        return 0.0
 
     async def _get_instrument(self, symbol: str) -> str:
         normalized = symbol.strip().upper().replace("-PERP", "").replace("_PERP", "")

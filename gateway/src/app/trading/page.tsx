@@ -1,9 +1,13 @@
 "use client";
 
 import { toast } from "sonner";
-import { Suspense, useState, useEffect, useCallback, useRef } from "react";
+import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import {
+  type ArbExecutionDialogModel,
+  ArbExecutionDialog,
+} from "@/components/arb-execution-dialog";
 import { TradingStatusBar } from "@/components/trading-status-bar";
 import { QuickTradePanel } from "@/components/quick-trade-panel";
 import { TerminalOrderBook } from "@/components/terminal-order-book";
@@ -24,6 +28,53 @@ import { getAvailableSymbols } from "@/lib/available-symbols";
 
 type ErrorPayload = { detail?: string; error?: string };
 type ArbOpenResponse = { arb_position_id?: string; status?: string; error?: string };
+type ArbPositionSnapshot = {
+  id: string;
+  symbol: string;
+  status: string;
+  notional: number;
+  meta?: Record<string, unknown> | null;
+};
+type RiskTaskSnapshot = {
+  id: string;
+  task_type: string;
+  status: string;
+  trigger_reason?: string | null;
+};
+type OrderLogSnapshot = {
+  id: string;
+  venue: string;
+  side: string;
+  price: number;
+  size: number;
+  reduce_only: boolean;
+  request_payload?: Record<string, unknown> | null;
+  response_payload?: Record<string, unknown> | null;
+  status: string;
+};
+type ExecutionLegSnapshot = {
+  venue: "lighter" | "grvt";
+  client_order_id?: number | null;
+  order_id?: string | null;
+  status?: string | null;
+  filled_size: number;
+  remaining_size?: number | null;
+  target_size?: number | null;
+  target_price?: number | null;
+  is_complete: boolean;
+  detail?: string | null;
+};
+type ExecutionProgressSnapshot = {
+  left_leg: ExecutionLegSnapshot;
+  right_leg: ExecutionLegSnapshot;
+  hedged: boolean;
+};
+type ArbStatusPayload = {
+  arb_position: ArbPositionSnapshot;
+  risk_tasks: RiskTaskSnapshot[];
+  order_logs: OrderLogSnapshot[];
+  execution?: ExecutionProgressSnapshot | null;
+};
 type SymbolCloseResponse = {
   symbol: string;
   mode: "post_only" | "market";
@@ -42,6 +93,21 @@ type RetryFetchOptions = {
   attempts?: number;
   baseDelayMs?: number;
   retryStatusCodes?: number[];
+};
+
+type ExecutionLegContext = {
+  venue: "lighter" | "grvt";
+  label: string;
+  side: "buy" | "sell";
+  targetPrice: number | null;
+  targetSize: number | null;
+};
+
+type ArbExecutionContext = {
+  symbol: string;
+  notional: number;
+  leftLeg: ExecutionLegContext;
+  rightLeg: ExecutionLegContext;
 };
 
 function sleep(ms: number): Promise<void> {
@@ -108,6 +174,30 @@ async function fetchBalances(): Promise<BalancesResponse> {
   }
 
   return response.json();
+}
+
+async function fetchArbStatusDetails(arbPositionId: string): Promise<ArbStatusPayload> {
+  const response = await fetch(`/api/arb/status/${arbPositionId}`, {
+    cache: "no-store",
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+  const data = contentType.includes("application/json")
+    ? await response.json()
+    : await response.text();
+
+  if (!response.ok) {
+    const detail =
+      typeof data === "string"
+        ? data
+        : typeof data?.detail === "string"
+          ? data.detail
+          : typeof data?.error === "string"
+            ? data.error
+            : `HTTP ${response.status}`;
+    throw new Error(detail);
+  }
+
+  return data as ArbStatusPayload;
 }
 
 type UnifiedVenue = {
@@ -400,10 +490,43 @@ function TradingPageContent() {
   const [arbStatus, setArbStatus] = useState<"idle" | "placing" | "success" | "error">("idle");
   const [arbMessage, setArbMessage] = useState<string | null>(null);
   const [closingState, setClosingState] = useState<Record<string, { postOnly: boolean; market: boolean }>>({});
-  const [, setArbPositionId] = useState<string | null>(null);
+  const [arbPositionId, setArbPositionId] = useState<string | null>(null);
+  const [arbStatusDetails, setArbStatusDetails] = useState<ArbStatusPayload | null>(null);
+  const [executionDialogOpen, setExecutionDialogOpen] = useState(false);
+  const [executionContext, setExecutionContext] = useState<ArbExecutionContext | null>(null);
   const balancesRef = useRef<BalancesResponse | null>(null);
+  const lastBalancesErrorRef = useRef<string | null>(null);
   const symbolsCacheKey = `fra:trade-symbols:${comparisonSelection.primarySource.id}:${comparisonSelection.secondarySource.id}`;
   const SYMBOLS_CACHE_TTL_MS = 10 * 60 * 1000;
+
+  useEffect(() => {
+    if (!executionDialogOpen || !arbPositionId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadStatus = async () => {
+      try {
+        const payload = await fetchArbStatusDetails(arbPositionId);
+        if (!cancelled) {
+          setArbStatusDetails(payload);
+        }
+      } catch {
+        // Ignore polling failures here; top-level trading page remains usable.
+      }
+    };
+
+    void loadStatus();
+    const interval = window.setInterval(() => {
+      void loadStatus();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [executionDialogOpen, arbPositionId]);
 
   useEffect(() => {
     const syncAuth = () => {
@@ -470,11 +593,17 @@ function TradingPageContent() {
         setAggregatedPositions(buildAggregatedPositions(data, currentFundingRates));
         setErrorMessage(null);
       } catch (error) {
-        setErrorMessage(
+        const message =
           error instanceof Error
             ? error.message
-            : "无法获取账户余额，请确认后端服务是否正在运行。",
-        );
+            : "无法获取账户余额，请确认后端服务是否正在运行。";
+        setErrorMessage(message);
+        if (lastBalancesErrorRef.current !== message) {
+          toast.error(message, {
+            className: "bg-destructive text-destructive-foreground",
+          });
+          lastBalancesErrorRef.current = message;
+        }
       }
     }
 
@@ -926,6 +1055,9 @@ function TradingPageContent() {
     if (!subscription || arbStatus === "placing") {
       return;
     }
+    setExecutionDialogOpen(true);
+    setArbPositionId(null);
+    setArbStatusDetails(null);
     setArbStatus("placing");
     setArbMessage(null);
 
@@ -941,6 +1073,24 @@ function TradingPageContent() {
 
     const lighterPrice = getMakerPrice("lighter", lighterSide, activeSubscription.symbol);
     const grvtPrice = getMakerPrice("grvt", grvtSide, activeSubscription.symbol);
+    setExecutionContext({
+      symbol: activeSubscription.symbol,
+      notional: activeSubscription.notional_value,
+      leftLeg: {
+        venue: "lighter",
+        label: "Lighter",
+        side: lighterSide,
+        targetPrice: lighterPrice,
+        targetSize: null,
+      },
+      rightLeg: {
+        venue: "grvt",
+        label: "GRVT",
+        side: grvtSide,
+        targetPrice: grvtPrice,
+        targetSize: null,
+      },
+    });
     if (!lighterPrice || !grvtPrice) {
       setArbStatus("error");
       setArbMessage("订单簿数据不足，无法下单。");
@@ -955,6 +1105,24 @@ function TradingPageContent() {
       setArbMessage("名义价值或价格异常，无法计算下单数量。");
       return;
     }
+    setExecutionContext({
+      symbol: activeSubscription.symbol,
+      notional,
+      leftLeg: {
+        venue: "lighter",
+        label: "Lighter",
+        side: lighterSide,
+        targetPrice: lighterPrice,
+        targetSize: lighterSize,
+      },
+      rightLeg: {
+        venue: "grvt",
+        label: "GRVT",
+        side: grvtSide,
+        targetPrice: grvtPrice,
+        targetSize: grvtSize,
+      },
+    });
 
     const openResult = await openArbPosition({
       symbol: activeSubscription.symbol,
@@ -997,8 +1165,303 @@ function TradingPageContent() {
     }
 
     setArbStatus("success");
-    setArbMessage("套利下单已提交，挂单有效期 10 秒。");
+    setArbMessage(null);
   };
+
+  const executionDialogModel = useMemo<ArbExecutionDialogModel | null>(() => {
+    if (!executionContext) {
+      return null;
+    }
+
+    const positionStatus = arbStatusDetails?.arb_position?.status ?? null;
+    const execution = arbStatusDetails?.execution ?? null;
+    const openingLogs = (arbStatusDetails?.order_logs ?? []).filter((log) => !log.reduce_only);
+    const findVenueLog = (venue: "lighter" | "grvt") =>
+      openingLogs.find((log) => log.venue === venue) ?? null;
+
+    const buildLeg = (
+      leg: ExecutionLegContext,
+      book:
+        | {
+            symbol?: string;
+            bids?: { levels?: Array<{ price: number }> };
+            asks?: { levels?: Array<{ price: number }> };
+          }
+        | undefined,
+    ) => {
+      const venueLog = findVenueLog(leg.venue);
+      const liveLeg =
+        execution?.left_leg?.venue === leg.venue
+          ? execution.left_leg
+          : execution?.right_leg?.venue === leg.venue
+            ? execution.right_leg
+            : null;
+      const lighterPosition =
+        balancesSnapshot?.lighter.positions.find(
+          (position) =>
+            position.symbol.toUpperCase() === executionContext.symbol.toUpperCase(),
+        ) ?? null;
+      const grvtPosition =
+        balancesSnapshot?.grvt.positions.find(
+          (position) =>
+            normalizeSymbolFromInstrument(position.instrument) === executionContext.symbol.toUpperCase(),
+        ) ?? null;
+      const currentFilledSize =
+        leg.venue === "lighter"
+          ? Math.abs(lighterPosition?.position ?? 0)
+          : Math.abs(grvtPosition?.size ?? 0);
+      const bestBid =
+        book && "bids" in book && book.symbol?.toUpperCase() === executionContext.symbol.toUpperCase()
+          ? book.bids?.levels?.[0]?.price ?? null
+          : null;
+      const bestAsk =
+        book && "asks" in book && book.symbol?.toUpperCase() === executionContext.symbol.toUpperCase()
+          ? book.asks?.levels?.[0]?.price ?? null
+          : null;
+
+      let status: "waiting" | "submitting" | "posted" | "filling" | "filled" | "failed" = "waiting";
+      let statusLabel = "未开始";
+      let detail: string | null = null;
+      let orderReference: string | null = null;
+      const targetSize = liveLeg?.target_size ?? leg.targetSize ?? 0;
+      const rawRemainingSize =
+        liveLeg?.remaining_size ??
+        (targetSize > 0 ? Math.max(targetSize - currentFilledSize, 0) : null);
+      const effectiveFilledSize = liveLeg?.filled_size ?? currentFilledSize;
+      const fillTolerance =
+        targetSize > 0 ? Math.max(targetSize * 0.02, 0.0005) : 0;
+      const isEffectivelyFilled =
+        Boolean(
+          liveLeg?.is_complete ||
+          (
+            targetSize > 0 &&
+            (
+              (rawRemainingSize ?? 0) <= fillTolerance ||
+              positionStatus === "hedged" ||
+              positionStatus === "closed"
+            )
+          )
+        );
+      const fillProgressPct =
+        targetSize > 0
+          ? isEffectivelyFilled
+            ? 100
+            : Math.min((effectiveFilledSize / targetSize) * 100, 100)
+          : 0;
+      const remainingSize =
+        targetSize > 0
+          ? isEffectivelyFilled
+            ? 0
+            : rawRemainingSize
+          : null;
+
+      if (liveLeg?.status === "failed" || venueLog?.status === "failed" || venueLog?.status === "rejected") {
+          status = "failed";
+          statusLabel = "失败";
+          detail =
+            liveLeg?.detail ??
+            (typeof venueLog?.response_payload?.error === "string"
+              ? venueLog.response_payload?.error
+              : "挂单失败");
+      } else if (isEffectivelyFilled) {
+        status = "filled";
+        statusLabel = "已吃满";
+        detail = liveLeg?.detail ?? "该腿目标数量已基本全部成交。";
+      } else if (targetSize > 0 && effectiveFilledSize > 0) {
+        status = "filling";
+        statusLabel = "吃单中";
+        detail = liveLeg?.detail ?? "该腿已开始成交，仍有剩余数量等待继续吃进。";
+      } else if (liveLeg?.status || venueLog) {
+        if ((liveLeg?.status && liveLeg.status !== "failed") || venueLog?.status === "accepted") {
+          status = "posted";
+          statusLabel = "已挂单";
+          detail = liveLeg?.detail ?? "挂单请求已被交易所接受，等待成交。";
+        } else {
+          status = "submitting";
+          statusLabel = "提交中";
+        }
+        const txHash =
+          (typeof liveLeg?.order_id === "string" ? liveLeg.order_id : null) ??
+          (typeof venueLog?.response_payload?.tx_hash === "string"
+            ? venueLog.response_payload?.tx_hash
+            : null);
+        const clientOrderId =
+          liveLeg?.client_order_id != null
+            ? String(liveLeg.client_order_id)
+            : typeof venueLog?.request_payload?.client_order_index === "number"
+            ? String(venueLog.request_payload?.client_order_index)
+            : typeof venueLog?.request_payload?.client_order_id === "number"
+              ? String(venueLog.request_payload?.client_order_id)
+              : null;
+        orderReference = txHash ?? clientOrderId;
+      } else if (arbStatus === "placing" || (arbPositionId && !arbStatusDetails)) {
+        status = "submitting";
+        statusLabel = "提交中";
+      }
+
+      return {
+        venue: leg.venue,
+        label: leg.label,
+        side: leg.side,
+        targetPrice: liveLeg?.target_price ?? leg.targetPrice,
+        targetSize: liveLeg?.target_size ?? leg.targetSize,
+        bestBid,
+        bestAsk,
+        filledSize: effectiveFilledSize,
+        remainingSize,
+        fillProgressPct,
+        status,
+        statusLabel,
+        orderStatus: liveLeg?.status ?? venueLog?.status ?? null,
+        orderReference,
+        detail,
+      };
+    };
+
+    const leftLeg = buildLeg(executionContext.leftLeg, orderBook?.lighter);
+    const rightLeg = buildLeg(executionContext.rightLeg, orderBook?.grvt);
+    const riskTasks = arbStatusDetails?.risk_tasks ?? [];
+    const riskSummary =
+      riskTasks.length > 0
+        ? riskTasks.map((task) => `${task.task_type}:${task.status}`).join(" / ")
+        : "未创建或未返回";
+
+    let statusLabel = "进行中";
+    let statusTone: ArbExecutionDialogModel["statusTone"] = "secondary";
+    if (arbStatus === "error" || positionStatus === "failed") {
+      statusLabel = "失败";
+      statusTone = "destructive";
+    } else if ((execution?.hedged ?? false) || (leftLeg.status === "filled" && rightLeg.status === "filled")) {
+      statusLabel = "对冲完成";
+      statusTone = "default";
+    } else if (positionStatus === "partially_filled") {
+      statusLabel = "部分完成";
+      statusTone = "outline";
+    } else if (
+      leftLeg.status === "filling" ||
+      rightLeg.status === "filling"
+    ) {
+      statusLabel = "吃单进行中";
+      statusTone = "default";
+    } else if (positionStatus === "pending" || leftLeg.status === "posted" || rightLeg.status === "posted") {
+      statusLabel = "挂单已提交";
+      statusTone = "default";
+    }
+
+    const steps: ArbExecutionDialogModel["steps"] = [
+      {
+        key: "validate",
+        label: "参数确认",
+        description: "校验币种、方向、名义价值与杠杆。",
+        status: "complete",
+      },
+      {
+        key: "pricing",
+        label: "盘口确认",
+        description: executionContext.leftLeg.targetPrice && executionContext.rightLeg.targetPrice
+          ? "已获取双腿挂单价格。"
+          : "正在检查订单簿与 maker 价格。",
+        status:
+          executionContext.leftLeg.targetPrice && executionContext.rightLeg.targetPrice
+            ? "complete"
+            : arbStatus === "error"
+              ? "failed"
+              : "current",
+      },
+      {
+        key: "submit",
+        label: "提交套利请求",
+        description: arbPositionId ? `建仓记录已创建：${arbPositionId}` : "正在向后端提交对冲建仓请求。",
+        status:
+          arbStatus === "error" && !arbPositionId
+            ? "failed"
+            : arbPositionId
+              ? "complete"
+              : "current",
+      },
+      {
+        key: "lighter-order",
+        label: "Lighter 挂单",
+        description: leftLeg.detail ?? "等待 Lighter 返回挂单结果。",
+        status:
+          leftLeg.status === "filled"
+            ? "complete"
+            : leftLeg.status === "failed"
+              ? "failed"
+              : leftLeg.status === "filling" || leftLeg.status === "posted" || leftLeg.status === "submitting"
+                ? "current"
+                : "upcoming",
+      },
+      {
+        key: "grvt-order",
+        label: "GRVT 挂单",
+        description: rightLeg.detail ?? "等待 GRVT 返回挂单结果。",
+        status:
+          rightLeg.status === "filled"
+            ? "complete"
+            : rightLeg.status === "failed"
+              ? "failed"
+              : rightLeg.status === "filling" || rightLeg.status === "posted" || rightLeg.status === "submitting"
+                ? "current"
+                : "upcoming",
+      },
+      {
+        key: "hedged",
+        label: "对冲吃单完成",
+        description:
+          (execution?.hedged ?? false) || (leftLeg.status === "filled" && rightLeg.status === "filled")
+            ? "两边都已吃进，已形成对冲仓位。"
+            : leftLeg.status === "filling" || rightLeg.status === "filling"
+              ? "至少一边已开始吃单，继续等待另一边完成。"
+              : positionStatus === "partially_filled"
+                ? "一边已开始吃单，另一边尚未完全补齐。"
+                : positionStatus === "pending"
+                  ? "双腿挂单已在场内等待成交。"
+              : positionStatus === "failed"
+                ? "套利下单失败，已记录错误。"
+                : "等待两边都真正成交完成。",
+        status:
+          (execution?.hedged ?? false) || (leftLeg.status === "filled" && rightLeg.status === "filled")
+            ? "complete"
+            : positionStatus === "failed"
+            ? "failed"
+            : arbPositionId
+              ? "current"
+              : "upcoming",
+      },
+      {
+        key: "result",
+        label: "建仓状态写回",
+        description:
+          (execution?.hedged ?? false) || positionStatus === "hedged"
+            ? "后端已标记为 hedged。"
+            : positionStatus
+              ? `当前后端状态：${positionStatus}`
+              : "等待后端返回最终建仓状态。",
+        status:
+          positionStatus === "hedged"
+            ? "complete"
+            : positionStatus === "failed"
+              ? "failed"
+            : arbPositionId
+              ? "current"
+              : "upcoming",
+      },
+    ];
+
+    return {
+      symbol: executionContext.symbol,
+      notional: executionContext.notional,
+      statusLabel,
+      statusTone,
+      message: arbMessage,
+      positionStatus,
+      riskSummary,
+      steps,
+      leftLeg,
+      rightLeg,
+    };
+  }, [arbMessage, arbPositionId, arbStatus, arbStatusDetails, balancesSnapshot, executionContext, orderBook]);
 
   const canExecute =
     Boolean(subscription) &&
@@ -1020,17 +1483,6 @@ function TradingPageContent() {
     return <AuthRequiredPage />;
   }
 
-  if (errorMessage) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white rounded-lg border border-red-200 shadow-md p-8 max-w-md">
-          <h2 className="text-xl font-bold text-red-600 mb-3">无法加载数据</h2>
-          <p className="text-gray-700 text-sm">{errorMessage}</p>
-        </div>
-      </div>
-    );
-  }
-
   if (!normalized) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -1041,6 +1493,11 @@ function TradingPageContent() {
 
   return (
     <div className="h-[calc(100vh-4rem)] bg-gray-50 flex flex-col overflow-hidden">
+      <ArbExecutionDialog
+        open={executionDialogOpen}
+        onOpenChange={setExecutionDialogOpen}
+        model={executionDialogModel}
+      />
       {/* Top Status Bar */}
       <TradingStatusBar
         totalUsd={normalized.totalUsd}

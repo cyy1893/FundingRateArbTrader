@@ -613,6 +613,40 @@ class LighterService:
         best_ask = asks[0].price if asks else None
         return best_bid, best_ask
 
+    async def get_order_status_with_credentials(
+        self,
+        symbol: str,
+        account_index: int,
+        api_key_index: int,
+        private_key: str,
+        client_order_index: int,
+    ) -> dict[str, Any] | None:
+        client = await self._get_cached_client_for_credentials(account_index, api_key_index, private_key)
+        market_id = await self._get_market_id(symbol)
+        auth_token, error = client.create_auth_token_with_expiry(api_key_index=api_key_index)
+        if error:
+            raise RuntimeError(f"Lighter auth token creation failed: {error}")
+
+        active_orders = await client.order_api.account_active_orders(
+            account_index=account_index,
+            market_id=market_id,
+            auth=auth_token,
+        )
+        active_match = self._match_lighter_order(active_orders.orders, client_order_index)
+        if active_match is not None:
+            return self._serialize_lighter_order(active_match)
+
+        inactive_orders = await client.order_api.account_inactive_orders(
+            account_index=account_index,
+            limit=100,
+            market_id=market_id,
+            auth=auth_token,
+        )
+        inactive_match = self._match_lighter_order(inactive_orders.orders, client_order_index)
+        if inactive_match is not None:
+            return self._serialize_lighter_order(inactive_match)
+        return None
+
     async def _build_client_for_credentials(
         self,
         account_index: int,
@@ -703,6 +737,32 @@ class LighterService:
             is_buy=is_buy,
             timestamp=ts_float,
         )
+
+    @staticmethod
+    def _match_lighter_order(orders: list[Any], client_order_index: int) -> Any | None:
+        for order in orders or []:
+            if getattr(order, "client_order_index", None) == client_order_index:
+                return order
+        return None
+
+    @staticmethod
+    def _serialize_lighter_order(order: Any) -> dict[str, Any]:
+        def to_float(value: Any) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+
+        return {
+            "order_id": getattr(order, "order_id", None),
+            "client_order_id": getattr(order, "client_order_index", None),
+            "status": getattr(order, "status", None),
+            "filled_size": to_float(getattr(order, "filled_base_amount", None)),
+            "remaining_size": to_float(getattr(order, "remaining_base_amount", None)),
+            "target_size": to_float(getattr(order, "initial_base_amount", None)),
+            "target_price": to_float(getattr(order, "price", None)),
+            "is_complete": getattr(order, "status", None) == "filled",
+        }
 
     @staticmethod
     def _parse_timestamp(value: Any) -> float:

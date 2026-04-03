@@ -534,10 +534,30 @@ class OrderLogSnapshot(BaseModel):
     deleted_at: datetime | None = None
 
 
+class ExecutionLegSnapshot(BaseModel):
+    venue: Literal["lighter", "grvt"]
+    client_order_id: int | None = None
+    order_id: str | None = None
+    status: str | None = None
+    filled_size: float = 0.0
+    remaining_size: float | None = None
+    target_size: float | None = None
+    target_price: float | None = None
+    is_complete: bool = False
+    detail: str | None = None
+
+
+class ExecutionProgressSnapshot(BaseModel):
+    left_leg: ExecutionLegSnapshot
+    right_leg: ExecutionLegSnapshot
+    hedged: bool = False
+
+
 class ArbStatusResponse(BaseModel):
     arb_position: ArbPositionSnapshot
     risk_tasks: list[RiskTaskSnapshot]
     order_logs: list[OrderLogSnapshot]
+    execution: ExecutionProgressSnapshot | None = None
 
 
 class AdminCreateUserRequest(BaseModel):
