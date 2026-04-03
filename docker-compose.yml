@@ -23,8 +23,6 @@ services:
       - ./trader/app/data:/app/app/data
     expose:
       - "8080"
-    ports:
-      - "8080:8080"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
       interval: 30s
@@ -51,14 +49,26 @@ services:
     pids_limit: 256
     environment:
       - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
-    ports:
-      - "80:3000"
     healthcheck:
       test: ["CMD", "node", "-e", "const h=require('os').hostname();require('http').get('http://'+h+':3000', (r)=>process.exit(r.statusCode>=200&&r.statusCode<500?0:1)).on('error', ()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  caddy:
+    image: caddy:2
+    container_name: funding-rate-arb-caddy
+    depends_on:
+      - gateway
+      - trader
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
   admin:
     profiles: ["admin"]
@@ -84,3 +94,7 @@ services:
       - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
     ports:
       - "127.0.0.1:3002:3000"
+
+volumes:
+  caddy_data:
+  caddy_config:

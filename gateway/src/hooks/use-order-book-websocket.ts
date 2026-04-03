@@ -91,9 +91,12 @@ export function useOrderBookWebSocket(subscription: OrderBookSubscription | null
     tradeBufferRef.current = {};
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const sameOriginBase = `${protocol}//${window.location.host}`;
     const base =
       process.env.NEXT_PUBLIC_TRADER_WS_URL ??
-      `${protocol}//${window.location.hostname}:8080`;
+      (window.location.port === '3001'
+        ? `${protocol}//${window.location.hostname}:8080`
+        : sameOriginBase);
     const token = getClientAuthToken();
     const wsUrl = `${base.replace(/^http/, 'ws').replace(/\/$/, '')}/ws/orderbook${
       token ? `?token=${encodeURIComponent(token)}` : ''
