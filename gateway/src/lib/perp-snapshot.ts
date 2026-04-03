@@ -18,7 +18,10 @@ export async function getPerpetualSnapshot(
   primarySource: SourceConfig,
   secondarySource: SourceConfig,
 ): Promise<PerpSnapshot> {
-  const upstream = `${TRADER_API_BASE_URL.replace(/\/$/, "")}/perp-snapshot`;
+  const upstream =
+    typeof window === "undefined"
+      ? `${TRADER_API_BASE_URL.replace(/\/$/, "")}/perp-snapshot`
+      : "/api/perp-snapshot";
   const response = await fetch(upstream, {
     method: "POST",
     cache: "no-store",
@@ -28,6 +31,8 @@ export async function getPerpetualSnapshot(
     body: JSON.stringify({
       primary_source: primarySource.provider,
       secondary_source: secondarySource.provider,
+      sourceA: primarySource.id,
+      sourceB: secondarySource.id,
     }),
   });
 

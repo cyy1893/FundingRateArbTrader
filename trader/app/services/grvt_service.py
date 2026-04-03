@@ -3,13 +3,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
+from http.cookies import SimpleCookie
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from typing import Any, Optional
 
+import aiohttp
 import websockets
 
-from pysdk.grvt_ccxt_env import GrvtEnv, GrvtWSEndpointType, get_grvt_ws_endpoint
+from pysdk.grvt_ccxt_env import GrvtEnv, GrvtWSEndpointType, get_grvt_endpoint, get_grvt_ws_endpoint
 from pysdk.grvt_ccxt_pro import GrvtCcxtPro
 
 from app.config import Settings
@@ -71,6 +74,7 @@ class GrvtService:
         trading_account_id: str,
     ) -> GrvtBalanceSnapshot:
         client = await self._get_cached_client_for_credentials(api_key, private_key, trading_account_id)
+        await self._refresh_client_cookie(client, api_key)
         account_summary = await client.get_account_summary()
         if not account_summary:
             raise RuntimeError("GRVT account summary returned no data")
@@ -93,7 +97,7 @@ class GrvtService:
     ) -> asyncio.AsyncIterator[VenueOrderBook]:
         client = await self._get_cached_client_for_credentials(api_key, private_key, trading_account_id)
         instrument = await self._get_instrument_with_client(client, symbol)
-        await client.refresh_cookie()
+        await self._refresh_client_cookie(client, api_key)
         cookie = getattr(client, "_cookie", {}) or {}
         gravity = cookie.get("gravity")
         account_id = cookie.get("X-Grvt-Account-Id")
@@ -183,7 +187,7 @@ class GrvtService:
 
         client = await self._get_cached_client_for_credentials(api_key, private_key, trading_account_id)
         instrument = await self._get_instrument_with_client(client, symbol)
-        await client.refresh_cookie()
+        await self._refresh_client_cookie(client, api_key)
         cookie = getattr(client, "_cookie", {}) or {}
         gravity = cookie.get("gravity")
         account_id = cookie.get("X-Grvt-Account-Id")
@@ -361,6 +365,8 @@ class GrvtService:
             "api_key": api_key,
         }
         client = GrvtCcxtPro(env=env, parameters=parameters)
+        client.refresh_cookie = self._make_refresh_cookie_override(client, api_key)  # type: ignore[method-assign]
+        await self._refresh_client_cookie(client, api_key)
         await client.load_markets()
         return client
 
@@ -403,6 +409,90 @@ class GrvtService:
         best_bid = extract_price(bids[0]) if isinstance(bids, list) and bids else 0.0
         best_ask = extract_price(asks[0]) if isinstance(asks, list) and asks else 0.0
         return (best_bid or None), (best_ask or None), instrument
+
+    def _make_refresh_cookie_override(
+        self,
+        client: GrvtCcxtPro,
+        api_key: str,
+    ):
+        async def _refresh_cookie_override() -> dict[str, Any] | None:
+            return await self._refresh_client_cookie(client, api_key)
+
+        return _refresh_cookie_override
+
+    async def _refresh_client_cookie(
+        self,
+        client: GrvtCcxtPro,
+        api_key: str,
+    ) -> dict[str, Any] | None:
+        existing = getattr(client, "_cookie", None)
+        expires_at = existing.get("expires") if isinstance(existing, dict) else None
+        if isinstance(expires_at, (int, float)) and expires_at - time.time() > 5:
+            return existing
+
+        cookie_bundle = await self._fetch_cookie_bundle(api_key)
+        if cookie_bundle is None:
+            raise RuntimeError("GRVT authentication failed: missing gravity cookie")
+
+        client._cookie = cookie_bundle  # noqa: SLF001
+        session = getattr(client, "_session", None)
+        if session is not None:
+            session.cookie_jar.update_cookies({"gravity": cookie_bundle["gravity"]})
+            account_id = cookie_bundle.get("X-Grvt-Account-Id")
+            if account_id:
+                session.headers.update({"X-Grvt-Account-Id": account_id})
+        return cookie_bundle
+
+    async def _fetch_cookie_bundle(self, api_key: str) -> dict[str, Any] | None:
+        try:
+            env = GrvtEnv(self._settings.grvt_env)
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid GRVT environment: {self._settings.grvt_env}") from exc
+
+        path = get_grvt_endpoint(env, "AUTH")
+        async with aiohttp.ClientSession(headers={"Content-Type": "application/json"}) as session:
+            async with session.post(url=path, json={"api_key": api_key}, timeout=5) as response:
+                if not response.ok:
+                    body = await response.text()
+                    raise RuntimeError(
+                        f"GRVT auth endpoint failed ({response.status}): {body or 'empty response'}"
+                    )
+
+                gravity_value: str | None = None
+                expires_raw: str | None = None
+                if "gravity" in response.cookies:
+                    gravity_cookie = response.cookies["gravity"]
+                    gravity_value = gravity_cookie.value
+                    expires_raw = gravity_cookie["expires"] or None
+                else:
+                    for header in response.headers.getall("Set-Cookie", []):
+                        parsed = SimpleCookie()
+                        parsed.load(header)
+                        if "gravity" in parsed:
+                            gravity_cookie = parsed["gravity"]
+                            gravity_value = gravity_cookie.value
+                            expires_raw = gravity_cookie["expires"] or None
+                            break
+
+                if not gravity_value:
+                    return None
+
+                if expires_raw:
+                    try:
+                        expires_ts = datetime.strptime(
+                            expires_raw,
+                            "%a, %d %b %Y %H:%M:%S %Z",
+                        ).timestamp()
+                    except ValueError:
+                        expires_ts = time.time() + 300
+                else:
+                    expires_ts = time.time() + 300
+
+                return {
+                    "gravity": gravity_value,
+                    "expires": expires_ts,
+                    "X-Grvt-Account-Id": response.headers.get("X-Grvt-Account-Id", ""),
+                }
 
     async def _get_instrument_with_client(self, client: GrvtCcxtPro, symbol: str) -> str:
         normalized = symbol.strip().upper().replace("-PERP", "").replace("_PERP", "")

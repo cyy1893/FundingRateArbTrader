@@ -20,7 +20,10 @@ export async function getAvailableSymbols(
   primarySource: SourceConfig,
   secondarySource: SourceConfig,
 ): Promise<AvailableSymbolsSnapshot> {
-  const upstream = `${TRADER_API_BASE_URL.replace(/\/$/, "")}/available-symbols`;
+  const upstream =
+    typeof window === "undefined"
+      ? `${TRADER_API_BASE_URL.replace(/\/$/, "")}/available-symbols`
+      : "/api/available-symbols";
   const response = await fetch(upstream, {
     method: "POST",
     cache: "no-store",
@@ -30,6 +33,8 @@ export async function getAvailableSymbols(
     body: JSON.stringify({
       primary_source: primarySource.provider,
       secondary_source: secondarySource.provider,
+      sourceA: primarySource.id,
+      sourceB: secondarySource.id,
     }),
   });
 
