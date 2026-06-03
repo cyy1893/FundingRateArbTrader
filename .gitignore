@@ -69,3 +69,8 @@ next-env.d.ts
 data/
 !trader/app/data/
 !trader/app/data/asset_icons.json
+
+.playwright-mcp/
+dashboard-screenshot.png
+dashboard-icons-verification.png
+recommendations-page.png

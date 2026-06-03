@@ -2523,12 +2523,16 @@ def _build_icon_candidate_urls(symbol: str) -> list[str]:
     if not normalized:
         return []
     lower = normalized.lower()
+    upper = normalized.upper()
     # Multi-source dynamic discovery; do not rely on static per-symbol mappings.
     urls = [
         f"https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/{lower}.png",
         f"https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/{lower}.png",
         f"https://assets.coincap.io/assets/icons/{lower}@2x.png",
         f"https://coinicons-api.vercel.app/api/icon/{lower}",
+        # Stock/equity logo sources (for GRVT stock perpetuals like SPY, NVDA, etc.)
+        f"https://storage.googleapis.com/iex/api/logos/{upper}.png",
+        f"https://companiesmarketcap.com/img/company-logos/256/{upper}.png",
     ]
     deduped: list[str] = []
     seen: set[str] = set()

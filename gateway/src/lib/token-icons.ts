@@ -40,6 +40,9 @@ export function buildTokenIconCandidates(
     candidates.push(`https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${lower}.png`);
     candidates.push(`https://assets.coincap.io/assets/icons/${lower}@2x.png`);
     candidates.push(`https://coinicons-api.vercel.app/api/icon/${lower}`);
+    // Stock/equity logo sources (for GRVT stock perpetuals like SPY, NVDA, etc.)
+    candidates.push(`https://storage.googleapis.com/iex/api/logos/${alias}.png`);
+    candidates.push(`https://companiesmarketcap.com/img/company-logos/256/${alias}.png`);
     // Backend proxy: resolves CDN icons via cache + CoinGecko bulk discovery
     candidates.push(`/token-icon/${lower}`);
   }
