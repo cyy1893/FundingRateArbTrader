@@ -10,7 +10,10 @@
   @token_icon path /token-icon/*
   reverse_proxy @token_icon trader:8080
 
-  import Caddyfile.auth
+  @admin path /admin /admin/*
+  basicauth @admin {
+      admin $2y$05$GQKUfpzlM2Z.mci5wPbhb.BxR455MyvEyXqhYjiFFZCy6kubs6FhC
+  }
 
   reverse_proxy gateway:3000
 }
