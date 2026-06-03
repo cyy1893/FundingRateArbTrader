@@ -47,6 +47,8 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
+    env_file:
+      - ./trader/.env
     environment:
       - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
     healthcheck:
@@ -69,31 +71,6 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-
-  admin:
-    profiles: ["admin"]
-    build:
-      context: ./admin
-      dockerfile: Dockerfile
-    image: funding-rate-arb-admin:latest
-    container_name: funding-rate-arb-admin
-    depends_on:
-      - trader
-    user: "1000:1000"
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 256
-    env_file:
-      - ./trader/.env
-    environment:
-      - NEXT_PUBLIC_API_BASE_URL=http://trader:8080
-    ports:
-      - "127.0.0.1:3002:3000"
 
 volumes:
   caddy_data:

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, TrendingUp, Lock, User, LogOut, ListOrdered } from "lucide-react";
+import { BarChart3, TrendingUp, Lock, User, LogOut, ListOrdered, Shield } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { clearClientAuthToken, extractUsernameFromToken, getClientAuthToken } from "@/lib/auth";
@@ -59,6 +59,19 @@ export function TopNav() {
 
         {/* Navigation */}
         <nav className="flex items-center space-x-4 lg:space-x-6">
+          {username ? (
+            <Link
+              href="/admin/users"
+              className={cn(
+                "flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary",
+                pathname.startsWith("/admin")
+                  ? "text-foreground"
+                  : "text-muted-foreground",
+              )}
+            >
+              <span>管理</span>
+            </Link>
+          ) : null}
           {NAV_ITEMS.map((item) => {
             const isActive =
               item.href === "/"
