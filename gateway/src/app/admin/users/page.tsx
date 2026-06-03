@@ -107,7 +107,7 @@ export default function AdminUsersPage() {
         <div>
           <h1 className="text-3xl font-semibold">Users</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {username ? `Logged in as ${username}` : "Admin management"}
+Admin management
           </p>
         </div>
         <div className="flex items-center gap-3">
