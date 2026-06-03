@@ -30,7 +30,7 @@ import {
   formatVolume,
   computeAnnualizedPercent,
 } from "@/lib/formatters";
-import { buildTokenIconCandidates, makeFallbackSvgDataUrl } from "@/lib/token-icons";
+import { buildTokenIconCandidates, makeFallbackSvgDataUrl, recordIconLoad } from "@/lib/token-icons";
 import type { MarketRow } from "@/types/market";
 import type { SourceProvider } from "@/lib/external";
 import { cn } from "@/lib/utils";
@@ -265,6 +265,9 @@ function PerpTableRowComponent({
               alt={`${row.displayName} 图标`}
               className="h-7 w-7 flex-shrink-0 rounded-full border border-border/30 bg-background object-contain"
               loading="lazy"
+              onLoad={() => {
+                if (row.symbol) recordIconLoad(row.symbol, iconSrc);
+              }}
               onError={() => {
                 setIconCandidateIndex((prev) =>
                   prev + 1 < iconCandidates.length ? prev + 1 : prev,

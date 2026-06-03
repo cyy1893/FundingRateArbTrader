@@ -24,6 +24,7 @@ import {
 import {
   buildTokenIconCandidates,
   makeFallbackSvgDataUrl,
+  recordIconLoad,
 } from "@/lib/token-icons";
 import { cn } from "@/lib/utils";
 
@@ -451,6 +452,9 @@ function RecommendationSymbolCell({
         alt={`${displayName} 图标`}
         className="h-7 w-7 flex-shrink-0 rounded-full border border-border/30 bg-background object-contain"
         loading="lazy"
+        onLoad={() => {
+          if (symbol) recordIconLoad(symbol, iconSrc);
+        }}
         onError={() => {
           setIconCandidateIndex((current) => current + 1);
         }}

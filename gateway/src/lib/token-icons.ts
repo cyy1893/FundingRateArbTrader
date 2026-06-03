@@ -15,6 +15,41 @@ function symbolAliases(symbol: string): string[] {
   return Array.from(aliases);
 }
 
+// ── Client-side icon URL cache ──────────────────────────────────────────────
+// Avoids re-walking the full fallback chain on every render.  Once an icon
+// loads successfully the winning URL is cached in sessionStorage so subsequent
+// renders (including page reloads) serve it instantly.
+
+const ICON_CACHE_PREFIX = "icon:";
+const ICON_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function getCachedIconUrl(symbol: string): string | null {
+  try {
+    const raw = sessionStorage.getItem(ICON_CACHE_PREFIX + symbol);
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as { u: string; t: number };
+    if (Date.now() - entry.t > ICON_CACHE_MAX_AGE_MS) {
+      sessionStorage.removeItem(ICON_CACHE_PREFIX + symbol);
+      return null;
+    }
+    return entry.u;
+  } catch {
+    return null;
+  }
+}
+
+export function recordIconLoad(symbol: string, url: string): void {
+  if (!url || url.startsWith("data:")) return;
+  try {
+    sessionStorage.setItem(
+      ICON_CACHE_PREFIX + symbol,
+      JSON.stringify({ u: url, t: Date.now() }),
+    );
+  } catch {
+    // sessionStorage full or unavailable — silently ignore
+  }
+}
+
 // Maps GRVT commodity symbols to TradingView instrument names for icon discovery.
 const COMMODITY_ICON_NAMES: Record<string, string> = {
   NATGAS: "natural-gas",
@@ -42,6 +77,13 @@ export function buildTokenIconCandidates(
   existingIconUrl: string | null,
 ): string[] {
   const candidates: string[] = [];
+
+  // Fast path: previously resolved URL from sessionStorage cache
+  const cached = getCachedIconUrl(normalizeSymbol(symbol));
+  if (cached) {
+    candidates.push(cached);
+  }
+
   if (existingIconUrl) {
     candidates.push(existingIconUrl);
   }
