@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, TrendingUp, Lock, User, LogOut, ListOrdered, Shield } from "lucide-react";
+import { BarChart3, TrendingUp, Lock, User, LogOut, ListOrdered } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { clearClientAuthToken, extractUsernameFromToken, getClientAuthToken } from "@/lib/auth";
