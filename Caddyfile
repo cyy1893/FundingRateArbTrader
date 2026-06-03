@@ -7,5 +7,8 @@
   @events path /ws/events
   reverse_proxy @events trader:8080
 
+  @token_icon path /token-icon/*
+  reverse_proxy @token_icon trader:8080
+
   reverse_proxy gateway:3000
 }

@@ -1549,6 +1549,119 @@ class MarketDataService:
             self._persist_asset_icons_to_file(cache_updates)
         return result
 
+    async def resolve_icon_url(self, symbol: str) -> str | None:
+        """Resolve a single symbol's icon URL via cache and live discovery.
+
+        Returns the best CDN icon URL when found, or None when no icon is known.
+        Results are cached in-memory (1h TTL) and persisted to asset_icons.json.
+        """
+        normalized = _normalize_icon_symbol(symbol)
+        if not normalized:
+            return None
+
+        now = time()
+        # 1. In-memory cache
+        cached = self._icon_url_cache.get(normalized)
+        if cached is not None and now - cached[0] < ICON_URL_CACHE_TTL_SECONDS:
+            return cached[1]
+
+        # 2. File-backed persistent cache
+        file_rows = self._load_asset_icons_from_file({normalized})
+        if normalized in file_rows:
+            icon_url, _ = file_rows[normalized]
+            self._icon_url_cache[normalized] = (now, icon_url)
+            return icon_url
+
+        # 3. Probe CDNs + CoinGecko
+        icon_url, source = await self._discover_icon_url(normalized)
+
+        # 4. Persist (including negative results)
+        self._icon_url_cache[normalized] = (now, icon_url)
+        self._persist_asset_icons_to_file({normalized: (icon_url, source)})
+        return icon_url
+
+    async def prefetch_coingecko_icons(self, target_pages: int = 20) -> int:
+        """Bulk-fetch icon URLs from CoinGecko /coins/markets and persist them.
+
+        Returns the number of new icon URLs discovered.
+        """
+        headers: dict[str, str] = {}
+        if self._coingecko_api_key:
+            headers["x-cg-demo-api-key"] = self._coingecko_api_key
+
+        discovered: dict[str, tuple[str | None, str | None]] = {}
+        new_count = 0
+
+        for page in range(1, target_pages + 1):
+            try:
+                response = await self._client.get(
+                    "https://api.coingecko.com/api/v3/coins/markets",
+                    params={
+                        "vs_currency": "usd",
+                        "order": "market_cap_desc",
+                        "per_page": 250,
+                        "page": page,
+                        "sparkline": "false",
+                    },
+                    headers=headers,
+                    timeout=15.0,
+                )
+                if response.status_code == 429:
+                    logger.warning("CoinGecko rate-limited at page %d; stopping prefetch", page)
+                    break
+                if response.status_code != 200:
+                    logger.warning("CoinGecko prefetch page %d returned %d", page, response.status_code)
+                    continue
+
+                payload = response.json()
+                if not isinstance(payload, list):
+                    continue
+
+                for coin in payload:
+                    if not isinstance(coin, dict):
+                        continue
+                    symbol = str(coin.get("symbol") or "").upper().strip()
+                    if not symbol:
+                        continue
+                    image_url = str(coin.get("image") or "").strip()
+                    if not image_url:
+                        continue
+                    symbol = _normalize_icon_symbol(symbol)
+                    if not symbol:
+                        continue
+                    if symbol in discovered:
+                        continue
+                    # Check if already cached in file
+                    existing = self._icon_url_cache.get(symbol)
+                    if existing is not None:
+                        continue
+                    discovered[symbol] = (image_url, "coingecko_bulk")
+                    new_count += 1
+
+                logger.info(
+                    "CoinGecko prefetch page %d done — %d coins, %d new icons so far",
+                    page, len(payload), new_count,
+                )
+                # Respect rate limits: ~20 req/min for free tier
+                await asyncio.sleep(3.0)
+
+            except Exception as exc:
+                logger.warning("CoinGecko prefetch page %d failed: %s", page, exc)
+                continue
+
+            if len(payload) < 250:
+                # Reached the end of available coins
+                break
+
+        if discovered:
+            self._persist_asset_icons_to_file(discovered)
+            now = time()
+            for symbol, (icon_url, _) in discovered.items():
+                self._icon_url_cache[symbol] = (now, icon_url)
+            logger.info("CoinGecko prefetch saved %d new icons to cache", len(discovered))
+
+        return new_count
+
     def _load_asset_icons_from_file(self, symbols: set[str]) -> dict[str, tuple[str | None, str | None]]:
         if not symbols:
             return {}

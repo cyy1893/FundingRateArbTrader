@@ -14,6 +14,7 @@ from cachetools import TTLCache
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Security, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
 from sqlmodel import Session, select
@@ -82,6 +83,7 @@ from app.services.arb_service import ArbService
 from app.services.lighter_service import LighterService
 from app.services.grvt_service import GrvtService
 from app.services.market_data_service import MarketDataService
+from app.services.market_data_service import _normalize_icon_symbol
 from app.utils.auth import AuthError, AuthManager, LockoutError, _hash_password
 from app.utils.crypto import decrypt_secret, encrypt_secret
 
@@ -107,6 +109,16 @@ LIQUIDATION_GUARD_CHECK_INTERVAL_SECONDS = 60
 DEFAULT_DRAWDOWN_CLOSE_THRESHOLD_PCT = 50.0
 
 
+async def _prefetch_icons_on_startup() -> None:
+    """Background task: bulk-fetch CoinGecko icons on startup."""
+    try:
+        await asyncio.sleep(5)  # Let other startup tasks settle first
+        count = await market_data_service.prefetch_coingecko_icons(target_pages=20)
+        logger.info("Startup icon prefetch complete: %d new icons cached", count)
+    except Exception:
+        logger.warning("Startup icon prefetch failed", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     workers: list[asyncio.Task[Any]] = []
@@ -117,6 +129,8 @@ async def lifespan(app: FastAPI):
     workers.append(asyncio.create_task(drawdown_guard_worker()))
     if settings.db_keepalive_interval_seconds > 0:
         workers.append(asyncio.create_task(database_keepalive_worker()))
+    # Background CoinGecko icon prefetch — fills asset_icons.json with 1000s of icons
+    workers.append(asyncio.create_task(_prefetch_icons_on_startup()))
     try:
         yield
     finally:
@@ -1145,6 +1159,38 @@ async def health() -> Dict[str, Any]:
         "lighter_connected": lighter_service.is_ready,
         "grvt_connected": grvt_service.is_ready,
     }
+
+
+@app.get("/token-icon/{symbol}")
+async def token_icon(
+    symbol: str,
+    service: MarketDataService = Depends(get_market_data_service),
+):
+    """Proxy endpoint for token icons.
+
+    Looks up the icon URL from cache (in-memory and file-backed). If found,
+    issues a 302 redirect to the CDN. If no icon is known, returns 404 so the
+    frontend can fall back to the next candidate in its chain.
+
+    No authentication required.
+    """
+    normalized = _normalize_icon_symbol(symbol)
+    if not normalized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Symbol cannot be empty",
+        )
+
+    icon_url = await service.resolve_icon_url(normalized)
+
+    if icon_url:
+        return RedirectResponse(
+            url=icon_url,
+            status_code=302,
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Icon not found")
 
 
 @app.get("/balances", response_model=BalancesResponse)

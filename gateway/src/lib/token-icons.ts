@@ -40,6 +40,8 @@ export function buildTokenIconCandidates(
     candidates.push(`https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${lower}.png`);
     candidates.push(`https://assets.coincap.io/assets/icons/${lower}@2x.png`);
     candidates.push(`https://coinicons-api.vercel.app/api/icon/${lower}`);
+    // Backend proxy: resolves CDN icons via cache + CoinGecko bulk discovery
+    candidates.push(`/token-icon/${lower}`);
   }
 
   const deduped = new Set<string>();
