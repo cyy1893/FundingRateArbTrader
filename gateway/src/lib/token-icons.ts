@@ -15,6 +15,18 @@ function symbolAliases(symbol: string): string[] {
   return Array.from(aliases);
 }
 
+// Maps GRVT commodity symbols to TradingView instrument names for icon discovery.
+const COMMODITY_ICON_NAMES: Record<string, string> = {
+  NATGAS: "natural-gas",
+  XAUUSD: "gold",
+  XAGUSD: "silver",
+  USOIL: "crude-oil",
+  WHEAT: "wheat",
+  CORN: "corn",
+  SOYBEAN: "soybean",
+  SUGAR: "sugar",
+};
+
 export function makeFallbackSvgDataUrl(symbol: string): string {
   const short = symbol.slice(0, 3).toUpperCase();
   const seed = Array.from(short).reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -43,6 +55,11 @@ export function buildTokenIconCandidates(
     // Stock/equity logo sources (for GRVT stock perpetuals like SPY, NVDA, etc.)
     candidates.push(`https://storage.googleapis.com/iex/api/logos/${alias}.png`);
     candidates.push(`https://companiesmarketcap.com/img/company-logos/256/${alias}.png`);
+    // Commodity TradingView SVG icons (for GRVT commodity perpetuals like NATGAS)
+    const commodityName = COMMODITY_ICON_NAMES[alias];
+    if (commodityName) {
+      candidates.push(`https://s3-symbol-logo.tradingview.com/${commodityName}.svg`);
+    }
     // Backend proxy: resolves CDN icons via cache + CoinGecko bulk discovery
     candidates.push(`/token-icon/${lower}`);
   }

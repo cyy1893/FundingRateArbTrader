@@ -85,6 +85,17 @@ SYMBOL_RENAMES: dict[str, str] = {
     "1000SHIB": "kSHIB",
     "1000BONK": "kBONK",
 }
+# Maps GRVT commodity symbols to TradingView instrument names for icon discovery.
+COMMODITY_ICON_NAMES: dict[str, str] = {
+    "NATGAS": "natural-gas",
+    "XAUUSD": "gold",
+    "XAGUSD": "silver",
+    "USOIL": "crude-oil",
+    "WHEAT": "wheat",
+    "CORN": "corn",
+    "SOYBEAN": "soybean",
+    "SUGAR": "sugar",
+}
 ASSET_ICON_CACHE_FILE = Path(__file__).resolve().parent.parent / "data" / "asset_icons.json"
 logger = logging.getLogger(__name__)
 
@@ -2534,6 +2545,9 @@ def _build_icon_candidate_urls(symbol: str) -> list[str]:
         f"https://storage.googleapis.com/iex/api/logos/{upper}.png",
         f"https://companiesmarketcap.com/img/company-logos/256/{upper}.png",
     ]
+    # Commodity TradingView SVG icons (for GRVT commodity perpetuals like NATGAS)
+    if (commodity_name := COMMODITY_ICON_NAMES.get(upper)):
+        urls.append(f"https://s3-symbol-logo.tradingview.com/{commodity_name}.svg")
     deduped: list[str] = []
     seen: set[str] = set()
     for url in urls:
