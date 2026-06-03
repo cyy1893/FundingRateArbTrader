@@ -41,6 +41,7 @@ export default function AdminUsersPage() {
     setError(null);
     try {
       const response = await fetch("/api/admin/users", { cache: "no-store" });
+      const data = (await response.json()) as AdminUserListResponse | { error?: string };
       if (!response.ok) {
         const message = extractErrorMessage(data, "Failed to load users");
         setError(message);
@@ -73,6 +74,7 @@ export default function AdminUsersPage() {
         },
         body: JSON.stringify(payload),
       });
+      const data = (await response.json()) as AdminResetPasswordResponse | { error?: string };
       if (!response.ok) {
         const message = extractErrorMessage(data, "Failed to reset password");
         setError(message);
