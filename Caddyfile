@@ -10,9 +10,7 @@
   @token_icon path /token-icon/*
   reverse_proxy @token_icon trader:8080
 
-  @admin path /admin /admin/*
-  @admin_not_localhost not remote_ip 127.0.0.1/32 ::1
-  respond @admin @admin_not_localhost 403
+  import Caddyfile.auth
 
   reverse_proxy gateway:3000
 }
