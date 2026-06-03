@@ -1,7 +1,4 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-
-import { AUTH_COOKIE_NAME } from "@/lib/auth";
 
 const TRADER_API_BASE_URL =
   process.env.TRADER_API_BASE_URL ??
@@ -29,19 +26,7 @@ function extractError(payload: unknown, fallback: string): string {
   return fallback;
 }
 
-function unauthorizedResponse(message: string): NextResponse {
-  return NextResponse.json({ error: message }, { status: 401 });
-}
-
-async function checkAuth(): Promise<NextResponse | null> {
-  // 1. JWT cookie check
-  const cookieStore = await cookies();
-  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
-  if (!token) {
-    return unauthorizedResponse("Authentication required");
-  }
-
-  // 2. Admin secret must be configured
+function ensureSecret(): string | NextResponse {
   const secret = getAdminSecret();
   if (!secret) {
     return NextResponse.json(
@@ -49,38 +34,18 @@ async function checkAuth(): Promise<NextResponse | null> {
       { status: 500 },
     );
   }
-
-  // 3. Validate JWT by calling the trader backend
-  try {
-    const verifyResp = await fetch(buildUpstreamUrl("/health"), {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    // Any trader endpoint that requires auth will reject invalid tokens.
-    // We use /balances as a lightweight auth check.
-    const verifyResp2 = await fetch(buildUpstreamUrl("/balances"), {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (verifyResp2.status === 401 || verifyResp2.status === 403) {
-      return unauthorizedResponse("Invalid or expired session");
-    }
-  } catch {
-    return NextResponse.json({ error: "Cannot reach auth backend" }, { status: 502 });
-  }
-
-  return null; // auth ok
+  return secret;
 }
 
 export async function GET() {
-  const authError = await checkAuth();
-  if (authError) return authError;
-
-  const secret = getAdminSecret()!;
+  const secretOrResponse = ensureSecret();
+  if (secretOrResponse instanceof NextResponse) return secretOrResponse;
 
   try {
     const response = await fetch(buildUpstreamUrl("/admin/users"), {
       cache: "no-store",
       headers: {
-        [ADMIN_CLIENT_HEADER_NAME]: secret,
+        [ADMIN_CLIENT_HEADER_NAME]: secretOrResponse,
       },
     });
 
@@ -101,10 +66,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const authError = await checkAuth();
-  if (authError) return authError;
-
-  const secret = getAdminSecret()!;
+  const secretOrResponse = ensureSecret();
+  if (secretOrResponse instanceof NextResponse) return secretOrResponse;
 
   let payload: unknown;
   try {
@@ -118,7 +81,7 @@ export async function POST(request: Request) {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        [ADMIN_CLIENT_HEADER_NAME]: secret,
+        [ADMIN_CLIENT_HEADER_NAME]: secretOrResponse,
       },
       body: JSON.stringify(payload),
     });

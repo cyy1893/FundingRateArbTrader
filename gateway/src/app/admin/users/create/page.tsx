@@ -4,7 +4,7 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 
 import type { AdminCreateUserRequest, AdminCreateUserResponse } from "@/types/admin";
-import { clearClientAuthToken } from "@/lib/auth";
+
 
 type CreateFormState = {
   username: string;
@@ -102,11 +102,6 @@ export default function CreateUserPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (response.status === 401) {
-        clearClientAuthToken();
-        window.location.href = "/login";
-        return;
-      }
       const data = (await response.json()) as AdminCreateUserResponse | { error?: string };
       if (!response.ok) {
         setCreateError(extractErrorMessage(data, "Failed to create user"));

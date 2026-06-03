@@ -9,7 +9,6 @@ import type {
   AdminUserListResponse,
   AdminUserSummary,
 } from "@/types/admin";
-import { clearClientAuthToken, getClientAuthToken, extractUsernameFromToken } from "@/lib/auth";
 
 function toLocalTime(value: string | null): string {
   if (!value) return "-";
@@ -42,12 +41,6 @@ export default function AdminUsersPage() {
     setError(null);
     try {
       const response = await fetch("/api/admin/users", { cache: "no-store" });
-      if (response.status === 401) {
-        clearClientAuthToken();
-        window.location.href = "/login";
-        return;
-      }
-      const data = (await response.json()) as AdminUserListResponse | { error?: string };
       if (!response.ok) {
         const message = extractErrorMessage(data, "Failed to load users");
         setError(message);
@@ -80,12 +73,6 @@ export default function AdminUsersPage() {
         },
         body: JSON.stringify(payload),
       });
-      if (response.status === 401) {
-        clearClientAuthToken();
-        window.location.href = "/login";
-        return;
-      }
-      const data = (await response.json()) as AdminResetPasswordResponse | { error?: string };
       if (!response.ok) {
         const message = extractErrorMessage(data, "Failed to reset password");
         setError(message);
@@ -111,8 +98,6 @@ export default function AdminUsersPage() {
     setResetDialogUser(null);
     setNewPassword("");
   };
-
-  const username = extractUsernameFromToken(getClientAuthToken());
 
   return (
     <div className="mx-auto w-full max-w-7xl px-6 py-8">

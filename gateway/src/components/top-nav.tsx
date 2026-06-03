@@ -59,19 +59,17 @@ export function TopNav() {
 
         {/* Navigation */}
         <nav className="flex items-center space-x-4 lg:space-x-6">
-          {username ? (
-            <Link
-              href="/admin/users"
-              className={cn(
-                "flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary",
-                pathname.startsWith("/admin")
-                  ? "text-foreground"
-                  : "text-muted-foreground",
-              )}
-            >
-              <span>管理</span>
-            </Link>
-          ) : null}
+          <Link
+            href="/admin/users"
+            className={cn(
+              "flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary",
+              pathname.startsWith("/admin")
+                ? "text-foreground"
+                : "text-muted-foreground",
+            )}
+          >
+            <span>管理</span>
+          </Link>
           {NAV_ITEMS.map((item) => {
             const isActive =
               item.href === "/"
