@@ -8,6 +8,7 @@ import {
   type ArbExecutionDialogModel,
   ArbExecutionDialog,
 } from "@/components/arb-execution-dialog";
+import { TradingRecommendationTable } from "@/components/trading-recommendation-table";
 import { TradingStatusBar } from "@/components/trading-status-bar";
 import { QuickTradePanel } from "@/components/quick-trade-panel";
 import { TerminalOrderBook } from "@/components/terminal-order-book";
@@ -22,6 +23,7 @@ import { useOrderBookWebSocket } from "@/hooks/use-order-book-websocket";
 import { getClientAuthToken } from "@/lib/auth";
 import { readComparisonSelection, type ResolvedComparisonSelection } from "@/lib/comparison-selection";
 import { DEFAULT_LEFT_SOURCE, DEFAULT_RIGHT_SOURCE, normalizeSource } from "@/lib/external";
+import type { FundingPredictionEntry } from "@/lib/funding-prediction";
 import { DEFAULT_VOLUME_THRESHOLD } from "@/lib/volume-filter";
 import { getPerpetualSnapshot } from "@/lib/perp-snapshot";
 import { getAvailableSymbols } from "@/lib/available-symbols";
@@ -487,7 +489,7 @@ function TradingPageContent() {
     updatedAt: null,
   });
   const { orderBook, trades, status, hasLighter, hasGrvt } = useOrderBookWebSocket(subscription);
-  const [arbStatus, setArbStatus] = useState<"idle" | "placing" | "success" | "error">("idle");
+  const [arbStatus, setArbStatus] = useState<"idle" | "placing" | "placed" | "success" | "error">("idle");
   const [arbMessage, setArbMessage] = useState<string | null>(null);
   const [closingState, setClosingState] = useState<Record<string, { postOnly: boolean; market: boolean }>>({});
   const [arbPositionId, setArbPositionId] = useState<string | null>(null);
@@ -1027,6 +1029,77 @@ function TradingPageContent() {
     return { ok: true, data, error: null }
   }
 
+  const executeFromRecommendation = async (entry: FundingPredictionEntry) => {
+    setExecutionDialogOpen(true);
+    setArbPositionId(null);
+    setArbStatusDetails(null);
+    setArbStatus("placing");
+    setArbMessage(null);
+
+    const leftVenue = entry.direction === "leftLong" ? "lighter" : "grvt";
+    const rightVenue = entry.direction === "leftLong" ? "grvt" : "lighter";
+    const leftSide = entry.direction === "leftLong" ? "buy" : "sell";
+    const rightSide = entry.direction === "leftLong" ? "sell" : "buy";
+
+    // Get prices from snapshot (not WebSocket)
+    try {
+      const snapResp = await fetch("/api/perp-snapshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ primary_source: comparisonSelection.primarySource.provider, secondary_source: comparisonSelection.secondarySource.provider }),
+      });
+      const snap = (await snapResp.json()) as { rows?: Array<{ symbol: string; price: number; right?: { price: number } }> };
+      const row = snap.rows?.find((r) => r.symbol === entry.symbol);
+      const leftPrice = row?.price ?? 0;
+      const rightPrice = row?.right?.price ?? 0;
+
+      const notional = 10000; // default $10k notional
+      const leftSize = leftPrice > 0 ? Number((notional / leftPrice).toFixed(4)) : 0;
+      const rightSize = rightPrice > 0 ? Number((notional / rightPrice).toFixed(4)) : 0;
+
+      setExecutionContext({
+        symbol: entry.symbol,
+        notional,
+        leftLeg: { venue: leftVenue as "lighter" | "grvt", label: leftVenue === "lighter" ? "Lighter" : "GRVT", side: leftSide, targetPrice: leftPrice, targetSize: leftSize },
+        rightLeg: { venue: rightVenue as "lighter" | "grvt", label: rightVenue === "lighter" ? "Lighter" : "GRVT", side: rightSide, targetPrice: rightPrice, targetSize: rightSize },
+      });
+
+      const result = await openArbPosition({
+        symbol: entry.symbol,
+        left_venue: leftVenue,
+        right_venue: rightVenue,
+        left_side: leftSide,
+        right_side: rightSide,
+        left_price: leftPrice,
+        right_price: rightPrice,
+        left_size: leftSize,
+        right_size: rightSize,
+        notional,
+        leverage_left: 5,
+        leverage_right: 5,
+        liquidation_guard_enabled: true,
+        liquidation_guard_threshold_pct: 50,
+        drawdown_guard_enabled: false,
+        drawdown_guard_threshold_pct: 20,
+      });
+
+      if (result.ok) {
+        const data = result.data as { arb_position_id?: string };
+        setArbPositionId(data?.arb_position_id ?? null);
+        setArbStatus("placed");
+        setArbMessage("建仓请求已提交");
+        toast.success("套利建仓已提交");
+      } else {
+        setArbStatus("error");
+        setArbMessage(result.error || "建仓失败");
+        toast.error(result.error || "建仓失败");
+      }
+    } catch (err) {
+      setArbStatus("error");
+      setArbMessage(err instanceof Error ? err.message : "建仓失败");
+    }
+  };
+
   const handleLeverageCommit = async (payload: { symbol: string; leverage: number }) => {
     const symbol = payload.symbol.trim();
     if (!symbol) {
@@ -1531,40 +1604,35 @@ function TradingPageContent() {
           />
         </div>
 
-        {/* Center - Order Books */}
-        <div className="flex-1 flex flex-col">
-          <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-1.5">
-            <div className="text-xs text-gray-500">
-              {arbMessage ? arbMessage : " "}
-            </div>
-            <button
-              onClick={handleStartMonitoring}
-              disabled={!canStartMonitoring}
-              className="rounded-md border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-200 disabled:text-gray-500"
-            >
-              {subscription ? "监控中..." : "开始监控"}
-            </button>
-          </div>
-          <div className="flex-1 flex min-h-0">
-            {subscription ? (
-              <OrderBookDisplay
-                orderBook={orderBook}
-                trades={trades}
-                status={status}
-                hasLighter={hasLighter}
-                hasGrvt={hasGrvt}
-              />
-            ) : (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-center">
-                  <p className="text-gray-600 text-sm mb-2">请从首页推荐套利币种进入并开始监控查看订单簿</p>
-                  <p className="text-gray-500 text-xs">
-                    在左侧面板配置参数后点击&quot;开始监控&quot;
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
+        {/* Center - Recommendation Table */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <TradingRecommendationTable
+            sourceA={comparisonSelection.primarySource}
+            sourceB={comparisonSelection.secondarySource}
+            volumeThreshold={comparisonSelection.volumeThreshold}
+            onTrade={(entry) => {
+              // Auto-configure QuickTradePanel from recommendation
+              const sub = {
+                symbol: entry.symbol,
+                lighterDirection: entry.direction === "leftLong" ? "buy" as const : "sell" as const,
+                grvtDirection: entry.direction === "rightLong" ? "buy" as const : "sell" as const,
+                lighterLeverage: 5,
+                grvtLeverage: 5,
+                notional: 10000,
+                liquidationGuardEnabled: true,
+                liquidationGuardThresholdPct: 50,
+                drawdownGuardEnabled: false,
+                drawdownGuardThresholdPct: 20,
+                leftVenue: "lighter" as const,
+                rightVenue: "grvt" as const,
+                leftPrice: 0,
+                rightPrice: 0,
+                leftSize: 0,
+                rightSize: 0,
+              };
+              executeFromRecommendation(entry);
+            }}
+          />
         </div>
       </div>
 
