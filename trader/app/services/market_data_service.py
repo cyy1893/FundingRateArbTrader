@@ -2360,7 +2360,7 @@ def _compute_theta_reversal_apr_metrics(
 
     latest_spread = spread_samples[-1]
     if not math.isfinite(latest_spread):
-        return 0.0, 0.0, 0.0, "unknown"
+        return 0.0, 0.0, 0.0, 0.0, "unknown"
 
     step_days = _estimate_average_step_days(spread_times_ms)
     if step_days <= 0:
@@ -2386,7 +2386,7 @@ def _compute_theta_reversal_apr_metrics(
         direction = "rightLong"
         dir_sign = -1
     if dir_sign == 0:
-        return 0.0, 0.0, 0.0, direction
+        return 0.0, 0.0, 0.0, 0.0, direction
 
     z = (latest_spread - mu) / sigma
     ds = spread_samples[-1] - spread_samples[-2]
