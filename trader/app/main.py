@@ -119,6 +119,27 @@ async def _prefetch_icons_on_startup() -> None:
         logger.warning("Startup icon prefetch failed", exc_info=True)
 
 
+async def _precompute_recommendations() -> None:
+    """Background task: pre-compute funding predictions every 2 minutes.
+
+    Keeps the prediction cache warm for the default source pair so the
+    recommendations page loads instantly instead of waiting 10-30 seconds.
+    """
+    await asyncio.sleep(15)  # Let startup settle
+    while True:
+        try:
+            await market_data_service.get_funding_prediction_snapshot(
+                primary="lighter",
+                secondary="grvt",
+                volume_threshold=1_000_000,
+                force_refresh=True,
+            )
+            logger.info("Recommendation pre-computation complete")
+        except Exception:
+            logger.warning("Recommendation pre-computation failed", exc_info=True)
+        await asyncio.sleep(120)  # 2 minutes
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     workers: list[asyncio.Task[Any]] = []
@@ -131,6 +152,8 @@ async def lifespan(app: FastAPI):
         workers.append(asyncio.create_task(database_keepalive_worker()))
     # Background CoinGecko icon prefetch — fills asset_icons.json with 1000s of icons
     workers.append(asyncio.create_task(_prefetch_icons_on_startup()))
+    # Background recommendation pre-computation — keeps prediction cache warm
+    workers.append(asyncio.create_task(_precompute_recommendations()))
     try:
         yield
     finally:

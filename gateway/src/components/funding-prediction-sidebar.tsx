@@ -104,6 +104,9 @@ export function FundingPredictionSidebarProvider({
     }
 
     const cacheKey = buildRecommendationCacheKey(request);
+
+    // Stale-while-revalidate: show any cached data immediately, update in background.
+    let staleData: PredictionSidebarPayload | null = null;
     if (!request.forceRefresh) {
       try {
         const raw = window.sessionStorage.getItem(cacheKey);
@@ -112,17 +115,19 @@ export function FundingPredictionSidebarProvider({
             timestamp?: number;
             payload?: PredictionSidebarPayload;
           };
-          if (
-            parsed?.payload &&
-            Number.isFinite(parsed.timestamp) &&
-            Date.now() - Number(parsed.timestamp) < RECOMMENDATION_CACHE_TTL_MS
-          ) {
-            setLastRequest(request);
-            setError(null);
-            setData(parsed.payload);
-            setProgress(100);
-            setStage("命中前端缓存");
-            return;
+          if (parsed?.payload) {
+            const age = Date.now() - (Number(parsed.timestamp) || 0);
+            if (age < RECOMMENDATION_CACHE_TTL_MS) {
+              // Fresh cache — return instantly, no background refresh
+              setLastRequest(request);
+              setError(null);
+              setData(parsed.payload);
+              setProgress(100);
+              setStage("命中前端缓存");
+              return;
+            }
+            // Stale cache — show immediately, refresh in background
+            staleData = parsed.payload;
           }
         }
       } catch {
@@ -136,21 +141,20 @@ export function FundingPredictionSidebarProvider({
       }
     }
 
-    setLastRequest(request);
-    const params = new URLSearchParams({
-      sourceA: request.sourceA,
-      sourceB: request.sourceB,
-      volumeThreshold: String(request.volumeThreshold),
-    });
-    if (request.forceRefresh) {
-      params.set("refresh", "1");
+    // Show stale data immediately while fetching fresh data
+    if (staleData) {
+      setData(staleData);
+      setProgress(100);
+      setStage("后台刷新中…");
+    } else {
+      setData(null);
+      setProgress(1);
+      setStage("创建任务…");
     }
 
+    setLastRequest(request);
     setLoading(true);
-    setProgress(1);
-    setStage("创建任务…");
     setError(null);
-    setData(null);
 
     try {
       const createResponse = await fetch("/api/funding/prediction/jobs", {
