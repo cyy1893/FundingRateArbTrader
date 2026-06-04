@@ -69,6 +69,8 @@ DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT = 5.0
 # Volatility cap for scoring penalty (not hard exclusion — highly volatile coins
 # are penalised in the score instead of being dropped).
 MAX_ACCEPTABLE_PRICE_VOLATILITY_PCT = 30.0
+BID_ASK_SPREAD_SAMPLE_SECONDS = 10
+BID_ASK_SPREAD_SAMPLE_INTERVAL = 2.0
 LIGHTER_SPREAD_FETCH_CONCURRENCY = 8
 LIGHTER_FUNDING_HISTORY_CONCURRENCY = 2
 LIGHTER_FUNDING_MARKET_MAP_TTL_SECONDS = 60 * 60
@@ -738,8 +740,95 @@ class MarketDataService:
         if not symbols:
             return {}
 
-        await _invoke_progress_callback(progress_callback, 30.0, "拉取当前盘口")
+        await _invoke_progress_callback(progress_callback, 30.0, "采集盘口价差 (10s)")
 
+        # ── 10-second multi-snapshot to smooth temporary liquidity jitter ──
+        sample_count = max(1, int(BID_ASK_SPREAD_SAMPLE_SECONDS / BID_ASK_SPREAD_SAMPLE_INTERVAL))
+        all_snapshots: list[dict[str, dict[str, Any]]] = []
+
+        for sample_idx in range(sample_count):
+            if sample_idx > 0:
+                await asyncio.sleep(BID_ASK_SPREAD_SAMPLE_INTERVAL)
+            try:
+                snap = await self._fetch_one_spread_snapshot(primary, secondary, symbols)
+            except Exception:  # noqa: BLE001
+                continue
+            if snap:
+                all_snapshots.append(snap)
+
+        if not all_snapshots:
+            return {}
+
+        # Merge: take the median spread for each symbol across snapshots.
+        merged: dict[str, dict[str, Any]] = {}
+        for symbol_key in symbols:
+            left_samples: list[float] = []
+            right_samples: list[float] = []
+            combined_samples: list[float] = []
+            best_left_bid = None
+            best_left_ask = None
+            best_right_bid = None
+            best_right_ask = None
+
+            for snap in all_snapshots:
+                entry = snap.get(symbol_key)
+                if entry is None:
+                    continue
+                left_samples.append(entry["left"])
+                right_samples.append(entry["right"])
+                combined_samples.append(entry["combined"])
+                if entry["left_best_bid"] is not None:
+                    best_left_bid = entry["left_best_bid"]
+                    best_left_ask = entry["left_best_ask"]
+                if entry["right_best_bid"] is not None:
+                    best_right_bid = entry["right_best_bid"]
+                    best_right_ask = entry["right_best_ask"]
+
+            if not left_samples:
+                # No sample for this symbol — use fallback defaults
+                merged[symbol_key] = {
+                    "left": DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
+                    "right": DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
+                    "combined": DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS * 2,
+                    "left_best_bid": None,
+                    "left_best_ask": None,
+                    "right_best_bid": None,
+                    "right_best_ask": None,
+                    "price_volatility_24h_pct": DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
+                    "left_spread_samples_bps": [DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS],
+                    "right_spread_samples_bps": [DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS],
+                    "combined_spread_samples_bps": [DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS * 2],
+                }
+                continue
+
+            # Use median to resist outliers
+            left_median = _median(left_samples)
+            right_median = _median(right_samples)
+            combined_median = _median(combined_samples)
+
+            merged[symbol_key] = {
+                "left": left_median,
+                "right": right_median,
+                "combined": combined_median,
+                "left_best_bid": best_left_bid,
+                "left_best_ask": best_left_ask,
+                "right_best_bid": best_right_bid,
+                "right_best_ask": best_right_ask,
+                "price_volatility_24h_pct": DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
+                "left_spread_samples_bps": left_samples,
+                "right_spread_samples_bps": right_samples,
+                "combined_spread_samples_bps": combined_samples,
+            }
+
+        return merged
+
+    async def _fetch_one_spread_snapshot(
+        self,
+        primary: str,
+        secondary: str,
+        symbols: set[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Single-point-in-time bid-ask spread snapshot for all *symbols*."""
         try:
             snapshot = await self.get_perp_snapshot(primary, secondary)
         except Exception:  # noqa: BLE001
@@ -780,14 +869,10 @@ class MarketDataService:
                 right_ask = _parse_float(right_payload.get("best_ask"))
 
             left_spread_bps = _compute_bid_ask_spread_bps(
-                left_bid,
-                left_ask,
-                default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
+                left_bid, left_ask, default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
             )
             right_spread_bps = _compute_bid_ask_spread_bps(
-                right_bid,
-                right_ask,
-                default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
+                right_bid, right_ask, default_bps=DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS,
             )
 
             spreads[symbol_key] = {
@@ -798,10 +883,6 @@ class MarketDataService:
                 "left_best_ask": left_ask,
                 "right_best_bid": right_bid,
                 "right_best_ask": right_ask,
-                "price_volatility_24h_pct": DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT,
-                "left_spread_samples_bps": [left_spread_bps],
-                "right_spread_samples_bps": [right_spread_bps],
-                "combined_spread_samples_bps": [left_spread_bps + right_spread_bps],
             }
         return spreads
 
@@ -2168,6 +2249,18 @@ def _compute_stddev(values: list[float]) -> float:
     mean = sum(values) / len(values)
     variance = sum((value - mean) ** 2 for value in values) / len(values)
     return math.sqrt(max(variance, 0.0))
+
+
+def _median(values: list[float]) -> float:
+    """Median of *values* (sorts a copy, so the input is not mutated)."""
+    if not values:
+        return 0.0
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+    mid = n // 2
+    if n % 2 == 1:
+        return sorted_vals[mid]
+    return (sorted_vals[mid - 1] + sorted_vals[mid]) / 2.0
 
 
 def _compute_bid_ask_spread_bps(
