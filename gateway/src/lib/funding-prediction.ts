@@ -35,6 +35,9 @@ export type FundingPredictionEntry = {
   rightSpreadSamplesBps: number[];
   combinedSpreadSamplesBps: number[];
   recommendationScore: number;
+  holdingDays: number;
+  leftFundingPeriodHours: number | null;
+  rightFundingPeriodHours: number | null;
   sampleCount: number;
   direction: FundingPredictionDirection;
   entryTimingWaitHours: number;
@@ -132,6 +135,15 @@ export async function fetchFundingPredictionSnapshot(
         ? entry.combined_spread_samples_bps.map((value) => Number(value))
         : [],
       recommendationScore: Number(entry.recommendation_score ?? 0),
+      holdingDays: Number(entry.holding_days ?? 30),
+      leftFundingPeriodHours:
+        entry.left_funding_period_hours != null
+          ? Number(entry.left_funding_period_hours)
+          : null,
+      rightFundingPeriodHours:
+        entry.right_funding_period_hours != null
+          ? Number(entry.right_funding_period_hours)
+          : null,
       sampleCount: Number(entry.sample_count ?? 0),
       direction: (entry.direction as FundingPredictionDirection) ?? "unknown",
       entryTimingWaitHours: Number(entry.entry_timing_wait_hours ?? 0),

@@ -57,13 +57,18 @@ PREDICTION_REVERSAL_BASE_PROB = 0.05
 PREDICTION_SURVIVAL_MAX_STEPS = 45
 PREDICTION_MARGIN_BUFFER = 0.20
 PREDICTION_MIN_SIGMA = 1e-6
-RECOMMENDATION_APR_WEIGHT = 0.80
-RECOMMENDATION_PRICE_VOLATILITY_WEIGHT = 0.20
-SPREAD_INTOLERABLE_BPS = 15.0
+RECOMMENDATION_APR_WEIGHT = 0.45
+RECOMMENDATION_PRICE_VOLATILITY_WEIGHT = 0.25
+RECOMMENDATION_HOLDING_TIME_WEIGHT = 0.10
+RECOMMENDATION_CYCLE_MATCH_WEIGHT = 0.05
+RECOMMENDATION_SPREAD_PENALTY_WEIGHT = 0.15
+SPREAD_INTOLERABLE_BPS = 8.0
 SPREAD_STEEPNESS_BPS = 1.5
 DEFAULT_FALLBACK_BID_ASK_SPREAD_BPS = 12.0
 DEFAULT_FALLBACK_PRICE_VOLATILITY_PCT = 5.0
-MAX_ACCEPTABLE_PRICE_VOLATILITY_PCT = 10.0
+# Volatility cap for scoring penalty (not hard exclusion — highly volatile coins
+# are penalised in the score instead of being dropped).
+MAX_ACCEPTABLE_PRICE_VOLATILITY_PCT = 30.0
 LIGHTER_SPREAD_FETCH_CONCURRENCY = 8
 LIGHTER_FUNDING_HISTORY_CONCURRENCY = 2
 LIGHTER_FUNDING_MARKET_MAP_TTL_SECONDS = 60 * 60
@@ -998,6 +1003,7 @@ class MarketDataService:
                     predicted_spread_24h,
                     total_decimal,
                     annualized_decimal,
+                    holding_days,
                     projected_direction,
                 ) = _compute_theta_reversal_apr_metrics(
                     spread_samples=run_spread_samples,
@@ -1063,15 +1069,6 @@ class MarketDataService:
                     right_spread_samples_bps = [right_bid_ask_spread_bps]
                     combined_spread_samples_bps = [combined_bid_ask_spread_bps]
 
-                if price_volatility_24h_pct > MAX_ACCEPTABLE_PRICE_VOLATILITY_PCT:
-                    failures.append(
-                        {
-                            "symbol": symbol_label,
-                            "reason": f"价格波动率过高（>{MAX_ACCEPTABLE_PRICE_VOLATILITY_PCT:.1f}%）",
-                        }
-                    )
-                    return
-
                 direction = projected_direction
                 if direction == "unknown":
                     # Fallback: keep symbols visible even when threshold model deems edge too weak.
@@ -1086,6 +1083,7 @@ class MarketDataService:
                     total_decimal = conservative_hourly_decimal
                     annualized_decimal = conservative_hourly_decimal * PREDICTION_HOURS_PER_YEAR
                     predicted_spread_24h = abs(average_spread_hourly) * PREDICTION_FORECAST_HOURS
+                    holding_days = 7.0  # conservative fallback for unknown-direction case
 
                 current_left_hourly = _parse_float(row.funding_rate)
                 current_right_hourly = _parse_float(right_payload.get("funding_rate"))
@@ -1136,6 +1134,9 @@ class MarketDataService:
                         "right_spread_samples_bps": right_spread_samples_bps,
                         "combined_spread_samples_bps": combined_spread_samples_bps,
                         "sample_count": spread_count,
+                        "holding_days": holding_days,
+                        "left_funding_period_hours": _parse_float(row.left_funding_period_hours),
+                        "right_funding_period_hours": _parse_float(right_payload.get("funding_period_hours")),
                         "direction": direction,
                         **_build_entry_timing_advice(
                             direction=direction,
@@ -1159,30 +1160,45 @@ class MarketDataService:
 
         await asyncio.gather(*(_compute_row(row) for row in eligible_rows))
 
-        apr_values = [float(entry.get("annualized_decimal") or 0.0) for entry in raw_entries]
-        price_volatility_values = [
-            float(entry.get("price_volatility_24h_pct") or 0.0)
-            for entry in raw_entries
-        ]
+        # ── Percentile-based scoring ──────────────────────────────────────
+        # Uses percentile rank instead of min-max normalisation so a single
+        # outlier cannot flatten the distribution of every other coin.
+
+        n = max(len(raw_entries), 1)
+        apr_sorted = sorted(float(e.get("annualized_decimal") or 0.0) for e in raw_entries)
+        vol_sorted = sorted(float(e.get("price_volatility_24h_pct") or 0.0) for e in raw_entries)
+        holding_sorted = sorted(
+            float(e.get("holding_days") or 30.0) for e in raw_entries
+        )
+
         final_entries: list[dict[str, Any]] = []
         for entry in raw_entries:
-            apr_norm = _min_max_normalize(float(entry.get("annualized_decimal") or 0.0), apr_values)
-            price_volatility_norm = _min_max_normalize(
-                float(entry.get("price_volatility_24h_pct") or 0.0),
-                price_volatility_values,
+            # Percentile rank (0…1): higher = better for APR, lower = better for vol & holding
+            apr_rank = _percentile_rank(float(entry.get("annualized_decimal") or 0.0), apr_sorted)
+            vol_rank = _percentile_rank(float(entry.get("price_volatility_24h_pct") or 0.0), vol_sorted)
+            holding_rank = _percentile_rank(
+                float(entry.get("holding_days") or 30.0), holding_sorted
             )
-            left_spread_acceptance_score = _compute_spread_acceptance_score(
-                float(entry.get("left_bid_ask_spread_bps") or 0.0)
+
+            # Spread penalty: additive deduction instead of multiplicative kill
+            left_spread_bps = float(entry.get("left_bid_ask_spread_bps") or 0.0)
+            right_spread_bps = float(entry.get("right_bid_ask_spread_bps") or 0.0)
+            spread_penalty = 1.0 - 0.5 * (
+                _compute_spread_acceptance_score(left_spread_bps)
+                * _compute_spread_acceptance_score(right_spread_bps)
             )
-            right_spread_acceptance_score = _compute_spread_acceptance_score(
-                float(entry.get("right_bid_ask_spread_bps") or 0.0)
-            )
-            spread_acceptance_score = left_spread_acceptance_score * right_spread_acceptance_score
+
+            # Multi-factor composite (all components in [0, 1])
             core_score = (
-                RECOMMENDATION_APR_WEIGHT * apr_norm
-                + RECOMMENDATION_PRICE_VOLATILITY_WEIGHT * (1.0 - price_volatility_norm)
+                RECOMMENDATION_APR_WEIGHT * apr_rank                    # higher APR → better
+                + RECOMMENDATION_PRICE_VOLATILITY_WEIGHT * (1.0 - vol_rank)  # lower vol → better
+                + RECOMMENDATION_HOLDING_TIME_WEIGHT * (1.0 - holding_rank)  # shorter hold → better
             )
-            score = core_score * spread_acceptance_score * 100.0
+            score = (core_score
+                     - RECOMMENDATION_SPREAD_PENALTY_WEIGHT * spread_penalty
+                     + RECOMMENDATION_CYCLE_MATCH_WEIGHT * _cycle_match_score(entry))
+            score = max(score, 0.0) * 100.0
+
             normalized_entry = dict(entry)
             normalized_entry["recommendation_score"] = round(score, 4)
             final_entries.append(normalized_entry)
@@ -2329,17 +2345,18 @@ def _compute_theta_reversal_apr_metrics(
     spread_times_ms: list[int],
     left_max_leverage: float | None,
     right_max_leverage: float | None,
-) -> tuple[float, float, float, str]:
+) -> tuple[float, float, float, float, str]:
     """
     Funding spread APR projection with net-threshold + reversal probability.
     Returns:
     - predicted_spread_24h (%)
     - total_decimal (expected cumulative return over projected hold, decimal on notional)
     - annualized_decimal (APR decimal on margin usage)
+    - holding_days (expected position duration in days)
     - direction (leftLong/rightLong/unknown)
     """
     if len(spread_samples) < 2:
-        return 0.0, 0.0, 0.0, "unknown"
+        return 0.0, 0.0, 0.0, 0.0, "unknown"
 
     latest_spread = spread_samples[-1]
     if not math.isfinite(latest_spread):
@@ -2400,7 +2417,7 @@ def _compute_theta_reversal_apr_metrics(
     margin_usage = max(margin_usage, PREDICTION_MIN_SIGMA)
     roi = total_decimal / margin_usage
     annualized_decimal = roi * 365.0 / holding_days
-    return predicted_spread_24h, total_decimal, annualized_decimal, direction
+    return predicted_spread_24h, total_decimal, annualized_decimal, holding_days, direction
 
 
 def _estimate_average_step_days(times_ms: list[int]) -> float:
@@ -2444,6 +2461,37 @@ def _min_max_normalize(value: float, population: list[float]) -> float:
     if span <= 1e-12:
         return 0.5
     return min(max((value - min_value) / span, 0.0), 1.0)
+
+
+def _percentile_rank(value: float, sorted_population: list[float]) -> float:
+    """Fraction of values in *sorted_population* that are <= *value*."""
+    n = len(sorted_population)
+    if n == 0:
+        return 0.5
+    lo, hi = 0, n
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if sorted_population[mid] <= value:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo / n
+
+
+def _cycle_match_score(entry: dict[str, object]) -> float:
+    """Score how well the two funding cycles align (0 = worst, 1 = best).
+
+    When both sides settle at the same frequency the arb is less likely to be
+    disrupted by a single-side settlement before the other side catches up.
+    """
+    left_hours = _parse_float(entry.get("left_funding_period_hours"))
+    right_hours = _parse_float(entry.get("right_funding_period_hours"))
+    if left_hours is None or right_hours is None:
+        return 0.5
+    if left_hours <= 0 or right_hours <= 0:
+        return 0.5
+    ratio = min(left_hours, right_hours) / max(left_hours, right_hours)
+    return round(min(ratio, 1.0), 4)
 
 
 async def _invoke_progress_callback(

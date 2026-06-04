@@ -373,6 +373,9 @@ class FundingPredictionEntry(BaseModel):
     right_spread_samples_bps: list[float] = Field(default_factory=list)
     combined_spread_samples_bps: list[float] = Field(default_factory=list)
     recommendation_score: float
+    holding_days: float = 30.0
+    left_funding_period_hours: float | None = None
+    right_funding_period_hours: float | None = None
     sample_count: int
     direction: Literal["leftLong", "rightLong", "unknown"]
     entry_timing_wait_hours: float = 0.0

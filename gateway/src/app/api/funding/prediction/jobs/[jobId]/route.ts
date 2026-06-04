@@ -58,6 +58,15 @@ function mapEntry(entry: Record<string, unknown>) {
       ? entry.combined_spread_samples_bps.map((value) => Number(value))
       : [],
     recommendationScore: Number(entry.recommendation_score ?? 0),
+    holdingDays: Number(entry.holding_days ?? 30),
+    leftFundingPeriodHours:
+      entry.left_funding_period_hours != null
+        ? Number(entry.left_funding_period_hours)
+        : null,
+    rightFundingPeriodHours:
+      entry.right_funding_period_hours != null
+        ? Number(entry.right_funding_period_hours)
+        : null,
     sampleCount: Number(entry.sample_count ?? 0),
     direction: String(entry.direction ?? "unknown"),
     entryTimingWaitHours: Number(entry.entry_timing_wait_hours ?? 0),
