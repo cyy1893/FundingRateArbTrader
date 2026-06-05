@@ -84,6 +84,7 @@ from app.services.lighter_service import LighterService
 from app.services.grvt_service import GrvtService
 from app.services.market_data_service import MarketDataService
 from app.services.market_data_service import _normalize_icon_symbol
+from app.services.event_log_service import EventLogService, FeishuBot, FEISHU_BOT as _feishu_bot_module
 from app.utils.auth import AuthError, AuthManager, LockoutError, _hash_password
 from app.utils.crypto import decrypt_secret, encrypt_secret
 
@@ -99,6 +100,13 @@ event_broadcaster = EventBroadcaster()
 lighter_service = LighterService(settings)
 grvt_service = GrvtService(settings)
 market_data_service = MarketDataService(settings, lighter_service=lighter_service)
+event_log = EventLogService()
+
+# Feishu bot (optional — only if FEISHU_WEBHOOK_URL is configured)
+if settings.feishu_webhook_url:
+    _feishu_bot_module.FEISHU_BOT = FeishuBot(settings.feishu_webhook_url)
+    logger.info("Feishu bot enabled: %s", settings.feishu_webhook_url[:40] + "...")
+
 auth_scheme = HTTPBearer()
 _user_cache = TTLCache(maxsize=2048, ttl=settings.user_cache_ttl_seconds)
 _prediction_job_store: dict[str, dict[str, Any]] = {}
@@ -840,6 +848,13 @@ async def liquidation_guard_worker() -> None:
                     position.id,
                     close_result["failed_reasons"],
                 )
+                await event_log.emit(
+                    "risk_triggered",
+                    severity="warning",
+                    symbol=position.symbol,
+                    message=f"爆仓保护触发 {position.symbol} | PnL {pnl_ratio_pct:.2f}% >= {threshold_pct:.0f}%",
+                    detail={"position_id": str(position.id), "pnl_ratio_pct": pnl_ratio_pct},
+                )
                 continue
 
 async def drawdown_guard_worker() -> None:
@@ -1214,6 +1229,12 @@ async def token_icon(
         )
 
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Icon not found")
+
+
+@app.get("/events/recent")
+async def events_recent(limit: int = 50) -> list[dict[str, Any]]:
+    """Return the most recent trading events for the event-log sidebar."""
+    return event_log.recent(min(max(limit, 1), 200))
 
 
 @app.get("/balances", response_model=BalancesResponse)
@@ -1677,6 +1698,18 @@ async def open_arb_position(
     session.add(position)
     session.commit()
 
+    await event_log.emit(
+        "position_opened",
+        severity="info",
+        symbol=request.symbol,
+        message=f"套利建仓 {request.symbol} | {request.left_venue.upper()}/{request.right_venue.upper()} | ${request.notional:,.0f}",
+        detail={
+            "position_id": str(position.id),
+            "notional": request.notional,
+            "left_venue": request.left_venue,
+            "right_venue": request.right_venue,
+        },
+    )
     return ArbOpenResponse(
         arb_position_id=str(position.id),
         status=position.status.value,

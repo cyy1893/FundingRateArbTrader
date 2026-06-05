@@ -62,6 +62,10 @@ class Settings(BaseSettings):
         "X-Admin-Client-Secret",
         description="HTTP header name used to carry admin registration secret",
     )
+    feishu_webhook_url: str = Field(
+        "",
+        description="Feishu/Lark bot webhook URL for critical event notifications (empty to disable)",
+    )
     user_cache_ttl_seconds: int = Field(300, ge=0, description="User cache TTL in seconds (0 to disable)")
     db_keepalive_interval_seconds: int = Field(
         8 * 60 * 60,

@@ -9,6 +9,7 @@ import {
   ArbExecutionDialog,
 } from "@/components/arb-execution-dialog";
 import { TradingRecommendationTable, type TradeConfig } from "@/components/trading-recommendation-table";
+import { EventLogSidebar } from "@/components/event-log-sidebar";
 import { TradingStatusBar } from "@/components/trading-status-bar";
 import { QuickTradePanel } from "@/components/quick-trade-panel";
 import { TerminalOrderBook } from "@/components/terminal-order-book";
@@ -1581,7 +1582,7 @@ function TradingPageContent() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Recommendation Table — full width */}
+        {/* Recommendation Table */}
         <div className="flex-1 flex flex-col min-h-0">
           <TradingRecommendationTable
             sourceA={comparisonSelection.primarySource}
@@ -1592,6 +1593,8 @@ function TradingPageContent() {
             }}
           />
         </div>
+        {/* Event Log Sidebar */}
+        <EventLogSidebar />
       </div>
 
       {/* Bottom Panel - Positions & Balances */}
