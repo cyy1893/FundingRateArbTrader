@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import logging
+import time as _time
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any
@@ -60,11 +64,23 @@ class EventLogService:
 
 
 class FeishuBot:
-    """Minimal Feishu/Lark webhook bot for critical event notifications."""
+    """Feishu/Lark webhook bot with signature verification support.
 
-    def __init__(self, webhook_url: str) -> None:
+    Usage (in .env):
+        FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+        FEISHU_SIGN_SECRET=sign_xxxxxxxx  # optional but recommended
+    """
+
+    def __init__(self, webhook_url: str, sign_secret: str = "") -> None:
         self._url = webhook_url.strip()
+        self._sign_secret = sign_secret.strip()
         self._client: Any = None  # httpx.AsyncClient, lazy-init
+
+    @staticmethod
+    def _gen_sign(timestamp: int, secret: str) -> str:
+        string_to_sign = f"{timestamp}\n{secret}".encode("utf-8")
+        hmac_code = hmac.new(secret.encode("utf-8"), string_to_sign, digestmod=hashlib.sha256).digest()
+        return base64.b64encode(hmac_code).decode("utf-8")
 
     async def _ensure_client(self) -> Any:
         if self._client is None:
@@ -82,25 +98,48 @@ class FeishuBot:
         if not self._url:
             return
 
-        title = f"[{event_type}] {symbol or '—'}"
-        content = [[{"tag": "text", "text": message}]]
-        if detail:
-            content.append([{"tag": "text", "text": str(detail)[:500]}])
+        # Build Feishu interactive card
+        severity_emoji = {"error": "🔴", "warning": "🟡", "info": "🔵"}
+        emoji = severity_emoji.get(event_type, "📌") if "error" in event_type or "risk" in event_type else severity_emoji.get("warning", "🔵") if "failed" in event_type else "📌"
 
-        payload = {
+        header_color = "red" if event_type in ("position_failed", "risk_triggered") else "blue"
+
+        body_lines = [
+            f"**事件**: {event_type}",
+            f"**币种**: {symbol or '—'}",
+            f"**时间**: {datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"**详情**: {message}",
+        ]
+        if detail:
+            detail_str = ", ".join(f"{k}={v}" for k, v in list(detail.items())[:5])
+            body_lines.append(f"**参数**: {detail_str}")
+
+        card_payload: dict[str, Any] = {
             "msg_type": "interactive",
             "card": {
-                "header": {"title": {"tag": "plain_text", "content": title}},
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "template": header_color,
+                    "title": {"tag": "plain_text", "content": f"{emoji} {event_type}"},
+                },
                 "elements": [
-                    {"tag": "div", "text": {"tag": "lark_md", "content": message}},
+                    {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(body_lines)}},
                 ],
             },
         }
 
+        # Add signature if configured
+        if self._sign_secret:
+            ts = int(_time.time())
+            card_payload["timestamp"] = str(ts)
+            card_payload["sign"] = self._gen_sign(ts, self._sign_secret)
+
         client = await self._ensure_client()
-        resp = await client.post(self._url, json=payload)
+        resp = await client.post(self._url, json=card_payload)
         if resp.status_code >= 400:
             logger.warning("Feishu webhook returned %d: %s", resp.status_code, resp.text[:200])
+        else:
+            logger.info("Feishu message sent: %s", event_type)
 
     async def close(self) -> None:
         if self._client is not None:

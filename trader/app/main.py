@@ -104,8 +104,8 @@ event_log = EventLogService()
 
 # Feishu bot (optional — only if FEISHU_WEBHOOK_URL is configured)
 if settings.feishu_webhook_url:
-    _feishu_bot_module.FEISHU_BOT = FeishuBot(settings.feishu_webhook_url)
-    logger.info("Feishu bot enabled: %s", settings.feishu_webhook_url[:40] + "...")
+    _feishu_bot_module.FEISHU_BOT = FeishuBot(settings.feishu_webhook_url, settings.feishu_sign_secret)
+    logger.info("Feishu bot enabled (sign=%s)", "on" if settings.feishu_sign_secret else "off")
 
 auth_scheme = HTTPBearer()
 _user_cache = TTLCache(maxsize=2048, ttl=settings.user_cache_ttl_seconds)

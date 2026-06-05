@@ -66,6 +66,10 @@ class Settings(BaseSettings):
         "",
         description="Feishu/Lark bot webhook URL for critical event notifications (empty to disable)",
     )
+    feishu_sign_secret: str = Field(
+        "",
+        description="Feishu bot signature secret for HMAC-SHA256 verification (optional)",
+    )
     user_cache_ttl_seconds: int = Field(300, ge=0, description="User cache TTL in seconds (0 to disable)")
     db_keepalive_interval_seconds: int = Field(
         8 * 60 * 60,
