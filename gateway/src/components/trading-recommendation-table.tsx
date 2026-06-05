@@ -9,8 +9,9 @@ import type { SourceConfig } from "@/lib/external";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-// ── helpers (mirror funding-prediction-sidebar.tsx) ──────────────────────
+// ── helpers ────────────────────────────────────────────────────────────
 
 function formatDecimalPercent(value: number): string { return `${(value * 100).toFixed(2)}%`; }
 function formatSignedPercent(value: number): string {
@@ -20,22 +21,47 @@ function formatSignedPercent(value: number): string {
 function formatPercent(value: number): string { return `${value.toFixed(1)}%`; }
 function formatBps(bps: number): string { return `${bps.toFixed(1)} bps`; }
 
+// ── types ──────────────────────────────────────────────────────────────
+
+export type TradeConfig = {
+  leverageLeft: number;
+  leverageRight: number;
+  notional: number;
+  liquidationGuardEnabled: boolean;
+  liquidationGuardThresholdPct: number;
+  drawdownGuardEnabled: boolean;
+  drawdownGuardThresholdPct: number;
+};
+
 // ── component ───────────────────────────────────────────────────────────
 
 type Props = {
   sourceA: SourceConfig;
   sourceB: SourceConfig;
   volumeThreshold: number;
-  onTrade: (entry: FundingPredictionEntry) => void;
+  onTrade: (entry: FundingPredictionEntry, config: TradeConfig) => void;
 };
 
 const POLL_INTERVAL_MS = 30_000;
 const JOB_POLL_MS = 700;
+const DEFAULT_LEVERAGE = 5;
+const DEFAULT_NOTIONAL = 10000;
+const DEFAULT_LIQ_THRESHOLD = 50;
+const DEFAULT_DD_THRESHOLD = 20;
 
 export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, onTrade }: Props) {
   const [data, setData] = useState<FundingPredictionSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Dialog state
+  const [dialogEntry, setDialogEntry] = useState<FundingPredictionEntry | null>(null);
+  const [config, setConfig] = useState<TradeConfig>({
+    leverageLeft: DEFAULT_LEVERAGE, leverageRight: DEFAULT_LEVERAGE,
+    notional: DEFAULT_NOTIONAL,
+    liquidationGuardEnabled: true, liquidationGuardThresholdPct: DEFAULT_LIQ_THRESHOLD,
+    drawdownGuardEnabled: false, drawdownGuardThresholdPct: DEFAULT_DD_THRESHOLD,
+  });
 
   const fetchRecommendations = useCallback(async (force: boolean) => {
     try {
@@ -54,7 +80,7 @@ export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, 
         const statusResp = await fetch(`/api/funding/prediction/jobs/${jobId}`, { cache: "no-store" });
         if (!statusResp.ok) throw new Error("Failed to poll job");
         const status = (await statusResp.json()) as {
-          status: string; result?: FundingPredictionSnapshot; metadata?: { volumeLabel: string; primarySourceLabel: string; secondarySourceLabel: string }; error?: string;
+          status: string; result?: FundingPredictionSnapshot; error?: string;
         };
         if (status.status === "completed" && status.result) {
           setData(status.result); setLoading(false); setError(null); return;
@@ -77,9 +103,6 @@ export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, 
   const entries = useMemo(() => (data?.entries ?? []).slice(0, 20), [data]);
   const volumeLabel = `两端合计 ≥ US$${((volumeThreshold || 1_000_000) / 1_000_000).toFixed(2)}M`;
 
-  const sourceALabel = sourceA.label;
-  const sourceBLabel = sourceB.label;
-
   return (
     <div className="flex flex-col h-full">
       <div className="space-y-4 p-4">
@@ -88,9 +111,7 @@ export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, 
             注：预测年化 APR 采用"沿当前有利方向持有，直到不再盈利"为口径；评分偏好高 APR、低价格波动、低点差。"建议建仓时机"仅用于提示，不参与综合分。仅显示 {volumeLabel} 的币种。
           </div>
           {data && data.failures.length > 0 ? (
-            <div className="mt-2">
-              {data.failures.length} 个币种因数据缺失暂不可用。
-            </div>
+            <div className="mt-2">{data.failures.length} 个币种因数据缺失暂不可用。</div>
           ) : null}
         </div>
 
@@ -108,7 +129,7 @@ export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, 
                 <TableHead>点差(Lighter)</TableHead>
                 <TableHead>点差(GRVT)</TableHead>
                 <TableHead>综合分</TableHead>
-                <TableHead>去交易</TableHead>
+                <TableHead>操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -116,12 +137,10 @@ export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, 
                 <TableRow key={entry.symbol}>
                   <TableCell className="min-w-[190px] py-3">
                     <RecommendationSymbolCell
-                      symbol={entry.symbol}
-                      displayName={entry.displayName}
-                      iconUrl={entry.iconUrl}
+                      symbol={entry.symbol} displayName={entry.displayName} iconUrl={entry.iconUrl}
                     />
                   </TableCell>
-                  <TableCell className="text-xs">{renderDirection(entry, sourceALabel, sourceBLabel)}</TableCell>
+                  <TableCell className="text-xs">{renderDirection(entry, sourceA.label, sourceB.label)}</TableCell>
                   <TableCell className="font-semibold text-primary">{formatDecimalPercent(entry.annualizedDecimal)}</TableCell>
                   <TableCell className="font-semibold">{formatSignedPercent(entry.currentDirectionalAnnualizedPct)}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{formatPercent(entry.priceVolatility24hPct)}</TableCell>
@@ -130,11 +149,18 @@ export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, 
                   <TableCell className="text-sm font-semibold">{entry.recommendationScore.toFixed(2)}</TableCell>
                   <TableCell>
                     <button
-                      onClick={() => onTrade(entry)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      title="建仓"
+                      onClick={() => {
+                        setDialogEntry(entry);
+                        setConfig({
+                          leverageLeft: DEFAULT_LEVERAGE, leverageRight: DEFAULT_LEVERAGE,
+                          notional: DEFAULT_NOTIONAL,
+                          liquidationGuardEnabled: true, liquidationGuardThresholdPct: DEFAULT_LIQ_THRESHOLD,
+                          drawdownGuardEnabled: false, drawdownGuardThresholdPct: DEFAULT_DD_THRESHOLD,
+                        });
+                      }}
+                      className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground hover:bg-primary/90 transition-colors"
                     >
-                      <SquareArrowOutUpRight className="h-4 w-4" />
+                      建仓
                     </button>
                   </TableCell>
                 </TableRow>
@@ -150,11 +176,146 @@ export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, 
           <div className="py-8 text-center text-sm text-muted-foreground">暂无推荐数据</div>
         )}
       </div>
+
+      {/* ── Configuration Dialog ── */}
+      <Dialog open={dialogEntry !== null} onOpenChange={(open) => { if (!open) setDialogEntry(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {dialogEntry && (
+                <>
+                  <img
+                    src={buildTokenIconCandidates(dialogEntry.symbol, dialogEntry.iconUrl)[0] ?? makeFallbackSvgDataUrl(dialogEntry.symbol)}
+                    alt="" className="h-6 w-6 rounded-full"
+                    onError={(e) => { (e.target as HTMLImageElement).src = makeFallbackSvgDataUrl(dialogEntry.symbol); }}
+                  />
+                  <span>{dialogEntry.displayName} 建仓</span>
+                </>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {dialogEntry && (
+            <div className="space-y-4 py-2">
+              {/* Direction summary */}
+              <div className="rounded-lg bg-muted/30 p-2 text-xs">
+                {renderDirectionSummary(dialogEntry, sourceA.label, sourceB.label)}
+              </div>
+
+              {/* Leverage */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium">Lighter 杠杆</label>
+                  <input
+                    type="number" min={1} max={50}
+                    value={config.leverageLeft}
+                    onChange={(e) => setConfig((c) => ({ ...c, leverageLeft: Math.max(1, Number(e.target.value) || 1) }))}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium">GRVT 杠杆</label>
+                  <input
+                    type="number" min={1} max={50}
+                    value={config.leverageRight}
+                    onChange={(e) => setConfig((c) => ({ ...c, leverageRight: Math.max(1, Number(e.target.value) || 1) }))}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Notional */}
+              <div>
+                <label className="text-xs font-medium">合约面值 (USD)</label>
+                <input
+                  type="number" min={100} step={100}
+                  value={config.notional}
+                  onChange={(e) => setConfig((c) => ({ ...c, notional: Math.max(100, Number(e.target.value) || 100) }))}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                />
+              </div>
+
+              {/* Risk Protection */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox" checked={config.liquidationGuardEnabled}
+                    onChange={(e) => setConfig((c) => ({ ...c, liquidationGuardEnabled: e.target.checked }))}
+                  />
+                  爆仓保护 (Liquidation Guard)
+                </label>
+                {config.liquidationGuardEnabled && (
+                  <div className="ml-5">
+                    <label className="text-xs text-muted-foreground">触发阈值 (%)</label>
+                    <input
+                      type="number" min={5} max={90}
+                      value={config.liquidationGuardThresholdPct}
+                      onChange={(e) => setConfig((c) => ({ ...c, liquidationGuardThresholdPct: Number(e.target.value) || 50 }))}
+                      className="mt-1 w-24 rounded-md border border-border bg-background px-2 py-1 text-sm"
+                    />
+                    <span className="ml-1 text-xs text-muted-foreground">%</span>
+                  </div>
+                )}
+
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox" checked={config.drawdownGuardEnabled}
+                    onChange={(e) => setConfig((c) => ({ ...c, drawdownGuardEnabled: e.target.checked }))}
+                  />
+                  回撤自动平仓 (Drawdown Guard)
+                </label>
+                {config.drawdownGuardEnabled && (
+                  <div className="ml-5">
+                    <label className="text-xs text-muted-foreground">回撤阈值 (%)</label>
+                    <input
+                      type="number" min={5} max={90}
+                      value={config.drawdownGuardThresholdPct}
+                      onChange={(e) => setConfig((c) => ({ ...c, drawdownGuardThresholdPct: Number(e.target.value) || 50 }))}
+                      className="mt-1 w-24 rounded-md border border-border bg-background px-2 py-1 text-sm"
+                    />
+                    <span className="ml-1 text-xs text-muted-foreground">%</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Estimated margin */}
+              <div className="rounded-lg bg-muted/30 p-2 text-xs text-muted-foreground">
+                <div>预估保证金：Lighter ≈ ${(config.notional / config.leverageLeft).toFixed(0)}，GRVT ≈ ${(config.notional / config.leverageRight).toFixed(0)}</div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setDialogEntry(null)}
+                  className="rounded-md border border-border px-4 py-1.5 text-sm text-muted-foreground hover:bg-muted"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => {
+                    onTrade(dialogEntry, config);
+                    setDialogEntry(null);
+                  }}
+                  className="rounded-md bg-primary px-4 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
+                >
+                  确认建仓
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-// ── sub-components (mirror funding-prediction-sidebar.tsx) ────────────
+// ── sub-components ──────────────────────────────────────────────────────
+
+function renderDirectionSummary(entry: FundingPredictionEntry, primary: string, secondary: string) {
+  if (entry.direction === "leftLong") return <span>做多 <strong>{primary}</strong>（Lighter），做空 <strong>{secondary}</strong>（GRVT）</span>;
+  if (entry.direction === "rightLong") return <span>做空 <strong>{primary}</strong>（Lighter），做多 <strong>{secondary}</strong>（GRVT）</span>;
+  return <span>方向未知</span>;
+}
 
 function RecommendationSymbolCell({
   symbol, displayName, iconUrl,

@@ -8,7 +8,7 @@ import {
   type ArbExecutionDialogModel,
   ArbExecutionDialog,
 } from "@/components/arb-execution-dialog";
-import { TradingRecommendationTable } from "@/components/trading-recommendation-table";
+import { TradingRecommendationTable, type TradeConfig } from "@/components/trading-recommendation-table";
 import { TradingStatusBar } from "@/components/trading-status-bar";
 import { QuickTradePanel } from "@/components/quick-trade-panel";
 import { TerminalOrderBook } from "@/components/terminal-order-book";
@@ -1029,7 +1029,7 @@ function TradingPageContent() {
     return { ok: true, data, error: null }
   }
 
-  const executeFromRecommendation = async (entry: FundingPredictionEntry) => {
+  const executeFromRecommendation = async (entry: FundingPredictionEntry, config: TradeConfig) => {
     setExecutionDialogOpen(true);
     setArbPositionId(null);
     setArbStatusDetails(null);
@@ -1053,7 +1053,7 @@ function TradingPageContent() {
       const leftPrice = row?.price ?? 0;
       const rightPrice = row?.right?.price ?? 0;
 
-      const notional = 10000; // default $10k notional
+      const notional = config.notional;
       const leftSize = leftPrice > 0 ? Number((notional / leftPrice).toFixed(4)) : 0;
       const rightSize = rightPrice > 0 ? Number((notional / rightPrice).toFixed(4)) : 0;
 
@@ -1075,12 +1075,12 @@ function TradingPageContent() {
         left_size: leftSize,
         right_size: rightSize,
         notional,
-        leverage_left: 5,
-        leverage_right: 5,
-        liquidation_guard_enabled: true,
-        liquidation_guard_threshold_pct: 50,
-        drawdown_guard_enabled: false,
-        drawdown_guard_threshold_pct: 20,
+        leverage_left: config.leverageLeft,
+        leverage_right: config.leverageRight,
+        liquidation_guard_enabled: config.liquidationGuardEnabled,
+        liquidation_guard_threshold_pct: config.liquidationGuardThresholdPct,
+        drawdown_guard_enabled: config.drawdownGuardEnabled,
+        drawdown_guard_threshold_pct: config.drawdownGuardThresholdPct,
       });
 
       if (result.ok) {
@@ -1610,27 +1610,8 @@ function TradingPageContent() {
             sourceA={comparisonSelection.primarySource}
             sourceB={comparisonSelection.secondarySource}
             volumeThreshold={comparisonSelection.volumeThreshold}
-            onTrade={(entry) => {
-              // Auto-configure QuickTradePanel from recommendation
-              const sub = {
-                symbol: entry.symbol,
-                lighterDirection: entry.direction === "leftLong" ? "buy" as const : "sell" as const,
-                grvtDirection: entry.direction === "rightLong" ? "buy" as const : "sell" as const,
-                lighterLeverage: 5,
-                grvtLeverage: 5,
-                notional: 10000,
-                liquidationGuardEnabled: true,
-                liquidationGuardThresholdPct: 50,
-                drawdownGuardEnabled: false,
-                drawdownGuardThresholdPct: 20,
-                leftVenue: "lighter" as const,
-                rightVenue: "grvt" as const,
-                leftPrice: 0,
-                rightPrice: 0,
-                leftSize: 0,
-                rightSize: 0,
-              };
-              executeFromRecommendation(entry);
+            onTrade={(entry, config) => {
+              executeFromRecommendation(entry, config);
             }}
           />
         </div>
