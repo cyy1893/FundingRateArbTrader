@@ -70,6 +70,18 @@ class Settings(BaseSettings):
         "",
         description="Feishu bot signature secret for HMAC-SHA256 verification (optional)",
     )
+    feishu_app_id: str = Field(
+        "",
+        description="Feishu enterprise app ID for API-mode messaging (private chat)",
+    )
+    feishu_app_secret: str = Field(
+        "",
+        description="Feishu enterprise app secret for API-mode messaging",
+    )
+    feishu_open_id: str = Field(
+        "",
+        description="Feishu user open_id to receive private chat notifications",
+    )
     user_cache_ttl_seconds: int = Field(300, ge=0, description="User cache TTL in seconds (0 to disable)")
     db_keepalive_interval_seconds: int = Field(
         8 * 60 * 60,
