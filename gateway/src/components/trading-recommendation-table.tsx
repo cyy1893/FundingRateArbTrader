@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { SquareArrowOutUpRight } from "lucide-react";
 
 import type { FundingPredictionEntry, FundingPredictionSnapshot } from "@/lib/funding-prediction";
 import { buildTokenIconCandidates, makeFallbackSvgDataUrl } from "@/lib/token-icons";
 import type { SourceConfig } from "@/lib/external";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
 
 type Props = {
   sourceA: SourceConfig;
@@ -14,8 +17,14 @@ type Props = {
   onTrade: (entry: FundingPredictionEntry) => void;
 };
 
-const POLL_INTERVAL_MS = 30_000; // refresh every 30s
+const POLL_INTERVAL_MS = 30_000;
 const JOB_POLL_MS = 700;
+
+function formatDecimalPercent(value: number): string {
+  return `${(value * 100).toFixed(2)}%`;
+}
+function formatPercent(value: number): string { return `${value.toFixed(1)}%`; }
+function formatBps(bps: number): string { return `${bps.toFixed(1)} bps`; }
 
 export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, onTrade }: Props) {
   const [data, setData] = useState<FundingPredictionSnapshot | null>(null);
@@ -24,41 +33,22 @@ export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, 
 
   const fetchRecommendations = useCallback(async (force: boolean) => {
     try {
-      // Create job
       const createResp = await fetch("/api/funding/prediction/jobs", {
-        method: "POST",
-        cache: "no-store",
+        method: "POST", cache: "no-store",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceA: sourceA.provider,
-          sourceB: sourceB.provider,
-          volumeThreshold,
-          forceRefresh: force,
-        }),
+        body: JSON.stringify({ sourceA: sourceA.provider, sourceB: sourceB.provider, volumeThreshold, forceRefresh: force }),
       });
       if (!createResp.ok) throw new Error("Failed to create prediction job");
       const { jobId } = (await createResp.json()) as { jobId: string };
 
-      // Poll until done
       while (true) {
-        const statusResp = await fetch(`/api/funding/prediction/jobs/${jobId}`, {
-          cache: "no-store",
-        });
+        const statusResp = await fetch(`/api/funding/prediction/jobs/${jobId}`, { cache: "no-store" });
         if (!statusResp.ok) throw new Error("Failed to poll job");
-        const status = (await statusResp.json()) as {
-          status: string;
-          result?: FundingPredictionSnapshot;
-          error?: string;
-        };
+        const status = (await statusResp.json()) as { status: string; result?: FundingPredictionSnapshot; error?: string };
         if (status.status === "completed" && status.result) {
-          setData(status.result);
-          setLoading(false);
-          setError(null);
-          return;
+          setData(status.result); setLoading(false); setError(null); return;
         }
-        if (status.status === "failed") {
-          throw new Error(status.error || "Prediction failed");
-        }
+        if (status.status === "failed") throw new Error(status.error || "Prediction failed");
         await new Promise((r) => setTimeout(r, JOB_POLL_MS));
       }
     } catch (err) {
@@ -67,30 +57,26 @@ export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, 
     }
   }, [sourceA.provider, sourceB.provider, volumeThreshold]);
 
-  // Initial load
+  useEffect(() => { void fetchRecommendations(false); }, [fetchRecommendations]);
   useEffect(() => {
-    void fetchRecommendations(false);
-  }, [fetchRecommendations]);
-
-  // Auto-refresh
-  useEffect(() => {
-    const interval = setInterval(() => {
-      void fetchRecommendations(false);
-    }, POLL_INTERVAL_MS);
+    const interval = setInterval(() => { void fetchRecommendations(false); }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [fetchRecommendations]);
 
   const entries = useMemo(() => (data?.entries ?? []).slice(0, 20), [data]);
+  const failuresText = data?.failures?.length ? `，${data.failures.length} 个币种因数据缺失暂不可用` : "";
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-        <h2 className="text-sm font-semibold">
-          套利推荐
-          {data && <span className="ml-2 text-xs text-muted-foreground">({data.entries.length} 个币种)</span>}
-        </h2>
+    <div className="flex flex-col h-full bg-card">
+      <div className="flex items-center justify-between px-6 py-3 border-b border-border">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">套利推荐</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            基于预测年化 APR 评分{loading ? "，刷新中…" : failuresText}
+          </p>
+        </div>
         <button
-          className="text-xs text-muted-foreground hover:text-foreground"
+          className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded"
           onClick={() => { setLoading(true); void fetchRecommendations(true); }}
           disabled={loading}
         >
@@ -99,107 +85,82 @@ export function TradingRecommendationTable({ sourceA, sourceB, volumeThreshold, 
       </div>
 
       <div className="flex-1 overflow-auto">
-        {error && (
-          <div className="px-4 py-3 text-sm text-destructive bg-destructive/5">{error}</div>
-        )}
+        {error && <div className="px-6 py-3 text-sm text-destructive bg-destructive/5">{error}</div>}
 
-        <table className="w-full text-xs">
-          <thead className="sticky top-0 bg-muted/50">
-            <tr className="border-b border-border text-left text-muted-foreground">
-              <th className="px-3 py-2 font-medium">币种</th>
-              <th className="px-3 py-2 font-medium">方向</th>
-              <th className="px-3 py-2 font-medium text-right">年化APR</th>
-              <th className="px-3 py-2 font-medium text-right">波动率</th>
-              <th className="px-3 py-2 font-medium text-right">持仓天数</th>
-              <th className="px-3 py-2 font-medium text-right">评分</th>
-              <th className="px-3 py-2 font-medium text-center">操作</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="min-w-[140px]">币种</TableHead>
+              <TableHead>方向</TableHead>
+              <TableHead>年化APR</TableHead>
+              <TableHead>当前费率差</TableHead>
+              <TableHead>波动率</TableHead>
+              <TableHead>点差(L)</TableHead>
+              <TableHead>点差(G)</TableHead>
+              <TableHead>持仓天</TableHead>
+              <TableHead>综合分</TableHead>
+              <TableHead>操作</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {entries.map((entry) => (
               <RecommendationRow key={entry.symbol} entry={entry} onTrade={onTrade} />
             ))}
             {!loading && entries.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+              <TableRow>
+                <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
                   暂无推荐数据
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
 
         {loading && entries.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-            加载推荐数据中...
-          </div>
+          <div className="px-6 py-8 text-center text-sm text-muted-foreground">加载推荐数据中...</div>
         )}
       </div>
     </div>
   );
 }
 
-function RecommendationRow({
-  entry,
-  onTrade,
-}: {
-  entry: FundingPredictionEntry;
-  onTrade: (entry: FundingPredictionEntry) => void;
-}) {
-  const [iconSrc, setIconSrc] = useState<string | null>(null);
+function RecommendationRow({ entry, onTrade }: { entry: FundingPredictionEntry; onTrade: (e: FundingPredictionEntry) => void }) {
   const [iconIdx, setIconIdx] = useState(0);
-
-  const iconCandidates = useMemo(
-    () => buildTokenIconCandidates(entry.symbol, entry.iconUrl),
-    [entry.symbol, entry.iconUrl],
-  );
-
-  useEffect(() => {
-    setIconSrc(iconCandidates[iconIdx] ?? makeFallbackSvgDataUrl(entry.symbol));
-  }, [iconCandidates, iconIdx, entry.symbol]);
+  const iconCandidates = useMemo(() => buildTokenIconCandidates(entry.symbol, entry.iconUrl), [entry.symbol, entry.iconUrl]);
+  const iconSrc = iconCandidates[iconIdx] ?? makeFallbackSvgDataUrl(entry.symbol);
 
   const dirLabel = entry.direction === "leftLong" ? "做多 Lighter" : entry.direction === "rightLong" ? "做多 GRVT" : "未知";
-  const scoreColor =
-    entry.recommendationScore >= 60 ? "text-green-600" : entry.recommendationScore >= 30 ? "text-yellow-600" : "text-red-600";
+  const scoreColor = entry.recommendationScore >= 60 ? "text-green-600" : entry.recommendationScore >= 30 ? "text-yellow-600" : "text-red-600";
+  const currentPctColor = entry.currentDirectionalAnnualizedPct >= 0 ? "text-emerald-600" : "text-rose-600";
 
   return (
-    <tr className="border-b border-border hover:bg-muted/30 transition-colors">
-      <td className="px-3 py-2">
+    <TableRow className="hover:bg-muted/30 transition-colors">
+      <TableCell className="py-3 text-sm font-semibold text-foreground">
         <div className="flex items-center gap-2">
-          <img
-            src={iconSrc ?? makeFallbackSvgDataUrl(entry.symbol)}
-            alt={entry.displayName}
-            className="h-5 w-5 rounded-full"
-            onError={() => setIconIdx((i) => i + 1)}
-          />
-          <span className="font-medium">{entry.displayName}</span>
+          <img src={iconSrc} alt={entry.displayName} className="h-6 w-6 rounded-full" onError={() => setIconIdx((i) => i + 1)} />
+          <span>{entry.displayName}</span>
         </div>
-      </td>
-      <td className="px-3 py-2">
-        <span className={entry.direction === "leftLong" ? "text-blue-600" : "text-orange-600"}>
-          {dirLabel}
-        </span>
-      </td>
-      <td className="px-3 py-2 text-right font-mono">
-        {(entry.annualizedDecimal * 100).toFixed(2)}%
-      </td>
-      <td className="px-3 py-2 text-right font-mono">
-        {entry.priceVolatility24hPct.toFixed(1)}%
-      </td>
-      <td className="px-3 py-2 text-right font-mono">
-        {entry.holdingDays.toFixed(1)}d
-      </td>
-      <td className={`px-3 py-2 text-right font-mono font-semibold ${scoreColor}`}>
-        {entry.recommendationScore.toFixed(0)}
-      </td>
-      <td className="px-3 py-2 text-center">
+      </TableCell>
+      <TableCell className="text-xs">
+        <span className={entry.direction === "leftLong" ? "text-blue-600" : "text-orange-600"}>{dirLabel}</span>
+      </TableCell>
+      <TableCell className="font-semibold text-primary">{formatDecimalPercent(entry.annualizedDecimal)}</TableCell>
+      <TableCell className={`font-semibold ${currentPctColor}`}>
+        {entry.currentDirectionalAnnualizedPct >= 0 ? "+" : ""}{entry.currentDirectionalAnnualizedPct.toFixed(2)}%
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground">{formatPercent(entry.priceVolatility24hPct)}</TableCell>
+      <TableCell className="text-xs text-muted-foreground">{formatBps(entry.leftBidAskSpreadBps)}</TableCell>
+      <TableCell className="text-xs text-muted-foreground">{formatBps(entry.rightBidAskSpreadBps)}</TableCell>
+      <TableCell className="text-xs font-mono text-muted-foreground">{entry.holdingDays.toFixed(1)}d</TableCell>
+      <TableCell className={`text-sm font-semibold ${scoreColor}`}>{entry.recommendationScore.toFixed(0)}</TableCell>
+      <TableCell>
         <button
-          className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground hover:bg-primary/90 transition-colors"
+          className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground hover:bg-primary/90 transition-colors"
           onClick={() => onTrade(entry)}
         >
           建仓
         </button>
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }

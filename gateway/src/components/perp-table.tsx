@@ -1184,7 +1184,7 @@ export function PerpTable({
                   sourceB: rightSource.id,
                   volumeThreshold: String(displayedVolumeThreshold),
                 });
-                router.push(`/recommendations?${params.toString()}`);
+                router.push(`/trading?${params.toString()}`);
               }}
             >
               推荐套利币种
