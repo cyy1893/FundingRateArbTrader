@@ -1581,30 +1581,7 @@ function TradingPageContent() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Left Panel - Quick Trade */}
-        <div className="w-72 border-r border-gray-200 p-3 bg-white flex flex-col min-h-0 overflow-hidden">
-          <QuickTradePanel
-            onExecuteArbitrage={executeArbitrage}
-            onConfigChange={setDraftSubscription}
-            onNotionalReady={setNotionalReady}
-            onLeverageCommit={(payload) =>
-              handleLeverageCommit({ symbol: payload.symbol, leverage: payload.lighterLeverage })
-            }
-            executeDisabled={!canExecute}
-            executeLabel={arbStatus === "placing" ? "下单中..." : "执行套利/下单"}
-            availableSymbols={quickTradeSymbols}
-            leverageCapsBySymbol={maxLeverageBySymbol}
-            primaryLabel={comparisonSelection.primarySource.label}
-            secondaryLabel={comparisonSelection.secondarySource.label}
-            defaultSymbol={searchParams.get("symbol") ?? undefined}
-            defaultLighterDirection={(searchParams.get("lighterDir") as "long" | "short" | null) ?? undefined}
-            defaultGrvtDirection={(searchParams.get("grvtDir") as "long" | "short" | null) ?? undefined}
-            lockSymbol={true}
-            lockDirections={Boolean(searchParams.get("lighterDir")) && Boolean(searchParams.get("grvtDir"))}
-          />
-        </div>
-
-        {/* Center - Recommendation Table */}
+        {/* Recommendation Table — full width */}
         <div className="flex-1 flex flex-col min-h-0">
           <TradingRecommendationTable
             sourceA={comparisonSelection.primarySource}
