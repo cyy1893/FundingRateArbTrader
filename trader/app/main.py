@@ -102,16 +102,15 @@ grvt_service = GrvtService(settings)
 market_data_service = MarketDataService(settings, lighter_service=lighter_service)
 event_log = _evtlog.EventLogService()
 
-# Feishu bot (optional — webhook or API)
+# Feishu bot (optional — per-user open_id from database)
 _evtlog.FEISHU_BOT = _evtlog.FeishuBot(
     webhook_url=settings.feishu_webhook_url,
     sign_secret=settings.feishu_sign_secret,
     app_id=settings.feishu_app_id,
     app_secret=settings.feishu_app_secret,
-    open_id=settings.feishu_open_id,
 )
 if settings.feishu_app_id:
-    logger.info("Feishu bot enabled (API mode → open_id=%s)", settings.feishu_open_id)
+    logger.info("Feishu bot enabled (API mode)")
 elif settings.feishu_webhook_url:
     logger.info("Feishu bot enabled (webhook mode)")
 

@@ -24,14 +24,11 @@ FEISHU_BOT: FeishuBot | None = None
 
 
 async def _lookup_user_feishu_open_id(user_id: str) -> str | None:
-    """Look up a user's feishu_open_id from the database, or fall back to settings."""
+    """Look up a user's feishu_open_id from the database only."""
     try:
-        from app.config import get_settings
-        settings = get_settings()
-        # If user_id is the admin's own user, use the .env default
         from uuid import UUID
-        from sqlmodel import Session, select
-        from app.db import get_engine
+        from sqlmodel import Session
+        from app.db_session import get_engine
         from app.db_models import User
 
         with Session(get_engine()) as session:
@@ -40,11 +37,7 @@ async def _lookup_user_feishu_open_id(user_id: str) -> str | None:
                 return user.feishu_open_id
     except Exception:
         pass
-    # Fallback to .env default
-    try:
-        return get_settings().feishu_open_id or None
-    except Exception:
-        return None
+    return None
 
 
 class EventLogService:
@@ -111,10 +104,9 @@ class FeishuBot:
         FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
         FEISHU_SIGN_SECRET=sign_xxxxxxxx  # optional
 
-        # API mode (private chat)
+        # API mode (private chat — per-user via DB feishu_open_id column)
         FEISHU_APP_ID=cli_xxxx
         FEISHU_APP_SECRET=xxxx
-        FEISHU_OPEN_ID=ou_xxxx
     """
 
     def __init__(
@@ -123,13 +115,11 @@ class FeishuBot:
         sign_secret: str = "",
         app_id: str = "",
         app_secret: str = "",
-        open_id: str = "",
     ) -> None:
         self._url = webhook_url.strip()
         self._sign_secret = sign_secret.strip()
         self._app_id = app_id.strip()
         self._app_secret = app_secret.strip()
-        self._open_id = open_id.strip()
         self._client: Any = None
         self._token: str | None = None
         self._token_expires_at: float = 0.0
@@ -163,11 +153,11 @@ class FeishuBot:
         self._token_expires_at = now + data.get("expire", 7200)
         return self._token
 
-    async def _send_api(self, text_content: str, open_id: str = "") -> None:
+    async def _send_api(self, text_content: str, open_id: str) -> None:
         token = await self._get_tenant_token()
         client = await self._ensure_client()
         payload = {
-            "receive_id": open_id or self._open_id,
+            "receive_id": open_id,
             "msg_type": "text",
             "content": json_dumps({"text": text_content}),
         }
@@ -197,8 +187,7 @@ class FeishuBot:
         detail: dict[str, Any] | None = None,
         open_id: str | None = None,
     ) -> None:
-        # Use the given open_id, or fall back to the default from config
-        target = (open_id or "").strip() or self._open_id
+        target = (open_id or "").strip()
         enabled = False
 
         # ── API mode (private chat) ──
