@@ -1718,7 +1718,6 @@ async def open_arb_position(
             "right_venue": request.right_venue,
         },
         user_id=str(user.id),
-        },
     )
     return ArbOpenResponse(
         arb_position_id=str(position.id),
