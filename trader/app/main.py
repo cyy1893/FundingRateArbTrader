@@ -84,7 +84,7 @@ from app.services.lighter_service import LighterService
 from app.services.grvt_service import GrvtService
 from app.services.market_data_service import MarketDataService
 from app.services.market_data_service import _normalize_icon_symbol
-from app.services.event_log_service import EventLogService, FeishuBot, FEISHU_BOT as _feishu_bot_module
+import app.services.event_log_service as _evtlog
 from app.utils.auth import AuthError, AuthManager, LockoutError, _hash_password
 from app.utils.crypto import decrypt_secret, encrypt_secret
 
@@ -100,10 +100,10 @@ event_broadcaster = EventBroadcaster()
 lighter_service = LighterService(settings)
 grvt_service = GrvtService(settings)
 market_data_service = MarketDataService(settings, lighter_service=lighter_service)
-event_log = EventLogService()
+event_log = _evtlog.EventLogService()
 
 # Feishu bot (optional — webhook or API)
-_feishu_bot_module.FEISHU_BOT = FeishuBot(
+_evtlog.FEISHU_BOT = _evtlog.FeishuBot(
     webhook_url=settings.feishu_webhook_url,
     sign_secret=settings.feishu_sign_secret,
     app_id=settings.feishu_app_id,
