@@ -153,17 +153,16 @@ class FeishuBot:
         self._token_expires_at = now + data.get("expire", 7200)
         return self._token
 
-    async def _send_api(self, text_content: str, open_id: str) -> None:
+    async def _send_api(self, open_id: str, payload: dict[str, Any]) -> None:
         token = await self._get_tenant_token()
         client = await self._ensure_client()
-        payload = {
-            "receive_id": open_id,
-            "msg_type": "text",
-            "content": json_dumps({"text": text_content}),
-        }
         resp = await client.post(
             "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id",
-            json=payload,
+            json={
+                "receive_id": open_id,
+                "msg_type": "interactive",
+                "content": json_dumps(payload),
+            },
             headers={"Authorization": f"Bearer {token}"},
         )
         if resp.status_code >= 400:
@@ -193,15 +192,49 @@ class FeishuBot:
         # ── API mode (private chat) ──
         if self._app_id and self._app_secret and target:
             enabled = True
-            lines = [
-                f"【{event_type}】",
-                f"币种: {symbol or '—'}",
-                f"{message}",
-            ]
+
+            emoji = {"position_opened": "🟢", "position_closed": "🔵", "risk_triggered": "🔴",
+                     "position_failed": "🔴", "test": "💬"}.get(event_type, "📌")
+            header_color = "red" if event_type in ("position_failed", "risk_triggered") else "blue"
+
+            body_md = f"**币种**: {symbol or '—'}\n{message}"
             if detail:
-                lines.append(", ".join(f"{k}={v}" for k, v in list(detail.items())[:5]))
+                body_md += "\n" + " · ".join(f"{k}={v}" for k, v in list(detail.items())[:4])
+
+            elements: list[dict[str, Any]] = [
+                {"tag": "div", "text": {"tag": "lark_md", "content": body_md}},
+                {"tag": "hr"},
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "📊 查看交易"},
+                            "url": "http://52.194.205.192/trading",
+                            "type": "default",
+                            "multi_url": {"pc_url": "http://52.194.205.192/trading", "ios_url": "http://52.194.205.192/trading", "android_url": "http://52.194.205.192/trading"},
+                        },
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "📋 费率比较"},
+                            "url": "http://52.194.205.192/",
+                            "type": "default",
+                            "multi_url": {"pc_url": "http://52.194.205.192/", "ios_url": "http://52.194.205.192/", "android_url": "http://52.194.205.192/"},
+                        },
+                    ],
+                },
+            ]
+
+            card = {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "template": header_color,
+                    "title": {"tag": "plain_text", "content": f"{emoji} {event_type}"},
+                },
+                "elements": elements,
+            }
             try:
-                await self._send_api("\n".join(lines), target)
+                await self._send_api(target, card)
             except Exception:
                 logger.warning("Feishu API send failed", exc_info=True)
 
