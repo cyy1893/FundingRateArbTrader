@@ -6,6 +6,7 @@ export type AdminUserSummary = {
   locked_until: string | null;
   created_at: string;
   updated_at: string;
+  feishuOpenId: string | null;
   has_lighter_credentials: boolean;
   has_grvt_credentials: boolean;
   lighter_account_index: number | null;
@@ -24,6 +25,7 @@ export type AdminCreateUserRequest = {
   username: string;
   password: string;
   is_active: boolean;
+  feishu_open_id?: string | null;
   lighter_account_index: number;
   lighter_api_key_index: number;
   lighter_private_key: string;

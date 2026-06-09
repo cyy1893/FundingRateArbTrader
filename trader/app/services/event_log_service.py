@@ -23,6 +23,30 @@ MAX_EVENTS = 500  # keep the most recent N events in memory
 FEISHU_BOT: FeishuBot | None = None
 
 
+async def _lookup_user_feishu_open_id(user_id: str) -> str | None:
+    """Look up a user's feishu_open_id from the database, or fall back to settings."""
+    try:
+        from app.config import get_settings
+        settings = get_settings()
+        # If user_id is the admin's own user, use the .env default
+        from uuid import UUID
+        from sqlmodel import Session, select
+        from app.db import get_engine
+        from app.db_models import User
+
+        with Session(get_engine()) as session:
+            user = session.get(User, UUID(user_id))
+            if user is not None and user.feishu_open_id:
+                return user.feishu_open_id
+    except Exception:
+        pass
+    # Fallback to .env default
+    try:
+        return get_settings().feishu_open_id or None
+    except Exception:
+        return None
+
+
 class EventLogService:
     """Ring-buffer event store polled by the frontend sidebar."""
 
@@ -37,6 +61,7 @@ class EventLogService:
         symbol: str | None = None,
         message: str = "",
         detail: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ) -> None:
         entry = {
             "timestamp": datetime.now(tz=timezone.utc).isoformat(),
@@ -44,6 +69,7 @@ class EventLogService:
             "severity": severity,  # info | warning | error
             "symbol": symbol,
             "message": message,
+            "user_id": user_id,
             "detail": detail or {},
         }
         self._events.append(entry)
@@ -54,7 +80,14 @@ class EventLogService:
         # Push to Feishu if critical
         if FEISHU_BOT is not None and severity in ("warning", "error"):
             try:
-                await FEISHU_BOT.send(event_type=event_type, message=message, symbol=symbol, detail=detail)
+                target_open_id = None
+                if user_id:
+                    # Look up user's feishu_open_id from the database
+                    target_open_id = await _lookup_user_feishu_open_id(user_id)
+                await FEISHU_BOT.send(
+                    event_type=event_type, message=message, symbol=symbol,
+                    detail=detail, open_id=target_open_id,
+                )
             except Exception:
                 logger.warning("Feishu push failed for event %s", event_type, exc_info=True)
 
@@ -130,11 +163,11 @@ class FeishuBot:
         self._token_expires_at = now + data.get("expire", 7200)
         return self._token
 
-    async def _send_api(self, text_content: str) -> None:
+    async def _send_api(self, text_content: str, open_id: str = "") -> None:
         token = await self._get_tenant_token()
         client = await self._ensure_client()
         payload = {
-            "receive_id": self._open_id,
+            "receive_id": open_id or self._open_id,
             "msg_type": "text",
             "content": json_dumps({"text": text_content}),
         }
@@ -162,11 +195,14 @@ class FeishuBot:
         message: str,
         symbol: str | None = None,
         detail: dict[str, Any] | None = None,
+        open_id: str | None = None,
     ) -> None:
+        # Use the given open_id, or fall back to the default from config
+        target = (open_id or "").strip() or self._open_id
         enabled = False
 
         # ── API mode (private chat) ──
-        if self._app_id and self._app_secret and self._open_id:
+        if self._app_id and self._app_secret and target:
             enabled = True
             lines = [
                 f"【{event_type}】",
@@ -176,7 +212,7 @@ class FeishuBot:
             if detail:
                 lines.append(", ".join(f"{k}={v}" for k, v in list(detail.items())[:5]))
             try:
-                await self._send_api("\n".join(lines))
+                await self._send_api("\n".join(lines), target)
             except Exception:
                 logger.warning("Feishu API send failed", exc_info=True)
 

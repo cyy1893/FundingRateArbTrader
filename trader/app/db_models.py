@@ -138,6 +138,7 @@ class User(SQLModel, table=True):
     failed_attempts: int = 0
     failed_first_at: Optional[datetime] = None
     locked_until: Optional[datetime] = None
+    feishu_open_id: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     deleted_at: Optional[datetime] = Field(default=None, index=True)

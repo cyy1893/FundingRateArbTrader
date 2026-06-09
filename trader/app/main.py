@@ -862,6 +862,7 @@ async def liquidation_guard_worker() -> None:
                     symbol=position.symbol,
                     message=f"爆仓保护触发 {position.symbol} | PnL {pnl_ratio_pct:.2f}% >= {threshold_pct:.0f}%",
                     detail={"position_id": str(position.id), "pnl_ratio_pct": pnl_ratio_pct},
+                    user_id=str(position.user_id),
                 )
                 continue
 
@@ -1717,6 +1718,8 @@ async def open_arb_position(
             "left_venue": request.left_venue,
             "right_venue": request.right_venue,
         },
+        user_id=str(user.id),
+        },
     )
     return ArbOpenResponse(
         arb_position_id=str(position.id),
@@ -1988,6 +1991,7 @@ async def create_user(
         password_hash=_hash_password(payload.password, salt),
         password_salt=salt.hex(),
         is_active=payload.is_active,
+        feishu_open_id=payload.feishu_open_id,
         created_at=now,
         updated_at=now,
     )
@@ -2044,6 +2048,7 @@ async def list_users(
                 is_active=user.is_active,
                 failed_attempts=user.failed_attempts,
                 locked_until=user.locked_until,
+                feishu_open_id=user.feishu_open_id,
                 created_at=user.created_at,
                 updated_at=user.updated_at,
                 has_lighter_credentials=bool(

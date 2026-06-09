@@ -567,6 +567,7 @@ class AdminCreateUserRequest(BaseModel):
     username: str
     password: str
     is_active: bool = True
+    feishu_open_id: str | None = None
     lighter_account_index: int
     lighter_api_key_index: int
     lighter_private_key: str
@@ -590,6 +591,7 @@ class AdminUserSummary(BaseModel):
     locked_until: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    feishu_open_id: str | None = None
     has_lighter_credentials: bool
     has_grvt_credentials: bool
     lighter_account_index: int | None = None

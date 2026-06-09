@@ -10,6 +10,7 @@ type CreateFormState = {
   username: string;
   password: string;
   is_active: boolean;
+  feishu_open_id: string;
   lighter_account_index: string;
   lighter_api_key_index: string;
   lighter_private_key: string;
@@ -62,6 +63,7 @@ export default function CreateUserPage() {
     username: "",
     password: "",
     is_active: true,
+    feishu_open_id: "",
     lighter_account_index: "",
     lighter_api_key_index: "",
     lighter_private_key: "",
@@ -94,6 +96,7 @@ export default function CreateUserPage() {
       grvt_api_key: form.grvt_api_key.trim(),
       grvt_private_key: form.grvt_private_key.trim(),
       grvt_trading_account_id: form.grvt_trading_account_id.trim(),
+      feishu_open_id: form.feishu_open_id.trim() || null,
     };
 
     try {
@@ -182,6 +185,18 @@ export default function CreateUserPage() {
                   Generate
                 </button>
               </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium">飞书 Open ID</label>
+              <input
+                className="w-full rounded-lg border border-border px-3 py-2 text-sm"
+                value={form.feishu_open_id}
+                onChange={(e) => setForm((prev) => ({ ...prev, feishu_open_id: e.target.value }))}
+                placeholder="ou_xxxx，用于私聊通知（可选）"
+              />
             </div>
           </div>
 
